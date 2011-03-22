@@ -72,7 +72,6 @@ Record function: Type := mkfunction
   { fn_sig: signature;
     fn_code: code;
     fn_stacksize: Z;
-    fn_framesize: Z;
     fn_link_ofs: int;
     fn_retaddr_ofs: int }.
 

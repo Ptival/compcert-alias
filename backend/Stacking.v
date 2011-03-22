@@ -210,14 +210,13 @@ Definition transf_function (f: Linear.function) : res Mach.function :=
   let fe := make_env (function_bounds f) in
   if zlt f.(Linear.fn_stacksize) 0 then
     Error (msg "Stacking.transf_function") 
-  else if zlt (- Int.min_signed) fe.(fe_size) then
+  else if zlt Int.max_signed (fe.(fe_size) + f.(Linear.fn_stacksize)) then
     Error (msg "Too many spilled variables, stack size exceeded")
   else
     OK (Mach.mkfunction
          f.(Linear.fn_sig)
          (transl_body f fe)
-         f.(Linear.fn_stacksize)
-         fe.(fe_size)
+         (fe.(fe_size) + f.(Linear.fn_stacksize))
          (Int.repr fe.(fe_ofs_link))
          (Int.repr fe.(fe_ofs_retaddr))).
 

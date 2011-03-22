@@ -464,11 +464,11 @@ Definition transl_instr (f: Mach.function) (i: Mach.instruction) (k: code) :=
       OK (Pcall_s symb :: k)
   | Mtailcall sig (inl reg) =>
       do r <- ireg_of reg; 
-      OK (Pfreeframe (-f .(fn_framesize)) f.(fn_stacksize) 
+      OK (Pfreeframe 0 f.(fn_stacksize) 
                      f.(fn_retaddr_ofs) f.(fn_link_ofs) :: 
           Pjmp_r r :: k)
   | Mtailcall sig (inr symb) =>
-      OK (Pfreeframe (-f .(fn_framesize)) f.(fn_stacksize) 
+      OK (Pfreeframe 0 f.(fn_stacksize) 
                      f.(fn_retaddr_ofs) f.(fn_link_ofs) :: 
           Pjmp_s symb :: k)
   | Mlabel lbl =>
@@ -480,7 +480,7 @@ Definition transl_instr (f: Mach.function) (i: Mach.instruction) (k: code) :=
   | Mjumptable arg tbl =>
       do r <- ireg_of arg; OK (Pjmptbl r tbl :: k)
   | Mreturn =>
-      OK (Pfreeframe (-f .(fn_framesize)) f.(fn_stacksize) 
+      OK (Pfreeframe 0 f.(fn_stacksize) 
                      f.(fn_retaddr_ofs) f.(fn_link_ofs) :: 
           Pret :: k)
   | Mbuiltin ef args res =>
@@ -501,7 +501,7 @@ Fixpoint transl_code (f: Mach.function) (il: list Mach.instruction) :=
 Definition transf_function (f: Mach.function) : res Asm.code :=
   do c <- transl_code f f.(fn_code);
   if zlt (list_length_z c) Int.max_unsigned 
-  then OK (Pallocframe (- f.(fn_framesize)) f.(fn_stacksize)
+  then OK (Pallocframe 0 f.(fn_stacksize)
                        f.(fn_retaddr_ofs) f.(fn_link_ofs) :: c)
   else Error (msg "code size exceeded").
 

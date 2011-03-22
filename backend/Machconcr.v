@@ -184,7 +184,7 @@ Inductive step: state -> trace -> state -> Prop :=
       Genv.find_funct_ptr ge fb = Some (Internal f) ->
       load_stack m (Vptr stk soff) Tint f.(fn_link_ofs) = Some (parent_sp s) ->
       load_stack m (Vptr stk soff) Tint f.(fn_retaddr_ofs) = Some (parent_ra s) ->
-      Mem.free m stk (- f.(fn_framesize)) f.(fn_stacksize) = Some m' ->
+      Mem.free m stk 0 f.(fn_stacksize) = Some m' ->
       step (State s fb (Vptr stk soff) (Mtailcall sig ros :: c) rs m)
         E0 (Callstate s f' rs m')
   | exec_Mbuiltin:
@@ -223,14 +223,14 @@ Inductive step: state -> trace -> state -> Prop :=
       Genv.find_funct_ptr ge fb = Some (Internal f) ->
       load_stack m (Vptr stk soff) Tint f.(fn_link_ofs) = Some (parent_sp s) ->
       load_stack m (Vptr stk soff) Tint f.(fn_retaddr_ofs) = Some (parent_ra s) ->
-      Mem.free m stk (- f.(fn_framesize)) f.(fn_stacksize) = Some m' ->
+      Mem.free m stk 0 f.(fn_stacksize) = Some m' ->
       step (State s fb (Vptr stk soff) (Mreturn :: c) rs m)
         E0 (Returnstate s rs m')
   | exec_function_internal:
       forall s fb rs m f m1 m2 m3 stk,
       Genv.find_funct_ptr ge fb = Some (Internal f) ->
-      Mem.alloc m (- f.(fn_framesize)) f.(fn_stacksize) = (m1, stk) ->
-      let sp := Vptr stk (Int.repr (-f.(fn_framesize))) in
+      Mem.alloc m 0 f.(fn_stacksize) = (m1, stk) ->
+      let sp := Vptr stk Int.zero in
       store_stack m1 sp Tint f.(fn_link_ofs) (parent_sp s) = Some m2 ->
       store_stack m2 sp Tint f.(fn_retaddr_ofs) (parent_ra s) = Some m3 ->
       step (Callstate s fb rs m)
