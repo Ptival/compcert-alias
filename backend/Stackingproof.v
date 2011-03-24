@@ -339,6 +339,20 @@ Proof.
   exists v; auto. 
 Qed.
 
+Lemma index_contains_load_stack:
+  forall j m sp idx v,
+  index_contains j m sp idx v ->
+  exists v',
+     load_stack m (Vptr sp Int.zero) (type_of_index idx)
+                (Int.repr (offset_of_index fe idx)) = Some v'
+  /\ val_inject j v v'.
+Proof.
+  intros. inv H. 
+  exists v'; split; auto.
+  unfold load_stack. simpl. rewrite Int.add_commut. rewrite Int.add_zero.
+  rewrite offset_of_index_no_overflow; auto.
+Qed.
+
 (** Good variable properties for [index_contains] *)
 
 Section GOOD_VARIABLES.
@@ -425,6 +439,37 @@ Proof.
 Qed.
 
 Hint Resolve index_contains_inject_incr: stacking.
+
+Lemma store_index_succeeds:
+  forall m sp idx v,
+  index_valid idx ->
+  Mem.range_perm m sp 0 fe.(fe_size) Freeable ->
+  exists m',
+  Mem.store (chunk_of_type (type_of_index idx)) m sp (offset_of_index fe idx) v = Some m'.
+Proof.
+  intros.
+  destruct (Mem.valid_access_store m (chunk_of_type (type_of_index idx)) sp (offset_of_index fe idx) v) as [m' ST].
+  constructor.
+  exploit offset_of_index_valid; eauto. intros [A B].
+  rewrite size_type_chunk. 
+  red; intros. apply Mem.perm_implies with Freeable; auto with mem. 
+  apply H0. omega.
+  replace (align_chunk (chunk_of_type (type_of_index idx))) with 4.
+  apply offset_of_index_aligned; auto.
+  destruct (type_of_index idx); auto.
+  exists m'; auto.
+Qed.
+
+Lemma store_stack_succeeds:
+  forall m sp idx v m',
+  index_valid idx ->
+  Mem.store (chunk_of_type (type_of_index idx)) m sp (offset_of_index fe idx) v = Some m' ->
+  store_stack m (Vptr sp Int.zero) (type_of_index idx) (Int.repr (offset_of_index fe idx)) v = Some m'.
+Proof.
+  intros. unfold store_stack. simpl. rewrite Int.add_commut. rewrite Int.add_zero.
+  rewrite offset_of_index_no_overflow; auto.
+Qed.
+  
 
 (** * Agreement between location sets and Mach states *)
 
@@ -857,6 +902,16 @@ Variable csregs: list mreg.
 Variable ls: locset.
 Variable rs: regset.
 
+Inductive stores_in_frame: mem -> mem -> Prop :=
+  | stores_in_frame_refl: forall m,
+      stores_in_frame m m
+  | stores_in_frame_step: forall m1 chunk ofs v m2 m3,
+       ofs + size_chunk chunk <= fe.(fe_size) ->
+       Mem.store chunk m1 sp ofs v = Some m2 ->
+       stores_in_frame m2 m3 ->
+       stores_in_frame m1 m3.
+
+(*
 Definition mem_unchanged (m1 m2: mem) : Prop :=
      (forall b, Mem.valid_block m1 b -> Mem.valid_block m2 b)
   /\ (forall b ofs p, Mem.perm m1 b ofs p -> Mem.perm m2 b ofs p)
@@ -874,15 +929,18 @@ Proof.
   intros until m3; intros [A [B C]] [D [E F]]. 
   split. eauto. split. eauto. intros. transitivity (Mem.load chunk m2 b0 ofs); auto. 
 Qed.
+*)
 
 Hypothesis number_inj: 
   forall r1 r2, In r1 csregs -> In r2 csregs -> r1 <> r2 -> number r1 <> number r2.
 Hypothesis mkindex_valid:
   forall r, In r csregs -> number r < bound fe -> index_valid (mkindex (number r)).
+(*
 Hypothesis mkindex_not_link:
   forall z, mkindex z <> FI_link.
 Hypothesis mkindex_not_retaddr:
   forall z, mkindex z <> FI_retaddr.
+*)
 Hypothesis mkindex_typ:
   forall z, type_of_index (mkindex z) = ty.
 Hypothesis mkindex_inj:
@@ -890,8 +948,11 @@ Hypothesis mkindex_inj:
 Hypothesis mkindex_diff:
   forall r idx,
   idx <> mkindex (number r) -> index_diff (mkindex (number r)) idx.
+Hypothesis csregs_typ:
+  forall r, In r csregs -> mreg_type r = ty.
 
 Hypothesis agree: agree_regs j ls rs.
+Hypothesis wt_ls: forall l, Val.has_type (ls l) (Loc.type l).
 
 Lemma save_callee_save_regs_correct:
   forall l k m,
@@ -911,190 +972,290 @@ Lemma save_callee_save_regs_correct:
        (forall r,
          In r l -> number r < bound fe -> idx <> mkindex (number r)) ->
        index_contains j m sp idx v -> index_contains j m' sp idx v)
-  /\ mem_unchanged m m'
+  /\ stores_in_frame m m' (*mem_unchanged m m'*)
   /\ Mem.range_perm m' sp 0 fe.(fe_size) Freeable.
-
 Proof.
   induction l; intros; simpl save_callee_save_regs.
   (* base case *)
   exists m. split. apply star_refl. 
   split. intros. elim H2.
   split. auto.
-  split. apply mem_unchanged_refl.
+  split. constructor.
   auto.
   (* inductive case *)
-  set (k1 := save_callee_save_regs bound number mkindex ty fe l k).
   assert (R1: incl l csregs). eauto with coqlib.
   assert (R2: list_norepet l). inversion H0; auto.
   unfold save_callee_save_reg.
   destruct (zlt (number a) (bound fe)).
   (* a store takes place *)
-  assert (STORE: { m1 | Mem.store (chunk_of_type ty) m sp (offset_of_index fe (mkindex (number a))) (rs a) = Some m1}).
-    apply Mem.valid_access_store.
-    constructor. 
-    exploit offset_of_index_valid. apply (mkindex_valid a). apply H; auto with coqlib. auto.
-    rewrite mkindex_typ. intros [A B].
-    rewrite size_type_chunk. red; intros.
-    apply Mem.perm_implies with Freeable; auto with mem. apply H1. 
-    generalize (AST.typesize_pos ty). omega.
-    replace (align_chunk (chunk_of_type ty)) with 4. 
-    apply offset_of_index_aligned. destruct ty; auto.
-  destruct STORE as [m1 STORE].
-  assert (index_contains j m1 sp (mkindex (number a)) (ls (R a))).
-    eapply gss_index_contains; eauto. rewrite mkindex_typ; eauto. apply mkindex_valid; auto with coqlib. 
-    rewrite mkindex_typ. 
-  exploit (IHl k m1); auto. red; eauto with mem. 
-  intros [m2 [A [B [C [D E]]]]].
-  exists m2.
-  split. eapply star_left; eauto. 
-    constructor. unfold store_stack. simpl. rewrite (Int.add_commut Int.zero). rewrite Int.add_zero.
-    rewrite offset_of_index_no_overflow. auto. apply mkindex_valid. auto with coqlib. auto. 
-    traceEq.
-  split. simpl; intros. destruct (mreg_eq a r). subst r. 
-    eapply gss_index_contains; eauto. rewrite mkindex_typ. eauto. 
-
-auto. 
-    red; intros. ea
-    auto with coqlib. auto. 
-
-
-
-  set (fr1 := set_index_val (mkindex (number a)) (rs a) fr).
-  exploit (IHl k rs fr1 m); auto. 
-  fold k1. intros [fr' [A [B C]]].
-  exists fr'.
-  split. eapply star_left. 
-  apply exec_Msetstack. instantiate (1 := fr1). 
-  unfold fr1. rewrite <- (mkindex_typ (number a)).
-  eapply set_slot_index; eauto with coqlib.
-  eexact A.
+  exploit store_index_succeeds. apply (mkindex_valid a); auto with coqlib. 
+  eauto. instantiate (1 := rs a). intros [m1 ST].
+  exploit (IHl k m1).  auto with coqlib. auto. 
+  red; eauto with mem.
+  intros [m' [A [B [C [D E]]]]].
+  exists m'. 
+  split. eapply star_left; eauto. constructor. 
+  rewrite <- (mkindex_typ (number a)). 
+  apply store_stack_succeeds; auto with coqlib.
   traceEq.
-  split. intros. simpl in H1. destruct H1. subst r.
-    rewrite C. unfold fr1. apply get_set_index_val_same.
-    apply mkindex_valid; auto with coqlib.
-    intros. apply mkindex_inj. apply number_inj; auto with coqlib.
-    inversion H0. congruence.
-    apply B; auto.
-  intros. rewrite C; auto with coqlib. 
-    unfold fr1. apply get_set_index_val_other; auto with coqlib. 
+  split; intros. 
+  simpl in H2. destruct (mreg_eq a r). subst r.
+  apply C; auto with coqlib. 
+  intros. apply mkindex_inj. apply number_inj; auto with coqlib. 
+  inv H0. intuition congruence.
+  eapply gss_index_contains; eauto. 
+  rewrite mkindex_typ. eauto. 
+  replace ty with (Loc.type (R a)). apply wt_ls. simpl. auto with coqlib.
+  apply B; auto with coqlib. 
+  intuition congruence.
+  split. intros.
+  apply C; auto with coqlib. 
+  eapply gso_index_contains; eauto with coqlib. 
+  split. econstructor; eauto.
+  rewrite size_type_chunk. 
+  exploit offset_of_index_valid; eauto with coqlib.
+  intros [P Q]. omega.
+  auto.
   (* no store takes place *)
-  exploit (IHl k rs fr m); auto. intros [fr' [A [B C]]].
-  exists fr'.
-  split. exact A.
-  split. intros. simpl in H1; destruct H1. subst r. omegaContradiction.
-    apply B; auto. 
-  intros. apply C; auto with coqlib.
+  exploit (IHl k m); auto with coqlib. 
+  intros [m' [A [B [C [D E]]]]].
+  exists m'; intuition. 
+  simpl in H2. destruct H2. subst r. omegaContradiction. apply B; auto.
+  apply C; auto with coqlib.
+  intros. eapply H3; eauto. auto with coqlib.
 Qed.
 
-End SAVE_CALLEE_SAVE. 
-
-Lemma save_callee_save_int_correct:
-  forall k sp rs fr m,
-  exists fr',
-    star step tge 
-       (State stack tf sp
-         (save_callee_save_int fe k) rs fr m)
-    E0 (State stack tf sp k rs fr' m)
-  /\ (forall r,
-       In r int_callee_save_regs ->
-       index_int_callee_save r < bound_int_callee_save b ->
-       index_val (FI_saved_int (index_int_callee_save r)) fr' = rs r)
-  /\ (forall idx,
-       index_valid idx ->
-       match idx with FI_saved_int _ => False | _ => True end ->
-       index_val idx fr' = index_val idx fr).
-Proof.
-  intros.
-  exploit (save_callee_save_regs_correct fe_num_int_callee_save index_int_callee_save FI_saved_int
-                                         Tint sp int_callee_save_regs).
-  exact index_int_callee_save_inj.
-  intros. red. split; auto. generalize (index_int_callee_save_pos r H). omega.
-  intro; congruence.
-  intro; congruence.
-  auto.
-  intros; congruence.
-  intros until idx. destruct idx; simpl; auto. congruence.
-  apply incl_refl.
-  apply int_callee_save_norepet.
-  intros [fr' [A [B C]]]. 
-  exists fr'; intuition. unfold save_callee_save_int; eauto. 
-  apply C. auto. intros; subst idx. auto.
-Qed.
-
-Lemma save_callee_save_float_correct:
-  forall k sp rs fr m,
-  exists fr',
-    star step tge 
-       (State stack tf sp
-         (save_callee_save_float fe k) rs fr m)
-    E0 (State stack tf sp k rs fr' m)
-  /\ (forall r,
-       In r float_callee_save_regs ->
-       index_float_callee_save r < bound_float_callee_save b ->
-       index_val (FI_saved_float (index_float_callee_save r)) fr' = rs r)
-  /\ (forall idx,
-       index_valid idx ->
-       match idx with FI_saved_float _ => False | _ => True end ->
-       index_val idx fr' = index_val idx fr).
-Proof.
-  intros.
-  exploit (save_callee_save_regs_correct fe_num_float_callee_save index_float_callee_save FI_saved_float
-                                         Tfloat sp float_callee_save_regs).
-  exact index_float_callee_save_inj.
-  intros. red. split; auto. generalize (index_float_callee_save_pos r H). omega.
-  intro; congruence.
-  intro; congruence.
-  auto.
-  intros; congruence.
-  intros until idx. destruct idx; simpl; auto. congruence.
-  apply incl_refl.
-  apply float_callee_save_norepet. eauto.
-  intros [fr' [A [B C]]].
-  exists fr'. split. unfold save_callee_save_float; eauto.
-  split. auto. 
-  intros. apply C. auto. intros; subst. red; intros; subst idx. contradiction. 
-Qed.
+End SAVE_CALLEE_SAVE.
 
 Lemma save_callee_save_correct:
-  forall sp k rs m ls cs,
-  (forall r, rs r = ls (R r)) ->
-  (forall ofs ty,
-     In (S (Outgoing ofs ty)) (loc_arguments f.(Linear.fn_sig)) ->
-     get_parent_slot cs ofs ty (ls (S (Outgoing ofs ty)))) ->
-  exists fr',
-    star step tge
-       (State stack tf sp (save_callee_save fe k) rs empty_frame m)
-    E0 (State stack tf sp k rs fr' m)
-  /\ agree (call_regs ls) ls rs fr' cs.
+  forall j ls rs sp cs fb k m,
+  agree_regs j ls rs ->
+  (forall l, Val.has_type (ls l) (Loc.type l)) ->
+  Mem.range_perm m sp 0 fe.(fe_size) Freeable ->
+  exists m',
+    star step tge 
+       (State cs fb (Vptr sp Int.zero) (save_callee_save fe k) rs m)
+    E0 (State cs fb (Vptr sp Int.zero) k rs m')
+  /\ (forall r,
+       In r int_callee_save_regs -> index_int_callee_save r < b.(bound_int_callee_save) ->
+       index_contains j m' sp (FI_saved_int (index_int_callee_save r)) (ls (R r)))
+  /\ (forall r,
+       In r float_callee_save_regs -> index_float_callee_save r < b.(bound_float_callee_save) ->
+       index_contains j m' sp (FI_saved_float (index_float_callee_save r)) (ls (R r)))
+  /\ (forall idx v,
+       index_valid idx ->
+       match idx with FI_saved_int _ => False | FI_saved_float _ => False | _ => True end ->
+       index_contains j m sp idx v -> index_contains j m' sp idx v)
+  /\ stores_in_frame sp m m'
+  /\ Mem.range_perm m' sp 0 fe.(fe_size) Freeable.
 Proof.
-  intros. unfold save_callee_save.
-  exploit save_callee_save_int_correct; eauto. 
-  intros [fr1 [A1 [B1 C1]]].
-  exploit save_callee_save_float_correct. 
-  intros [fr2 [A2 [B2 C2]]].
-  exists fr2.
-  split. eapply star_trans. eexact A1. eexact A2. traceEq.
-  constructor; unfold call_regs; auto.
-  (* agree_local *)
-  intros. rewrite C2; auto with stacking. 
-  rewrite C1; auto with stacking. 
-  (* agree_outgoing *)
-  intros. rewrite C2; auto with stacking. 
-  rewrite C1; auto with stacking.
-  (* agree_incoming *)
-  intros. apply H0. unfold loc_parameters in H1.
-  exploit list_in_map_inv; eauto. intros [l [A B]].
-  exploit loc_arguments_acceptable; eauto. intro C.
-  destruct l; simpl in A. discriminate.
-  simpl in C. destruct s; try contradiction. inv A. auto.
-  (* agree_saved_int *)
-  intros. rewrite C2; auto with stacking.
-  rewrite B1; auto with stacking. 
-  (* agree_saved_float *)
-  intros. rewrite B2; auto with stacking. 
+  intros.
+  exploit (save_callee_save_regs_correct 
+             fe_num_int_callee_save
+             index_int_callee_save
+             FI_saved_int
+             Tint
+             j cs fb sp int_callee_save_regs ls rs).
+  intros. apply index_int_callee_save_inj; auto. 
+  intros. simpl. split. apply Zge_le. apply index_int_callee_save_pos; auto. assumption.
+  simpl; auto.
+  intros; congruence.
+  intros; simpl. destruct idx; auto. congruence.
+  intros. apply int_callee_save_type. auto.
+  auto. 
+  auto.
+  apply incl_refl. 
+  apply int_callee_save_norepet.
+  eauto.
+  intros [m1 [A [B [C [D E]]]]].
+  exploit (save_callee_save_regs_correct 
+             fe_num_float_callee_save
+             index_float_callee_save
+             FI_saved_float
+             Tfloat
+             j cs fb sp float_callee_save_regs ls rs).
+  intros. apply index_float_callee_save_inj; auto. 
+  intros. simpl. split. apply Zge_le. apply index_float_callee_save_pos; auto. assumption.
+  simpl; auto.
+  intros; congruence.
+  intros; simpl. destruct idx; auto. congruence.
+  intros. apply float_callee_save_type. auto.
+  auto. 
+  auto.
+  apply incl_refl. 
+  apply float_callee_save_norepet.
+  eexact E.
+  intros [m2 [P [Q [R [S T]]]]].
+  exists m2.
+  split. unfold save_callee_save, save_callee_save_int, save_callee_save_float.
+  eapply star_trans; eauto. 
+  split; intros.
+  apply R. apply index_saved_int_valid; auto. 
+  intros. congruence.
+  apply B. auto. auto. 
+  split. intros.
+  apply Q. auto. auto. 
+  split. intros. 
+  apply R.   auto. 
+  intros. destruct idx; contradiction||congruence.
+  apply C.  auto.
+  intros. destruct idx; contradiction||congruence.
+  auto.
+  split. eapply mem_unchanged_trans; eauto. auto.
 Qed.
 
+(** Function prologue *)
 
+Lemma function_prologue_correct:
+  
+
+(** The following lemmas show the correctness of the register reloading
+  code generated by [reload_callee_save]: after this code has executed,
+  all callee-save registers contain the same values they had at
+  function entry. *)
+
+Section RESTORE_CALLEE_SAVE.
+
+Variable bound: frame_env -> Z.
+Variable number: mreg -> Z.
+Variable mkindex: Z -> frame_index.
+Variable ty: typ.
+Variable csregs: list mreg.
+Variable j: meminj.
+Variable cs: list stackframe.
+Variable fb: block.
+Variable sp: block.
+Variable ls0: locset.
+Variable m: mem.
+
+Hypothesis mkindex_valid:
+  forall r, In r csregs -> number r < bound fe -> index_valid (mkindex (number r)).
+(*
+Hypothesis mkindex_not_link:
+  forall z, mkindex z <> FI_link.
+Hypothesis mkindex_not_retaddr:
+  forall z, mkindex z <> FI_retaddr.
+*)
+Hypothesis mkindex_typ:
+  forall z, type_of_index (mkindex z) = ty.
+Hypothesis number_within_bounds:
+  forall r, In r csregs ->
+  (number r < bound fe <-> mreg_within_bounds b r).
+Hypothesis mkindex_val:
+  forall r,
+  In r csregs -> number r < bound fe ->
+  index_contains j m sp (mkindex (number r)) (ls0 (R r)).
+
+Lemma restore_callee_save_regs_correct:
+  forall l ls rs k,
+  incl l csregs ->
+  list_norepet l -> 
+  agree_regs j ls rs ->
+  agree_locsets ls ls0 ->
+  exists ls', exists rs',
+    star step tge
+      (State cs fb (Vptr sp Int.zero)
+        (restore_callee_save_regs bound number mkindex ty fe l k) rs m)
+   E0 (State cs fb (Vptr sp Int.zero) k rs' m)
+  /\ (forall r, In r l -> val_inject j (ls0 (R r)) (rs' r))
+  /\ (forall r, ~(In r l) -> rs' r = rs r)
+  /\ agree_regs j ls' rs'
+  /\ agree_locsets ls' ls0.
+Proof.
+  induction l; intros; simpl restore_callee_save_regs.
+  (* base case *)
+  exists ls. exists rs. intuition. apply star_refl. elim H2. 
+  (* inductive case *)
+  assert (R0: In a csregs). apply H; auto with coqlib.
+  assert (R1: incl l csregs). eauto with coqlib.
+  assert (R2: list_norepet l). inversion H0; auto.
+  unfold restore_callee_save_reg.
+  destruct (zlt (number a) (bound fe)).
+  exploit (mkindex_val a); auto. intros [v X Y Z].
+  set (ls1 := Locmap.set (R a) (ls0 (R a)) ls).
+  set (rs1 := Regmap.set a v rs).
+  exploit (IHl ls1 rs1 k); eauto. 
+    unfold ls1, rs1. apply agree_regs_set_reg; auto. 
+    unfold ls1. apply agree_locsets_set_reg; auto. rewrite <- number_within_bounds; auto. 
+  intros [ls' [rs' [A [B [C D]]]]].
+  exists ls'; exists rs'. split. 
+  eapply star_left. 
+  constructor. 
+  unfold load_stack. simpl. rewrite Int.add_commut. rewrite Int.add_zero.
+  rewrite offset_of_index_no_overflow. 
+  rewrite mkindex_typ in Y. eauto.
+  auto.
+  eauto.
+  traceEq.
+  split. intros. destruct H3.
+  subst r. rewrite C. unfold rs1. rewrite Regmap.gss. auto. inv H0; auto.
+  auto.
+  split. intros. simpl in H3. rewrite C. unfold rs1. apply Regmap.gso.
+  apply sym_not_eq; tauto. tauto.
+  auto.
+  (* no load takes place *)
+  exploit (IHl ls rs k); auto.
+  intros [ls' [rs' [A [B [C [D E]]]]]].
+  exists ls'; exists rs'. split. assumption.
+  split. intros. elim H3; intros. 
+  subst r. rewrite <- (agree_unused_reg _ _ E). apply D. 
+  rewrite <- number_within_bounds. auto. auto. auto.
+  split. intros. simpl in H3. apply C. tauto.
+  auto.
+Qed.
+
+End RESTORE_CALLEE_SAVE.
+
+Lemma restore_callee_save_correct:
+  forall j cs fb sp k rs m ls ls0 pa ra,
+  agree_regs j ls rs -> agree_locsets ls ls0 -> 
+  agree_frame j ls ls0 m sp pa ra ->
+  exists rs',
+    star step tge
+       (State cs fb (Vptr sp Int.zero) (restore_callee_save fe k) rs m)
+    E0 (State cs fb (Vptr sp Int.zero) k rs' m)
+  /\ (forall r, 
+        In r int_callee_save_regs \/ In r float_callee_save_regs -> 
+        val_inject j (ls0 (R r)) (rs' r))
+  /\ (forall r, 
+        ~(In r int_callee_save_regs) ->
+        ~(In r float_callee_save_regs) ->
+        rs' r = rs r).
+Proof.
+  intros. 
+    exploit (restore_callee_save_regs_correct 
+             fe_num_int_callee_save
+             index_int_callee_save
+             FI_saved_int
+             Tint
+             int_callee_save_regs
+             j cs fb sp ls0 m); auto.
+  intros. unfold mreg_within_bounds. rewrite (int_callee_save_type r H2). tauto.
+  eapply agree_saved_int; eauto. 
+  apply incl_refl.
+  apply int_callee_save_norepet.
+  eauto. auto.
+  intros [ls1 [rs1 [A [B [C [D E]]]]]].
+    exploit (restore_callee_save_regs_correct 
+             fe_num_float_callee_save
+             index_float_callee_save
+             FI_saved_float
+             Tfloat
+             float_callee_save_regs
+             j cs fb sp ls0 m); auto.
+  intros. unfold mreg_within_bounds. rewrite (float_callee_save_type r H2). tauto.
+  eapply agree_saved_float; eauto. 
+  apply incl_refl.
+  apply float_callee_save_norepet.
+  eexact D. eexact E.
+  intros [ls2 [rs2 [P [Q [R [S T]]]]]].
+  exists rs2.
+  split. unfold restore_callee_save. eapply star_trans; eauto.
+  split. intros. destruct H2.
+    rewrite R. apply B; auto. red; intros. exploit int_float_callee_save_disjoint; eauto.
+   apply Q; auto.
+  intros. rewrite R; auto.
+Qed.
 
 End FRAME_PROPERTIES.
 
