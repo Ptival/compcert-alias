@@ -776,6 +776,20 @@ Proof.
   rewrite agree_incoming0; auto.
 Qed.
 
+(** Preservation at return points (when locset is changed) *)
+
+Lemma agree_callee_save_agree_locsets_2:
+  forall ls0 ls1 ls2,
+  agree_locsets ls1 ls0 ->
+  agree_callee_save ls2 ls1 ->
+  agree_locsets ls2 ls0.
+Proof.
+  intros. inv H. constructor; intros.
+  red in H0. rewrite H0. apply agree_unused_reg0. auto.
+  apply mreg_not_within_bounds; auto.
+  red in H0. rewrite H0. auto. auto.
+Qed.
+
 (** Properties of [agree_callee_save]. *)
 
 Lemma agree_callee_save_return_regs:
@@ -1674,31 +1688,6 @@ Proof.
   intros; apply H2; omega.
 Qed.
 
-(** A variant of the latter, for use with external calls. *)
-
-Lemma match_stack_change_extcall:
-  forall j m m1' m2' cs cs' sg bound bound',
-  match_stacks j m m1' cs cs' sg bound bound' ->
-  (forall b, b < bound' -> Mem.valid_block m1' b -> Mem.valid_block m2' b) ->
-  mem_unchanged_on (loc_out_of_reach j m) m1' m2' ->
-  match_stacks j m m2' cs cs' sg bound bound'.
-Proof.
-  induction 1; intros.
-  econstructor; eauto.
-  assert (REACH: forall ofs,
-    0 <= ofs < fe_size (make_env (function_bounds f)) ->
-    loc_out_of_reach j m sp' ofs).
-  intros; red; intros. exploit agree_inj_unique; eauto. intros [EQ1 EQ2]; subst.
-  rewrite (agree_bounds _ _ _ SDATA). unfold fst. left. omega. 
-  econstructor; eauto.
-  eapply agree_frame_invariant; eauto. 
-  intros. destruct H1. apply H5; auto. intros. apply REACH. omega.
-  intros. destruct H1. apply H1; auto.
-  apply IHmatch_stacks. 
-  intros; apply H0; auto; omega.
-  auto.
-Qed.
-
 (** Invariance with respect to change of [j]. *)
 
 Lemma match_stacks_change_meminj:
@@ -1720,6 +1709,69 @@ Proof.
   eapply agree_frame_inject_incr; eauto.
   eapply agree_stackptrs_inject_incr; eauto. red; omega. red; omega. 
   apply IHmatch_stacks. omega. omega.
+Qed.
+
+(** Invariance by external calls. *)
+
+(*
+Lemma match_stack_change_extcall_1:
+  forall j m m1' m2' cs cs' sg bound bound',
+  match_stacks j m m1' cs cs' sg bound bound' ->
+  (forall b, b < bound' -> Mem.valid_block m1' b -> Mem.valid_block m2' b) ->
+  mem_unchanged_on (loc_out_of_reach j m) m1' m2' ->
+  match_stacks j m m2' cs cs' sg bound bound'.
+Proof.
+  induction 1; intros.
+  econstructor; eauto.
+  assert (REACH: forall ofs,
+    0 <= ofs < fe_size (make_env (function_bounds f)) ->
+    loc_out_of_reach j m sp' ofs).
+  intros; red; intros. exploit agree_inj_unique; eauto. intros [EQ1 EQ2]; subst.
+  rewrite (agree_bounds _ _ _ SDATA). unfold fst. left. omega. 
+  econstructor; eauto.
+  eapply agree_frame_invariant; eauto. 
+  intros. destruct H1. apply H5; auto. intros. apply REACH. omega.
+  intros. destruct H1. apply H1; auto.
+  apply IHmatch_stacks. 
+  intros; apply H0; auto; omega.
+  auto.
+Qed.
+*)
+
+Lemma match_stack_change_extcall:
+  forall ec args m1 res t m2 args' m1' res' t' m2' j j',
+  external_call ec ge args m1 t res m2 ->
+  external_call ec ge args' m1' t' res' m2' ->
+  inject_incr j j' ->
+  inject_separated j j' m1 m1' ->
+  mem_unchanged_on (loc_out_of_reach j m1) m1' m2' ->
+  forall cs cs' sg bound bound',
+  match_stacks j m1 m1' cs cs' sg bound bound' ->
+  bound <= Mem.nextblock m1 -> bound' <= Mem.nextblock m1' ->
+  match_stacks j' m2 m2' cs cs' sg bound bound'.
+Proof.
+  intros until cs. induction 1; intros.
+  apply match_callstack_empty with hi; auto.
+  inv H6. constructor; auto.
+  intros. red in H2. case_eq (j b1).
+  intros [b' delta'] EQ. rewrite (H1 _ _ _ EQ) in H6. inv H6. eauto.
+  intros EQ. exploit H2; eauto. intros [A B]. elim B. red. omega. 
+  assert (REACH: forall ofs,
+    0 <= ofs < fe_size (make_env (function_bounds f)) ->
+    loc_out_of_reach j m1 sp' ofs).
+  intros; red; intros. exploit agree_inj_unique; eauto. intros [EQ1 EQ2]; subst.
+  rewrite (agree_bounds _ _ _ SDATA). unfold fst. left. omega. 
+  econstructor; eauto.
+  apply agree_frame_inject_incr with j; auto.
+  apply agree_frame_invariant with ls (parent_locset cs) m1'; auto.
+  red in H3. intros. apply H3. intros. apply REACH. omega. auto. 
+  intros. eapply external_call_valid_block; eauto.
+  intros. apply H3. apply REACH. omega. auto.
+  apply agree_stackdata_invariant with m1; auto. 
+  intros. eapply external_call_valid_block; eauto.
+  eapply external_call_bounds; eauto. eapply agree_valid_linear; eauto. 
+  eapply agree_stackptrs_inject_incr; eauto.  eapply agree_valid_linear; eauto. eapply agree_valid_mach; eauto.
+  apply IHmatch_stacks. omega. omega. 
 Qed.
 
 (** Invariance with respect to change of signature *)
@@ -2342,20 +2394,26 @@ Proof.
   eapply external_call_symbols_preserved; eauto.
   exact symbols_preserved. exact varinfo_preserved.
   econstructor; eauto.
-  
-
-
-  intros. unfold Regmap.set. case (RegEq.eq r (loc_result (ef_sig ef))); intro.
-  rewrite e. rewrite Locmap.gss; auto. rewrite Locmap.gso; auto.
-  red; auto.
-  apply agree_callee_save_set_result; auto.
+  apply match_stack_change_bounds with (Mem.nextblock m) (Mem.nextblock m'0).
+  eapply match_stack_change_extcall; eauto. omega. omega.
+  exploit external_call_valid_block. eexact H. 
+    instantiate (1 := (Mem.nextblock m - 1)). red; omega. unfold Mem.valid_block; omega.
+  exploit external_call_valid_block. eexact A. 
+    instantiate (1 := (Mem.nextblock m'0 - 1)). red; omega. unfold Mem.valid_block; omega.
+  apply wt_setloc; auto. simpl. rewrite loc_result_type.
+  change (Val.has_type res (proj_sig_res (ef_sig ef))). 
+  eapply external_call_well_typed; eauto. 
+  apply agree_regs_set_reg; auto. apply agree_regs_inject_incr with j; auto. 
+  apply agree_callee_save_set_result; auto. 
 
   (* return *)
-  inv STACKS. 
+  inv STACKS. simpl in AGLOCS.  
   econstructor; split.
   apply plus_one. apply exec_return. 
-  econstructor; eauto. simpl in AG2.  
-  eapply agree_frame_agree; eauto.
+  econstructor; eauto.
+  apply agree_callee_save_agree_locsets_2 with rs0; auto.
+  apply agree_frame_invariant with rs0 (parent_locset s) m'; auto.
+  intros. apply AGLOCS. destruct l; tauto.
 Qed.
 
 Lemma transf_initial_states:
