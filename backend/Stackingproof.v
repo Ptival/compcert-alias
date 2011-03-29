@@ -650,7 +650,7 @@ Qed.
 Lemma agree_regs_undef_op:
   forall op j ls rs,
   agree_regs j ls rs ->
-  agree_regs j (Linear.undef_op op ls) (undef_op op rs).
+  agree_regs j (Linear.undef_op op ls) (undef_op (transl_op fe op) rs).
 Proof.
   intros.
   generalize (agree_regs_undef_temps _ _ _ H). 
@@ -1317,21 +1317,9 @@ Proof.
   (* Store of parent *)
   exploit (store_index_succeeds m2' sp' FI_link parent). red; auto. auto. 
   intros [m3' STORE2].
-(*
-  assert (INJ3: Mem.inject j' m2 m3').
-    eapply STORE_IN_FRAME_INJ; eauto. 
-    exploit (offset_of_index_valid FI_link). red; auto.
-    rewrite size_type_chunk; omega.
-*)
   (* Store of retaddr *)
   exploit (store_index_succeeds m3' sp' FI_retaddr ra). red; auto. red; eauto with mem.
   intros [m4' STORE3].
-(*
-  assert (INJ4: Mem.inject j' m2 m4').
-    eapply STORE_IN_FRAME_INJ; eauto. 
-    exploit (offset_of_index_valid FI_retaddr). red; auto.
-    rewrite size_type_chunk; omega.
-*)
   (* Saving callee-save registers *)
   assert (PERM4: Mem.range_perm m4' sp' 0 (fe_size fe) Freeable).
     red; intros. eauto with mem. 
@@ -1346,18 +1334,6 @@ Proof.
     rewrite size_type_chunk. apply offset_of_index_valid. red; auto.
     econstructor; eauto. 
     rewrite size_type_chunk. apply offset_of_index_valid. red; auto.
-(*
-  assert (STORES_IN_FRAME_INJ:
-    forall m m', stores_in_frame sp' m m' -> Mem.inject j' m2 m -> Mem.inject j' m2 m').
-    induction 1; intros.
-    auto.
-    apply IHstores_in_frame. eapply STORE_IN_FRAME_INJ; eauto. 
-  assert (INJ5: Mem.inject j' m2 m5').
-    eapply STORES_IN_FRAME_INJ; eauto.
-  assert (STORES_IN_FRAME_VALID:
-    forall m m', stores_in_frame sp' m m' -> Mem.valid_block m sp' -> Mem.valid_block m' sp').
-    induction 1; intros. auto. apply IHstores_in_frame. eauto with mem.
-*)
   (* Agree frame *)
   assert (FRAME: agree_frame j' (call_regs ls) ls m5' sp' parent ra).
     constructor; intros.
@@ -1713,31 +1689,6 @@ Qed.
 
 (** Invariance by external calls. *)
 
-(*
-Lemma match_stack_change_extcall_1:
-  forall j m m1' m2' cs cs' sg bound bound',
-  match_stacks j m m1' cs cs' sg bound bound' ->
-  (forall b, b < bound' -> Mem.valid_block m1' b -> Mem.valid_block m2' b) ->
-  mem_unchanged_on (loc_out_of_reach j m) m1' m2' ->
-  match_stacks j m m2' cs cs' sg bound bound'.
-Proof.
-  induction 1; intros.
-  econstructor; eauto.
-  assert (REACH: forall ofs,
-    0 <= ofs < fe_size (make_env (function_bounds f)) ->
-    loc_out_of_reach j m sp' ofs).
-  intros; red; intros. exploit agree_inj_unique; eauto. intros [EQ1 EQ2]; subst.
-  rewrite (agree_bounds _ _ _ SDATA). unfold fst. left. omega. 
-  econstructor; eauto.
-  eapply agree_frame_invariant; eauto. 
-  intros. destruct H1. apply H5; auto. intros. apply REACH. omega.
-  intros. destruct H1. apply H1; auto.
-  apply IHmatch_stacks. 
-  intros; apply H0; auto; omega.
-  auto.
-Qed.
-*)
-
 Lemma match_stack_change_extcall:
   forall ec args m1 res t m2 args' m1' res' t' m2' j j',
   external_call ec ge args m1 t res m2 ->
@@ -1959,21 +1910,6 @@ Proof.
   rewrite (unfold_transf_function _ _ EQ). auto. 
   auto.
 Qed.
-
-(*
-Lemma funct_ptr_inject:
-  forall j v v' tf hi,
-  Genv.find_funct tge v = Some tf ->
-  val_inject j v v' ->
-  match_globalenvs j hi ->
-  v' = v.
-Proof.
-  intros. exploit Genv.find_funct_inv; eauto. intros [b EQ]. subst v.
-  rewrite Genv.find_funct_find_funct_ptr in H. 
-  exploit Genv.find_funct_ptr_negative. unfold tge in H; eexact H. intros. 
-  inv H0. inv H1. rewrite (DOMAIN b) in H5. inv H5. reflexivity. omega.
-Qed.
-*)
 
 Lemma find_function_translated:
   forall j ls rs m m' cs cs' sg bound bound' ros f,
@@ -2246,6 +2182,35 @@ Proof.
     eapply agree_frame_set_outgoing; eauto. simpl in H1; rewrite H1; apply WTLS.
 
   (* Lop *)
+  assert (meminj_preserves_globals ge j).
+    exploit match_stacks_globalenvs; eauto. intros [hi MG].
+    eapply match_globalenvs_preserves_globals; eauto.
+  assert (Val.has_type v (mreg_type res)).
+    inv WTI. simpl in H. inv H. rewrite <- H2. apply WTLS. 
+    replace (mreg_type res) with (snd (type_of_operation op)).
+    eapply type_of_operation_sound; eauto. 
+    rewrite <- H5; auto.
+  assert (exists v',
+          eval_operation ge (Vptr sp' Int.zero) (transl_op (make_env (function_bounds f)) op) rs0##args = Some v'
+       /\ val_inject j v v').
+  eapply eval_operation_inject; eauto. eapply agree_inj; eauto. eapply agree_reglist; eauto.
+  destruct H2 as [v' [A B]].
+  econstructor; split. 
+  apply plus_one. constructor. 
+  instantiate (1 := v'). rewrite <- A. apply eval_operation_preserved. 
+  exact symbols_preserved.
+  econstructor; eauto.
+  apply wt_setloc. assumption. apply wt_undef_op; auto. 
+  apply agree_regs_set_reg; auto. apply agree_regs_undef_op; auto. 
+  apply agree_locsets_set_reg; auto. apply agree_locsets_undef_op; auto.
+  
+inv WTI.
+  apply eval_oeexact A. 
+  
+    
+
+  inv WTI.
+  
   admit.
 
   (* Lload *)

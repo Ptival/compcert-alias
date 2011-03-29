@@ -32,6 +32,7 @@ Require Import Values.
 Require Import Memdata.
 Require Import Memory.
 Require Import Globalenvs.
+Require Import Events.
 
 Set Implicit Arguments.
 
@@ -570,7 +571,7 @@ End SOUNDNESS.
 
 (** Alternate definition of [eval_condition], [eval_op], [eval_addressing]
   as total functions that return [Vundef] when not applicable
-  (instead of [None]).  Used in the proof of [PPCgen]. *)
+  (instead of [None]).  Used in the proof of [Asmgen]. *)
 
 Section EVAL_OP_TOTAL.
 
@@ -843,6 +844,139 @@ Qed.
 
 End EVAL_LESSDEF.
 
+
+(** Shifting stack-relative references.  This is used in [Stacking]. *)
+
+Definition shift_stack_addressing (delta: int) (addr: addressing) :=
+  match addr with
+  | Ainstack ofs => Ainstack (Int.add delta ofs)
+  | _ => addr
+  end.
+
+Definition shift_stack_operation (delta: int) (op: operation) :=
+  match op with
+  | Olea addr => Olea (shift_stack_addressing delta addr)
+  | _ => op
+  end.
+
+Lemma type_shift_stack_addressing:
+  forall delta addr, type_of_addressing (shift_stack_addressing delta addr) = type_of_addressing addr.
+Proof.
+  intros. destruct addr; auto. 
+Qed.
+
+Lemma type_shift_stack_operation:
+  forall delta op, type_of_operation (shift_stack_operation delta op) = type_of_operation op.
+Proof.
+  intros. destruct op; auto. simpl. decEq. apply type_shift_stack_addressing. 
+Qed.
+
+(** Compatibility of the evaluation functions with memory injections. *)
+
+Section EVAL_INJECT.
+
+Variable F V: Type.
+Variable genv: Genv.t F V.
+Variable f: meminj.
+Hypothesis globals: meminj_preserves_globals genv f.
+Variable sp1: block.
+Variable sp2: block.
+Variable delta: Z.
+Hypothesis sp_inj: f sp1 = Some(sp2, delta).
+
+Ltac InvInject :=
+  match goal with
+  | [ H: val_inject _ (Vint _) _ |- _ ] =>
+      inv H; InvInject
+  | [ H: val_inject _ (Vfloat _) _ |- _ ] =>
+      inv H; InvInject
+  | [ H: val_inject _ (Vptr _ _) _ |- _ ] =>
+      inv H; InvInject
+  | [ H: val_list_inject _ nil _ |- _ ] =>
+      inv H; InvInject
+  | [ H: val_list_inject _ (_ :: _) _ |- _ ] =>
+      inv H; InvInject
+  | _ => idtac
+  end.
+
+Lemma eval_condition_inject:
+  forall cond vl1 vl2 b,
+  val_list_inject f vl1 vl2 ->
+  eval_condition cond vl1 = Some b ->
+  eval_condition cond vl2 = Some b.
+Proof.
+  intros. destruct cond; simpl in *; FuncInv; InvInject; auto.
+  admit.
+Qed.
+
+Ltac TrivialExists2 :=
+  match goal with
+  | [ |- exists v2, Some ?v1 = Some v2 /\ val_inject _ _ v2 ] =>
+      exists v1; split; [auto | econstructor; eauto]
+  | _ => idtac
+  end.
+
+Lemma eval_addressing_inject:
+  forall addr vl1 vl2 v1,
+  val_list_inject f vl1 vl2 ->
+  eval_addressing genv (Vptr sp1 Int.zero) addr vl1 = Some v1 ->
+  exists v2, 
+     eval_addressing genv (Vptr sp2 Int.zero) (shift_stack_addressing (Int.repr delta) addr) vl2 = Some v2
+  /\ val_inject f v1 v2.
+Proof.
+  intros. destruct addr; simpl in *; FuncInv; InvInject; TrivialExists2.
+  repeat rewrite Int.add_assoc. decEq. apply Int.add_commut. 
+  repeat rewrite Int.add_assoc. decEq. rewrite Int.add_commut. apply Int.add_assoc. 
+  repeat rewrite Int.add_assoc. decEq. rewrite Int.add_commut. apply Int.add_assoc. 
+  repeat rewrite Int.add_assoc. decEq. rewrite Int.add_commut. apply Int.add_assoc.
+  destruct (Genv.find_symbol genv i) as [] _eqn; inv H0.
+  TrivialExists2. eapply (proj1 globals); eauto. rewrite Int.add_zero; auto.
+  destruct (Genv.find_symbol genv i) as [] _eqn; inv H0.
+  TrivialExists2. eapply (proj1 globals); eauto. rewrite Int.add_zero; auto.
+  destruct (Genv.find_symbol genv i0) as [] _eqn; inv H0.
+  TrivialExists2. eapply (proj1 globals); eauto. rewrite Int.add_zero; auto.
+  rewrite Int.add_assoc. decEq. apply Int.add_commut.
+Qed.
+
+Lemma eval_operation_inject:
+  forall op vl1 vl2 v1,
+  val_list_inject f vl1 vl2 ->
+  eval_operation genv (Vptr sp1 Int.zero) op vl1 = Some v1 ->
+  exists v2,
+     eval_operation genv (Vptr sp2 Int.zero) (shift_stack_operation (Int.repr delta) op) vl2 = Some v2
+  /\ val_inject f v1 v2.
+Proof.
+  intros. destruct op; simpl in *; FuncInv; InvInject; TrivialExists2.
+  exists v'; auto.
+  exists (Val.sign_ext 8 v'); split; auto. inv H3; simpl; auto.
+  exists (Val.zero_ext 8 v'); split; auto. inv H3; simpl; auto.
+  exists (Val.sign_ext 16 v'); split; auto. inv H3; simpl; auto.
+  exists (Val.zero_ext 16 v'); split; auto. inv H3; simpl; auto.
+  rewrite Int.sub_add_l. auto.
+  destruct (eq_block b b0); inv H0. rewrite H2 in H4; inv H4. rewrite dec_eq_true.
+  rewrite Int.sub_shifted. TrivialExists2.
+  destruct (Int.eq i0 Int.zero); inv H0. TrivialExists2.
+  destruct (Int.eq i0 Int.zero); inv H0. TrivialExists2.
+  destruct (Int.eq i0 Int.zero); inv H0. TrivialExists2.
+  destruct (Int.eq i0 Int.zero); inv H0. TrivialExists2.
+  destruct (Int.ltu i0 Int.iwordsize); inv H0. TrivialExists2.
+  destruct (Int.ltu i Int.iwordsize); inv H0. TrivialExists2.
+  destruct (Int.ltu i0 Int.iwordsize); inv H0. TrivialExists2.
+  destruct (Int.ltu i Int.iwordsize); inv H0. TrivialExists2.
+  destruct (Int.ltu i (Int.repr 31)); inv H0. TrivialExists2.
+  destruct (Int.ltu i0 Int.iwordsize); inv H0. TrivialExists2.
+  destruct (Int.ltu i Int.iwordsize); inv H0. TrivialExists2.
+  destruct (Int.ltu i Int.iwordsize); inv H0. TrivialExists2.
+  eapply eval_addressing_inject; eauto.
+  exists (Val.singleoffloat v'); split; auto. inv H3; simpl; auto.
+  destruct (Float.intoffloat f0); simpl in *; inv H0. TrivialExists2.
+  destruct (eval_condition c vl1) as [] _eqn; try discriminate.
+  exploit eval_condition_inject; eauto. intros EQ; rewrite EQ. 
+  destruct b; inv H0; TrivialExists2.
+Qed.
+
+End EVAL_INJECT.
+
 (** Transformation of addressing modes with two operands or more
   into an equivalent arithmetic operation.  This is used in the [Reload]
   pass when a store instruction cannot be reloaded directly because
@@ -924,54 +1058,4 @@ Definition is_trivial_op (op: operation) : bool :=
   | Olea (Ainstack _) => true
   | _ => false
   end.
-
-(** Shifting stack-relative references.  This is used in [Stacking]. *)
-
-Definition shift_stack_addressing (delta: int) (addr: addressing) :=
-  match addr with
-  | Ainstack ofs => Ainstack (Int.add delta ofs)
-  | _ => addr
-  end.
-
-Definition shift_stack_operation (delta: int) (op: operation) :=
-  match op with
-  | Olea addr => Olea (shift_stack_addressing delta addr)
-  | _ => op
-  end.
-
-Lemma shift_stack_eval_addressing:
-  forall (F V: Type) (ge: Genv.t F V) sp addr args delta,
-  eval_addressing ge (Val.sub sp (Vint delta)) (shift_stack_addressing delta addr) args =
-  eval_addressing ge sp addr args.
-Proof.
-  intros. destruct addr; simpl; auto. 
-  destruct args; auto. unfold offset_sp. destruct sp; simpl; auto. 
-  decEq. decEq. rewrite <- Int.add_assoc. decEq. 
-  rewrite Int.sub_add_opp. rewrite Int.add_assoc.
-  rewrite (Int.add_commut (Int.neg delta)). rewrite <- Int.sub_add_opp. 
-  rewrite Int.sub_idem. apply Int.add_zero. 
-Qed.
-
-Lemma shift_stack_eval_operation:
-  forall (F V: Type) (ge: Genv.t F V) sp op args delta,
-  eval_operation ge (Val.sub sp (Vint delta)) (shift_stack_operation delta op) args =
-  eval_operation ge sp op args.
-Proof.
-  intros. destruct op; simpl; auto.
-  apply shift_stack_eval_addressing. 
-Qed.
-
-Lemma type_shift_stack_addressing:
-  forall delta addr, type_of_addressing (shift_stack_addressing delta addr) = type_of_addressing addr.
-Proof.
-  intros. destruct addr; auto. 
-Qed.
-
-Lemma type_shift_stack_operation:
-  forall delta op, type_of_operation (shift_stack_operation delta op) = type_of_operation op.
-Proof.
-  intros. destruct op; auto. simpl. decEq. apply type_shift_stack_addressing. 
-Qed.
-
-
 
