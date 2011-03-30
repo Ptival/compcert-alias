@@ -741,14 +741,14 @@ Lemma exec_Mop_prop:
   forall (s : list stackframe) (fb : block) (sp : val) (op : operation)
          (args : list mreg) (res : mreg) (c : list Mach.instruction)
          (ms : mreg -> val) (m : mem) (v : val),
-  eval_operation ge sp op ms ## args = Some v ->
+  eval_operation ge sp op ms ## args m = Some v ->
   exec_instr_prop (Machconcr.State s fb sp (Mop op args res :: c) ms m) E0
                   (Machconcr.State s fb sp c (Regmap.set res v (undef_op op ms)) m).
 Proof.
   intros; red; intros; inv MS.
-  assert (eval_operation tge sp op ms##args = Some v). 
+  assert (eval_operation tge sp op ms##args m = Some v). 
     rewrite <- H. apply eval_operation_preserved. exact symbols_preserved.
-  exploit eval_operation_lessdef. eapply preg_vals; eauto. eexact H0.
+  exploit eval_operation_lessdef. eapply preg_vals; eauto. eauto. eexact H0.
   intros [v' [A B]]. rewrite (sp_val _ _ _ AG) in A. 
   left; eapply exec_straight_steps; eauto; intros. simpl in H1. 
   exploit transl_op_correct; eauto. intros [rs2 [P [Q R]]]. 
@@ -868,7 +868,7 @@ Lemma exec_Mtailcall_prop:
   Genv.find_funct_ptr ge fb = Some (Internal f) ->
   load_stack m (Vptr stk soff) Tint f.(fn_link_ofs) = Some (parent_sp s) ->
   load_stack m (Vptr stk soff) Tint f.(fn_retaddr_ofs) = Some (parent_ra s) ->
-  Mem.free m stk (- f.(fn_framesize)) f.(fn_stacksize) = Some m' ->
+  Mem.free m stk 0 f.(fn_stacksize) = Some m' ->
   exec_instr_prop
           (Machconcr.State s fb (Vptr stk soff) (Mtailcall sig ros :: c) ms m) E0
           (Callstate s f' ms m').
@@ -980,14 +980,14 @@ Lemma exec_Mcond_true_prop:
          (cond : condition) (args : list mreg) (lbl : Mach.label)
          (c : list Mach.instruction) (ms : mreg -> val) (m : mem)
          (c' : Mach.code),
-  eval_condition cond ms ## args = Some true ->
+  eval_condition cond ms ## args m = Some true ->
   Genv.find_funct_ptr ge fb = Some (Internal f) ->
   Mach.find_label lbl (fn_code f) = Some c' ->
   exec_instr_prop (Machconcr.State s fb sp (Mcond cond args lbl :: c) ms m) E0
                   (Machconcr.State s fb sp c' (undef_temps ms) m).
 Proof.
   intros; red; intros; inv MS. assert (f0 = f) by congruence. subst f0.
-  exploit eval_condition_lessdef. eapply preg_vals; eauto. eauto. intros EC.
+  exploit eval_condition_lessdef. eapply preg_vals; eauto. eauto. eauto. intros EC.
   inv AT. monadInv H5.
   exploit transl_cond_correct; eauto. intros [rs' [A [B C]]].
   generalize (functions_transl _ _ _ FIND H4); intro FN.
@@ -1009,12 +1009,12 @@ Lemma exec_Mcond_false_prop:
   forall (s : list stackframe) (fb : block) (sp : val)
          (cond : condition) (args : list mreg) (lbl : Mach.label)
          (c : list Mach.instruction) (ms : mreg -> val) (m : mem),
-  eval_condition cond ms ## args = Some false ->
+  eval_condition cond ms ## args m = Some false ->
   exec_instr_prop (Machconcr.State s fb sp (Mcond cond args lbl :: c) ms m) E0
                   (Machconcr.State s fb sp c (undef_temps ms) m).
 Proof.
   intros; red; intros; inv MS.
-  exploit eval_condition_lessdef. eapply preg_vals; eauto. eauto. intros EC.
+  exploit eval_condition_lessdef. eapply preg_vals; eauto. eauto. eauto. intros EC.
   left; eapply exec_straight_steps; eauto. intros. simpl in H0. 
   exploit transl_cond_correct; eauto. intros [rs' [A [B C]]].
   econstructor; split.
@@ -1060,7 +1060,7 @@ Lemma exec_Mreturn_prop:
   Genv.find_funct_ptr ge fb = Some (Internal f) ->
   load_stack m (Vptr stk soff) Tint f.(fn_link_ofs) = Some (parent_sp s) ->
   load_stack m (Vptr stk soff) Tint f.(fn_retaddr_ofs) = Some (parent_ra s) ->
-  Mem.free m stk (- f.(fn_framesize)) f.(fn_stacksize) = Some m' ->
+  Mem.free m stk 0 f.(fn_stacksize) = Some m' ->
   exec_instr_prop (Machconcr.State s fb (Vptr stk soff) (Mreturn :: c) ms m) E0
                   (Returnstate s ms m').
 Proof.
@@ -1094,8 +1094,8 @@ Lemma exec_function_internal_prop:
   forall (s : list stackframe) (fb : block) (ms : Mach.regset)
          (m : mem) (f : function) (m1 m2 m3 : mem) (stk : block),
   Genv.find_funct_ptr ge fb = Some (Internal f) ->
-  Mem.alloc m (- fn_framesize f) (fn_stacksize f) = (m1, stk) ->
-  let sp := Vptr stk (Int.repr (- fn_framesize f)) in
+  Mem.alloc m 0 (fn_stacksize f) = (m1, stk) ->
+  let sp := Vptr stk Int.zero in
   store_stack m1 sp Tint f.(fn_link_ofs) (parent_sp s) = Some m2 ->
   store_stack m2 sp Tint f.(fn_retaddr_ofs) (parent_ra s) = Some m3 ->
   exec_instr_prop (Machconcr.Callstate s fb ms m) E0

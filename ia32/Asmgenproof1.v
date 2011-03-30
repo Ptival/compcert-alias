@@ -1048,13 +1048,17 @@ Proof.
 Qed.
 
 Lemma testcond_for_signed_comparison_correct_pp:
-  forall c b1 n1 b2 n2 rs b,
-  (if eq_block b1 b2 then Some (Int.cmp c n1 n2) else eval_compare_mismatch c) = Some b ->
+  forall c b1 n1 b2 n2 rs m b,
+  (if Mem.valid_pointer m b1 (Int.signed n1) && Mem.valid_pointer m b2 (Int.signed n2) 
+   then if eq_block b1 b2 then Some (Int.cmp c n1 n2) else eval_compare_mismatch c
+   else None) = Some b ->
   eval_testcond (testcond_for_signed_comparison c)
                 (nextinstr (compare_ints (Vptr b1 n1) (Vptr b2 n2) rs)) =
   Some b.
 Proof.
-  intros. generalize (compare_ints_spec rs (Vptr b1 n1) (Vptr b2 n2)).
+  intros.
+  destruct (Mem.valid_pointer m b1 (Int.signed n1) && Mem.valid_pointer m b2 (Int.signed n2)); try discriminate.
+  generalize (compare_ints_spec rs (Vptr b1 n1) (Vptr b2 n2)).
   set (rs' := nextinstr (compare_ints (Vptr b1 n1) (Vptr b2 n2) rs)). 
   intros [A [B [C D]]]. unfold eq_block in H.
   unfold eval_testcond. rewrite A; rewrite B; rewrite C.
@@ -1214,7 +1218,7 @@ Qed.
 Lemma transl_cond_correct:
   forall cond args k c rs m b,
   transl_cond cond args k = OK c ->
-  eval_condition cond (map rs (map preg_of args)) = Some b ->
+  eval_condition cond (map rs (map preg_of args)) m = Some b ->
   exists rs',
      exec_straight c rs m k rs' m
   /\ eval_testcond (testcond_for_condition cond) rs' = Some b
@@ -1229,10 +1233,11 @@ Proof.
   subst b. apply testcond_for_signed_comparison_correct_ii. 
   apply testcond_for_signed_comparison_correct_ip; auto. 
   apply testcond_for_signed_comparison_correct_pi; auto.
-  apply testcond_for_signed_comparison_correct_pp; auto.
+  eapply testcond_for_signed_comparison_correct_pp; eauto.
   intros. unfold compare_ints. repeat SOther.
 (* compu *)
-  simpl map in H0. rewrite (ireg_of_eq _ _ EQ) in H0. rewrite (ireg_of_eq _ _ EQ1) in H0.
+  simpl map in H0. 
+  rewrite (ireg_of_eq _ _ EQ) in H0. rewrite (ireg_of_eq _ _ EQ1) in H0.
   econstructor. split. apply exec_straight_one. simpl. eauto. auto.
   split. simpl in H0. FuncInv.
   subst b. apply testcond_for_unsigned_comparison_correct. 
@@ -1333,7 +1338,7 @@ Ltac TranslOp :=
 Lemma transl_op_correct:
   forall op args res k c (rs: regset) m v,
   transl_op op args res k = OK c ->
-  eval_operation ge (rs#ESP) op (map rs (map preg_of args)) = Some v ->
+  eval_operation ge (rs#ESP) op (map rs (map preg_of args)) m = Some v ->
   exists rs',
      exec_straight c rs m k rs' m
   /\ rs'#(preg_of res) = v
@@ -1342,7 +1347,7 @@ Lemma transl_op_correct:
      r <> preg_of res -> rs' r = rs r.
 Proof.
   intros until v; intros TR EV.
-  rewrite <- (eval_operation_weaken _ _ _ _ EV).
+  rewrite <- (eval_operation_weaken _ _ _ _ _ EV).
   destruct op; simpl in TR; ArgsInv; try (TranslOp; fail).
 (* move *)
   exploit mk_mov_correct; eauto. intros [rs2 [A [B C]]]. 
@@ -1383,8 +1388,8 @@ Proof.
   rewrite (eval_addressing_weaken _ _ _ _ EV). rewrite <- EA. 
   TranslOp.
 (* condition *)
-  remember (eval_condition c0 rs ## (preg_of ## args)) as ob. destruct ob; inv EV. 
-  rewrite (eval_condition_weaken _ _ (sym_equal Heqob)). 
+  remember (eval_condition c0 rs ## (preg_of ## args) m) as ob. destruct ob; inv EV. 
+  rewrite (eval_condition_weaken _ _ _ (sym_equal Heqob)). 
   exploit transl_cond_correct; eauto. intros [rs2 [P [Q R]]].
   exists (nextinstr (rs2#ECX <- Vundef #EDX <- Vundef #x <- v)).
   split. eapply exec_straight_trans. eauto. 

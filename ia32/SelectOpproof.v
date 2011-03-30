@@ -64,13 +64,13 @@ Ltac InvEval1 :=
 
 Ltac InvEval2 :=
   match goal with
-  | [ H: (eval_operation _ _ _ nil = Some _) |- _ ] =>
+  | [ H: (eval_operation _ _ _ nil _ = Some _) |- _ ] =>
       simpl in H; inv H
-  | [ H: (eval_operation _ _ _ (_ :: nil) = Some _) |- _ ] =>
+  | [ H: (eval_operation _ _ _ (_ :: nil) _ = Some _) |- _ ] =>
       simpl in H; FuncInv
-  | [ H: (eval_operation _ _ _ (_ :: _ :: nil) = Some _) |- _ ] =>
+  | [ H: (eval_operation _ _ _ (_ :: _ :: nil) _ = Some _) |- _ ] =>
       simpl in H; FuncInv
-  | [ H: (eval_operation _ _ _ (_ :: _ :: _ :: nil) = Some _) |- _ ] =>
+  | [ H: (eval_operation _ _ _ (_ :: _ :: _ :: nil) _ = Some _) |- _ ] =>
       simpl in H; FuncInv
   | _ =>
       idtac
@@ -150,12 +150,12 @@ Proof.
   eapply eval_notbool_base; eauto.
 
   inv H. eapply eval_Eop; eauto.
-  simpl. assert (eval_condition c vl = Some b).
+  simpl. assert (eval_condition c vl m = Some b).
   generalize H6. simpl. 
   case (eval_condition c vl); intros.
   destruct b0; inv H1; inversion H0; auto; congruence.
   congruence.
-  rewrite (Op.eval_negate_condition _ _ H). 
+  rewrite (Op.eval_negate_condition _ _ _ H). 
   destruct b; reflexivity.
 
   inv H. eapply eval_Econdition; eauto. 
@@ -734,12 +734,14 @@ Theorem eval_comp_ptr_ptr:
   forall le c a x1 x2 b y1 y2,
   eval_expr ge sp e m le a (Vptr x1 x2) ->
   eval_expr ge sp e m le b (Vptr y1 y2) ->
+  Mem.valid_pointer m x1 (Int.signed x2)
+  && Mem.valid_pointer m y1 (Int.signed y2) = true ->
   x1 = y1 ->
   eval_expr ge sp e m le (comp c a b) (Val.of_bool(Int.cmp c x2 y2)).
 Proof.
   intros until y2.
   unfold comp; case (comp_match a b); intros; InvEval.
-  EvalOp. simpl. subst y1. rewrite dec_eq_true. 
+  EvalOp. simpl. rewrite H1. subst y1. rewrite dec_eq_true. 
   destruct (Int.cmp c x2 y2); reflexivity.
 Qed.
 
@@ -747,14 +749,16 @@ Theorem eval_comp_ptr_ptr_2:
   forall le c a x1 x2 b y1 y2 v,
   eval_expr ge sp e m le a (Vptr x1 x2) ->
   eval_expr ge sp e m le b (Vptr y1 y2) ->
+  Mem.valid_pointer m x1 (Int.signed x2)
+  && Mem.valid_pointer m y1 (Int.signed y2) = true ->
   x1 <> y1 ->
   Cminor.eval_compare_mismatch c = Some v ->
   eval_expr ge sp e m le (comp c a b) v.
 Proof.
   intros until y2.
   unfold comp; case (comp_match a b); intros; InvEval.
-  EvalOp. simpl. rewrite dec_eq_false; auto.
-  destruct c; simpl in H2; inv H2; auto.
+  EvalOp. simpl. rewrite H1. rewrite dec_eq_false; auto.
+  destruct c; simpl in H3; inv H3; auto.
 Qed.
 
 Theorem eval_compu:

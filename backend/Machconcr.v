@@ -155,7 +155,7 @@ Inductive step: state -> trace -> state -> Prop :=
         E0 (State s fb sp c (rs # IT1 <- Vundef # dst <- v) m)
   | exec_Mop:
       forall s f sp op args res c rs m v,
-      eval_operation ge sp op rs##args = Some v ->
+      eval_operation ge sp op rs##args m = Some v ->
       step (State s f sp (Mop op args res :: c) rs m)
         E0 (State s f sp c ((undef_op op rs)#res <- v) m)
   | exec_Mload:
@@ -200,14 +200,14 @@ Inductive step: state -> trace -> state -> Prop :=
         E0 (State s fb sp c' rs m)
   | exec_Mcond_true:
       forall s fb f sp cond args lbl c rs m c',
-      eval_condition cond rs##args = Some true ->
+      eval_condition cond rs##args m = Some true ->
       Genv.find_funct_ptr ge fb = Some (Internal f) ->
       find_label lbl f.(fn_code) = Some c' ->
       step (State s fb sp (Mcond cond args lbl :: c) rs m)
         E0 (State s fb sp c' (undef_temps rs) m)
   | exec_Mcond_false:
       forall s f sp cond args lbl c rs m,
-      eval_condition cond rs##args = Some false ->
+      eval_condition cond rs##args m = Some false ->
       step (State s f sp (Mcond cond args lbl :: c) rs m)
         E0 (State s f sp c (undef_temps rs) m)
   | exec_Mjumptable:

@@ -1265,7 +1265,7 @@ Lemma eval_binop_compat:
   val_inject f v2 tv2 ->
   Mem.inject f m tm ->
   exists tv,
-     Cminor.eval_binop op tv1 tv2 = Some tv
+     Cminor.eval_binop op tv1 tv2 tm = Some tv
   /\ val_inject f v tv.
 Proof.
   destruct op; simpl; intros.
@@ -1308,6 +1308,10 @@ Proof.
   caseEq (Mem.valid_pointer m b1 (Int.signed ofs1) && Mem.valid_pointer m b0 (Int.signed ofs0)); 
   intro EQ; rewrite EQ in H4; try discriminate.
   elim (andb_prop _ _ EQ); intros.
+  exploit Mem.valid_pointer_inject_val. eauto. eexact H. econstructor; eauto. 
+  intros V1. rewrite V1.
+  exploit Mem.valid_pointer_inject_val. eauto. eexact H1. econstructor; eauto. 
+  intros V2. rewrite V2. simpl.
   destruct (eq_block b1 b0); inv H4.
   (* same blocks in source *)
   assert (b3 = b2) by congruence. subst b3.

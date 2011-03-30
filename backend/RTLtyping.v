@@ -527,7 +527,7 @@ Proof.
   econstructor; eauto.
   apply wt_regset_assign. auto.
   replace (env res) with (snd (type_of_operation op)).
-  apply type_of_operation_sound with fundef unit ge rs##args sp; auto.
+  eapply type_of_operation_sound; eauto.
   rewrite <- H6. reflexivity.
   (* Iload *)
   econstructor; eauto.

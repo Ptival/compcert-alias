@@ -97,7 +97,7 @@ Qed.
 Lemma is_compare_neq_zero_correct:
   forall c v b,
   is_compare_neq_zero c = true ->
-  eval_condition c (v :: nil) = Some b ->
+  eval_condition c (v :: nil) m = Some b ->
   Val.bool_of_val v b.
 Proof.
   intros.
@@ -117,7 +117,7 @@ Qed.
 Lemma is_compare_eq_zero_correct:
   forall c v b,
   is_compare_eq_zero c = true ->
-  eval_condition c (v :: nil) = Some b ->
+  eval_condition c (v :: nil) m = Some b ->
   Val.bool_of_val v (negb b).
 Proof.
   intros. apply is_compare_neq_zero_correct with (negate_condition c).
@@ -145,8 +145,8 @@ Proof.
   eapply eval_base_condition_of_expr; eauto.
 
   inv H0. simpl in H7.
-  assert (eval_condition c vl = Some b).
-    destruct (eval_condition c vl); try discriminate.
+  assert (eval_condition c vl m = Some b).
+    destruct (eval_condition c vl m); try discriminate.
     destruct b0; inv H7; inversion H1; congruence.
   assert (eval_condexpr ge sp e m le (CEcond c e0) b).
     eapply eval_CEcond; eauto.
@@ -230,7 +230,7 @@ Lemma eval_sel_binop:
   forall le op a1 a2 v1 v2 v,
   eval_expr ge sp e m le a1 v1 ->
   eval_expr ge sp e m le a2 v2 ->
-  eval_binop op v1 v2 = Some v ->
+  eval_binop op v1 v2 m = Some v ->
   eval_expr ge sp e m le (sel_binop op a1 a2) v.
 Proof.
   destruct op; simpl; intros; FuncInv; try subst v.
@@ -266,6 +266,8 @@ Proof.
   apply eval_comp_int; auto.
   eapply eval_comp_int_ptr; eauto.
   eapply eval_comp_ptr_int; eauto.
+  destruct (Mem.valid_pointer m b (Int.signed i) &&
+            Mem.valid_pointer m b0 (Int.signed i0)) as [] _eqn; try congruence.
   destruct (eq_block b b0); inv H1.
   eapply eval_comp_ptr_ptr; eauto.
   eapply eval_comp_ptr_ptr_2; eauto.

@@ -254,7 +254,7 @@ Definition eval_compare_null (c: comparison) (n: int) : option val :=
   if Int.eq n Int.zero then eval_compare_mismatch c else None.
 
 Definition eval_binop
-            (op: binary_operation) (arg1 arg2: val): option val :=
+            (op: binary_operation) (arg1 arg2: val) (m: mem): option val :=
   match op, arg1, arg2 with
   | Oadd, Vint n1, Vint n2 => Some (Vint (Int.add n1 n2))
   | Oadd, Vint n1, Vptr b2 n2 => Some (Vptr b2 (Int.add n2 n1))
@@ -288,9 +288,12 @@ Definition eval_binop
   | Ocmp c, Vint n1, Vint n2 =>
       Some (Val.of_bool(Int.cmp c n1 n2))
   | Ocmp c, Vptr b1 n1, Vptr b2 n2 =>
-      if eq_block b1 b2
-      then Some(Val.of_bool(Int.cmp c n1 n2))
-      else eval_compare_mismatch c
+      if Mem.valid_pointer m b1 (Int.signed n1)
+      && Mem.valid_pointer m b2 (Int.signed n2) then
+        if eq_block b1 b2
+        then Some(Val.of_bool(Int.cmp c n1 n2))
+        else eval_compare_mismatch c
+      else None
   | Ocmp c, Vptr b1 n1, Vint n2 =>
       eval_compare_null c n2
   | Ocmp c, Vint n1, Vptr b2 n2 =>
@@ -330,7 +333,7 @@ Inductive eval_expr: expr -> val -> Prop :=
   | eval_Ebinop: forall op a1 a2 v1 v2 v,
       eval_expr a1 v1 ->
       eval_expr a2 v2 ->
-      eval_binop op v1 v2 = Some v ->
+      eval_binop op v1 v2 m = Some v ->
       eval_expr (Ebinop op a1 a2) v
   | eval_Eload: forall chunk addr vaddr v,
       eval_expr addr vaddr ->

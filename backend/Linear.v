@@ -262,7 +262,7 @@ Inductive step: state -> trace -> state -> Prop :=
         E0 (State s f sp b (Locmap.set (S sl) (rs (R r)) rs) m)
   | exec_Lop:
       forall s f sp op args res b rs m v,
-      eval_operation ge sp op (reglist rs args) = Some v ->
+      eval_operation ge sp op (reglist rs args) m = Some v ->
       step (State s f sp (Lop op args res :: b) rs m)
         E0 (State s f sp b (Locmap.set (R res) v (undef_op op rs)) m)
   | exec_Lload:
@@ -306,13 +306,13 @@ Inductive step: state -> trace -> state -> Prop :=
         E0 (State s f sp b' rs m)
   | exec_Lcond_true:
       forall s f sp cond args lbl b rs m b',
-      eval_condition cond (reglist rs args) = Some true ->
+      eval_condition cond (reglist rs args) m = Some true ->
       find_label lbl f.(fn_code) = Some b' ->
       step (State s f sp (Lcond cond args lbl :: b) rs m)
         E0 (State s f sp b' (undef_temps rs) m)
   | exec_Lcond_false:
       forall s f sp cond args lbl b rs m,
-      eval_condition cond (reglist rs args) = Some false ->
+      eval_condition cond (reglist rs args) m = Some false ->
       step (State s f sp (Lcond cond args lbl :: b) rs m)
         E0 (State s f sp b (undef_temps rs) m)
   | exec_Ljumptable:

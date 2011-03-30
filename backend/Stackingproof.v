@@ -2275,7 +2275,7 @@ Proof.
     eapply type_of_operation_sound; eauto. 
     rewrite <- H4; auto.
   assert (exists v',
-          eval_operation ge (Vptr sp' Int.zero) (transl_op (make_env (function_bounds f)) op) rs0##args = Some v'
+          eval_operation ge (Vptr sp' Int.zero) (transl_op (make_env (function_bounds f)) op) rs0##args m' = Some v'
        /\ val_inject j v v').
   eapply eval_operation_inject; eauto.
   eapply match_stacks_preserves_globals; eauto.
