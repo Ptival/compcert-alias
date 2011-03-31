@@ -96,7 +96,7 @@ Record wt_function (f: function) : Prop := mk_wt_function {
   wt_function_instrs:
     forall instr, In instr f.(fn_code) -> wt_instr instr;
   wt_function_stacksize:
-    0 <= f.(fn_stacksize) <= Int.max_signed
+    0 <= f.(fn_stacksize) <= Int.max_unsigned
 }.
 
 Inductive wt_fundef: fundef -> Prop :=

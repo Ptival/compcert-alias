@@ -215,10 +215,10 @@ Definition transl_cond
   | Ccompu c, a1 :: a2 :: nil =>
       do r1 <- ireg_of a1; do r2 <- ireg_of a2; OK (Pcmp_rr r1 r2 :: k)
   | Ccompimm c n, a1 :: nil =>
-      do r1 <- ireg_of a1; OK (Pcmp_ri r1 n :: k)
-  | Ccompuimm c n, a1 :: nil =>
       do r1 <- ireg_of a1;
       OK (if Int.eq_dec n Int.zero then Ptest_rr r1 r1 :: k else Pcmp_ri r1 n :: k)
+  | Ccompuimm c n, a1 :: nil =>
+      do r1 <- ireg_of a1; OK (Pcmp_ri r1 n :: k)
   | Ccompf cmp, a1 :: a2 :: nil =>
       do r1 <- freg_of a1; do r2 <- freg_of a2; OK (floatcomp cmp r1 r2 :: k)
   | Cnotcompf cmp, a1 :: a2 :: nil =>

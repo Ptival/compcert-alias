@@ -77,7 +77,7 @@ Lemma unfold_transf_function:
 Proof.
   generalize TRANSF_F. unfold transf_function.
   destruct (zlt (Linear.fn_stacksize f) 0). intros; discriminate.
-  destruct (zlt Int.max_signed (fe_size (make_env (function_bounds f)) + Linear.fn_stacksize f)).
+  destruct (zlt Int.max_unsigned (fe_size (make_env (function_bounds f)) + Linear.fn_stacksize f)).
   intros; discriminate.
   intros. unfold fe. unfold b. congruence.
 Qed.
@@ -89,11 +89,11 @@ Proof.
   auto.
 Qed.
 
-Lemma size_no_overflow: fe.(fe_size) + f.(Linear.fn_stacksize) <= Int.max_signed.
+Lemma size_no_overflow: fe.(fe_size) + f.(Linear.fn_stacksize) <= Int.max_unsigned.
 Proof.
   generalize TRANSF_F. unfold transf_function.
   destruct (zlt (Linear.fn_stacksize f) 0). intros; discriminate.
-  destruct (zlt Int.max_signed (fe_size (make_env (function_bounds f)) + Linear.fn_stacksize f)).
+  destruct (zlt Int.max_unsigned (fe_size (make_env (function_bounds f)) + Linear.fn_stacksize f)).
   intros; discriminate.
   intros. unfold fe,b. omega.
 Qed.
@@ -292,12 +292,12 @@ Qed.
 Lemma offset_of_index_no_overflow:
   forall idx,
   index_valid idx ->
-  Int.signed (Int.repr (offset_of_index fe idx)) = offset_of_index fe idx.
+  Int.unsigned (Int.repr (offset_of_index fe idx)) = offset_of_index fe idx.
 Proof.
   intros.
   generalize (offset_of_index_valid idx H). intros [A B].
-  apply Int.signed_repr.
-  split. apply Zle_trans with 0; auto. compute; intro; discriminate.
+  apply Int.unsigned_repr.
+  split. auto.
   assert (offset_of_index fe idx < fe_size fe).
     generalize (AST.typesize_pos (type_of_index idx)); intro. omega.
   generalize size_no_overflow. generalize stacksize_pos. omega.
@@ -307,15 +307,14 @@ Qed.
 
 Lemma shifted_stack_offset_no_overflow:
   forall ofs,
-  0 <= Int.signed ofs < Linear.fn_stacksize f ->
-  Int.signed (Int.add ofs (Int.repr fe.(fe_size))) = Int.signed ofs + fe.(fe_size).
+  0 <= Int.unsigned ofs < Linear.fn_stacksize f ->
+  Int.unsigned (Int.add ofs (Int.repr fe.(fe_size))) = Int.unsigned ofs + fe.(fe_size).
 Proof.
-  intros. rewrite Int.add_signed.
+  intros. unfold Int.add.
   generalize stacksize_pos, size_no_overflow, size_pos; intros.
-  assert (Int.min_signed < 0). compute; auto.
-  replace (Int.signed (Int.repr (fe_size fe))) with (fe_size fe).
-  apply Int.signed_repr. omega. 
-  symmetry. apply Int.signed_repr. omega.
+  replace (Int.unsigned (Int.repr (fe_size fe))) with (fe_size fe).
+  apply Int.unsigned_repr. omega. 
+  symmetry. apply Int.unsigned_repr. omega.
 Qed.
 
 (** * Contents of frame slots *)
@@ -333,7 +332,7 @@ Lemma index_contains_load_stack:
               (Int.repr (offset_of_index fe idx)) = Some v.
 Proof.
   intros. inv H. 
-  unfold load_stack. simpl. rewrite Int.add_commut. rewrite Int.add_zero.
+  unfold load_stack, Mem.loadv, Val.add. rewrite Int.add_commut. rewrite Int.add_zero.
   rewrite offset_of_index_no_overflow; auto.
 Qed.
 
@@ -420,7 +419,8 @@ Lemma store_stack_succeeds:
   Mem.store (chunk_of_type (type_of_index idx)) m sp (offset_of_index fe idx) v = Some m' ->
   store_stack m (Vptr sp Int.zero) (type_of_index idx) (Int.repr (offset_of_index fe idx)) v = Some m'.
 Proof.
-  intros. unfold store_stack. simpl. rewrite Int.add_commut. rewrite Int.add_zero.
+  intros. unfold store_stack, Mem.storev, Val.add.
+  rewrite Int.add_commut. rewrite Int.add_zero.
   rewrite offset_of_index_no_overflow; auto.
 Qed.
 
@@ -897,6 +897,7 @@ Lemma agree_frame_parallel_stores:
   Mem.storev chunk m' addr' v' = Some m1' ->
   agree_frame j ls ls0 m1 sp m1' sp' parent retaddr.
 Proof.
+Opaque Int.add.
   intros until m1'. intros AG MINJ VINJ STORE1 STORE2.
   inv VINJ; simpl in *; try discriminate.
   eapply agree_frame_invariant; eauto.
@@ -910,7 +911,7 @@ Proof.
     exploit Mem.store_valid_access_3. eexact STORE1. intros [A B].
     exploit Mem.range_perm_in_bounds. eexact A. generalize (size_chunk_pos chunk); omega.
     rewrite (agree_bounds _ _ _ _ _ _ _ _ _ AG). unfold fst,snd. intros [C D].
-    left. rewrite shifted_stack_offset_no_overflow; auto. omega.
+    left. rewrite shifted_stack_offset_no_overflow. omega.
     generalize (size_chunk_pos chunk); omega. 
   intros; eauto with mem.
 Qed.

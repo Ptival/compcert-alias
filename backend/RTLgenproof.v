@@ -419,6 +419,7 @@ Lemma transl_switch_correct:
   nth_error nexits act = Some nd /\
   match_env map e nil rs'.
 Proof.
+  Opaque Int.sub.
   induction 1; simpl; intros.
 (* action *)
   inv H3. exists n; exists rs; intuition.

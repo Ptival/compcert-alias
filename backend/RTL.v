@@ -271,7 +271,7 @@ Inductive step: state -> trace -> state -> Prop :=
       forall s f sp pc rs m arg tbl n pc',
       (fn_code f)!pc = Some(Ijumptable arg tbl) ->
       rs#arg = Vint n ->
-      list_nth_z tbl (Int.signed n) = Some pc' ->
+      list_nth_z tbl (Int.unsigned n) = Some pc' ->
       step (State s f sp pc rs m)
         E0 (State s f sp pc' rs m)
   | exec_Ireturn:

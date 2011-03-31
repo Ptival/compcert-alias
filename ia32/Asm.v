@@ -601,7 +601,7 @@ Definition exec_instr (c: code) (i: instruction) (rs: regset) (m: mem) : outcome
   | Pjmptbl r tbl =>
       match rs#r with
       | Vint n => 
-          match list_nth_z tbl (Int.signed n) with
+          match list_nth_z tbl (Int.unsigned n) with
           | None => Stuck
           | Some lbl => goto_label c lbl (rs #ECX <- Vundef #EDX <- Vundef) m
           end

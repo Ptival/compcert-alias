@@ -318,7 +318,7 @@ Inductive step: state -> trace -> state -> Prop :=
   | exec_Ljumptable:
       forall s f sp arg tbl b rs m n lbl b',
       rs (R arg) = Vint n ->
-      list_nth_z tbl (Int.signed n) = Some lbl ->
+      list_nth_z tbl (Int.unsigned n) = Some lbl ->
       find_label lbl f.(fn_code) = Some b' ->
       step (State s f sp (Ljumptable arg tbl :: b) rs m)
         E0 (State s f sp b' (undef_temps rs) m)

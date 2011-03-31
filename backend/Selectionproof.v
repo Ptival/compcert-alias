@@ -86,7 +86,7 @@ Lemma eval_base_condition_of_expr:
   eval_expr ge sp e m le a v ->
   Val.bool_of_val v b ->
   eval_condexpr ge sp e m le 
-                (CEcond (Ccompimm Cne Int.zero) (a ::: Enil))
+                (CEcond (Ccompuimm Cne Int.zero) (a ::: Enil))
                 b.
 Proof.
   intros. 
@@ -107,11 +107,12 @@ Proof.
 
   simpl in H0. destruct v; inv H0. 
   generalize (Int.eq_spec i Int.zero). destruct (Int.eq i Int.zero); intros; simpl.
-  subst i; constructor. constructor; auto. constructor.
+  subst i; constructor. constructor; auto.
 
   simpl in H0. destruct v; inv H0. 
   generalize (Int.eq_spec i Int.zero). destruct (Int.eq i Int.zero); intros; simpl.
   subst i; constructor. constructor; auto.
+  constructor.
 Qed.
 
 Lemma is_compare_eq_zero_correct:
@@ -263,15 +264,15 @@ Proof.
   apply eval_subf; auto.
   apply eval_mulf; auto.
   apply eval_divf; auto.
-  apply eval_comp_int; auto.
-  eapply eval_comp_int_ptr; eauto.
-  eapply eval_comp_ptr_int; eauto.
-  destruct (Mem.valid_pointer m b (Int.signed i) &&
-            Mem.valid_pointer m b0 (Int.signed i0)) as [] _eqn; try congruence.
+  apply eval_comp; auto.
+  eapply eval_compu_int; eauto.
+  eapply eval_compu_int_ptr; eauto.
+  eapply eval_compu_ptr_int; eauto.
+  destruct (Mem.valid_pointer m b (Int.unsigned i) &&
+            Mem.valid_pointer m b0 (Int.unsigned i0)) as [] _eqn; try congruence.
   destruct (eq_block b b0); inv H1.
-  eapply eval_comp_ptr_ptr; eauto.
-  eapply eval_comp_ptr_ptr_2; eauto.
-  eapply eval_compu; eauto.
+  eapply eval_compu_ptr_ptr; eauto.
+  eapply eval_compu_ptr_ptr_2; eauto.
   eapply eval_compf; eauto.
 Qed.
 

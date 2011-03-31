@@ -2685,6 +2685,28 @@ Proof.
   omega. omega.
 Qed.
 
+Lemma translate_ltu:
+  forall x y d,
+  0 <= unsigned x + unsigned d <= max_unsigned ->
+  0 <= unsigned y + unsigned d <= max_unsigned ->
+  ltu (add x d) (add y d) = ltu x y.
+Proof.
+  intros. unfold add. unfold ltu.
+  repeat rewrite unsigned_repr; auto. case (zlt (unsigned x) (unsigned y)); intro.
+  apply zlt_true. omega.
+  apply zlt_false. omega.
+Qed.
+
+Theorem translate_cmpu:
+  forall c x y d,
+  0 <= unsigned x + unsigned d <= max_unsigned ->
+  0 <= unsigned y + unsigned d <= max_unsigned ->
+  cmpu c (add x d) (add y d) = cmpu c x y.
+Proof.
+  intros. unfold cmpu.
+  rewrite translate_eq. repeat rewrite translate_ltu; auto.
+Qed.  
+
 Lemma translate_lt:
   forall x y d,
   min_signed <= signed x + signed d <= max_signed ->

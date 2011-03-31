@@ -225,13 +225,13 @@ Proof.
   caseEq (intval app r1); intros.
   simpl. rewrite (intval_correct _ _ H). 
   destruct (rs#r2); auto. rewrite Int.swap_cmp. auto.
-  destruct c; reflexivity.
   caseEq (intval app r2); intros.
   simpl. rewrite (intval_correct _ _ H0). auto.
   auto.
   caseEq (intval app r1); intros.
   simpl. rewrite (intval_correct _ _ H). 
   destruct (rs#r2); auto. rewrite Int.swap_cmpu. auto.
+  destruct c; reflexivity.
   caseEq (intval app r2); intros.
   simpl. rewrite (intval_correct _ _ H0). auto.
   auto.

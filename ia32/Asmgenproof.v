@@ -1029,7 +1029,7 @@ Lemma exec_Mjumptable_prop:
          (rs : mreg -> val) (m : mem) (n : int) (lbl : Mach.label)
          (c' : Mach.code),
   rs arg = Vint n ->
-  list_nth_z tbl (Int.signed n) = Some lbl ->
+  list_nth_z tbl (Int.unsigned n) = Some lbl ->
   Genv.find_funct_ptr ge fb = Some (Internal f) ->
   Mach.find_label lbl (fn_code f) = Some c' ->
   exec_instr_prop

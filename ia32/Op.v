@@ -153,25 +153,25 @@ Definition eval_condition (cond: condition) (vl: list val) (m: mem):
   match cond, vl with
   | Ccomp c, Vint n1 :: Vint n2 :: nil =>
       Some (Int.cmp c n1 n2)
-  | Ccomp c, Vptr b1 n1 :: Vptr b2 n2 :: nil =>
-      if Mem.valid_pointer m b1 (Int.signed n1)
-      && Mem.valid_pointer m b2 (Int.signed n2) then
-        if eq_block b1 b2
-        then Some (Int.cmp c n1 n2)
-        else eval_compare_mismatch c
-      else None
-  | Ccomp c, Vptr b1 n1 :: Vint n2 :: nil =>
-      eval_compare_null c n2
-  | Ccomp c, Vint n1 :: Vptr b2 n2 :: nil =>
-      eval_compare_null c n1
   | Ccompu c, Vint n1 :: Vint n2 :: nil =>
       Some (Int.cmpu c n1 n2)
+  | Ccompu c, Vptr b1 n1 :: Vptr b2 n2 :: nil =>
+      if Mem.valid_pointer m b1 (Int.unsigned n1)
+      && Mem.valid_pointer m b2 (Int.unsigned n2) then
+        if eq_block b1 b2
+        then Some (Int.cmpu c n1 n2)
+        else eval_compare_mismatch c
+      else None
+  | Ccompu c, Vptr b1 n1 :: Vint n2 :: nil =>
+      eval_compare_null c n2
+  | Ccompu c, Vint n1 :: Vptr b2 n2 :: nil =>
+      eval_compare_null c n1
   | Ccompimm c n, Vint n1 :: nil =>
       Some (Int.cmp c n1 n)
-  | Ccompimm c n, Vptr b1 n1 :: nil =>
-      eval_compare_null c n
   | Ccompuimm c n, Vint n1 :: nil =>
       Some (Int.cmpu c n1 n)
+  | Ccompuimm c n, Vptr b1 n1 :: nil =>
+      eval_compare_null c n
   | Ccompf c, Vfloat f1 :: Vfloat f2 :: nil =>
       Some (Float.cmp c f1 f2)
   | Cnotcompf c, Vfloat f1 :: Vfloat f2 :: nil =>
@@ -351,17 +351,17 @@ Proof.
   intros. 
   destruct cond; simpl in H; FuncInv; try subst b; simpl.
   rewrite Int.negate_cmp. auto.
+  rewrite Int.negate_cmpu. auto.
   apply eval_negate_compare_null; auto.
   apply eval_negate_compare_null; auto.
-  destruct (Mem.valid_pointer m b0 (Int.signed i) &&
-           Mem.valid_pointer m b1 (Int.signed i0)); try discriminate.
+  destruct (Mem.valid_pointer m b0 (Int.unsigned i) &&
+           Mem.valid_pointer m b1 (Int.unsigned i0)); try discriminate.
   destruct (eq_block b0 b1); try discriminate.
-   rewrite Int.negate_cmp. congruence.
+  rewrite Int.negate_cmpu. congruence.
   apply eval_negate_compare_mismatch; auto. 
-  rewrite Int.negate_cmpu. auto.
   rewrite Int.negate_cmp. auto.
-  apply eval_negate_compare_null; auto.
   rewrite Int.negate_cmpu. auto.
+  apply eval_negate_compare_null; auto.
   auto.
   rewrite negb_elim. auto.
   auto.
@@ -690,8 +690,8 @@ Proof.
   unfold eval_condition in H; destruct c; FuncInv;
   try subst b; try reflexivity; simpl;
   try (apply eval_compare_null_weaken; auto).
-  destruct (Mem.valid_pointer m b0 (Int.signed i) &&
-           Mem.valid_pointer m b1 (Int.signed i0)); try discriminate.
+  destruct (Mem.valid_pointer m b0 (Int.unsigned i) &&
+           Mem.valid_pointer m b1 (Int.unsigned i0)); try discriminate.
   unfold eq_block in H. destruct (zeq b0 b1).
   congruence.
   apply eval_compare_mismatch_weaken; auto.
@@ -795,8 +795,8 @@ Lemma eval_condition_lessdef:
   eval_condition cond vl2 m2 = Some b.
 Proof.
   intros. destruct cond; simpl in *; FuncInv; InvLessdef; auto.
-  destruct (Mem.valid_pointer m1 b0 (Int.signed i) &&
-            Mem.valid_pointer m1 b1 (Int.signed i0)) as [] _eqn; try discriminate.
+  destruct (Mem.valid_pointer m1 b0 (Int.unsigned i) &&
+            Mem.valid_pointer m1 b1 (Int.unsigned i0)) as [] _eqn; try discriminate.
   destruct (andb_prop _ _ Heqb2) as [A B].
   assert (forall b ofs, Mem.valid_pointer m1 b ofs = true -> Mem.valid_pointer m2 b ofs = true).
     intros until ofs. repeat rewrite Mem.valid_pointer_nonempty_perm. 
@@ -923,8 +923,8 @@ Lemma eval_condition_inject:
   eval_condition cond vl2 m2 = Some b.
 Proof.
   intros. destruct cond; simpl in *; FuncInv; InvInject; auto.
-  destruct (Mem.valid_pointer m1 b0 (Int.signed i)) as [] _eqn; try discriminate.
-  destruct (Mem.valid_pointer m1 b1 (Int.signed i0)) as [] _eqn; try discriminate.
+  destruct (Mem.valid_pointer m1 b0 (Int.unsigned i)) as [] _eqn; try discriminate.
+  destruct (Mem.valid_pointer m1 b1 (Int.unsigned i0)) as [] _eqn; try discriminate.
   simpl in H1.
   exploit Mem.valid_pointer_inject_val. eauto. eexact Heqb0. econstructor; eauto. 
   intros V1. rewrite V1.
@@ -933,15 +933,15 @@ Proof.
   simpl. 
   destruct (eq_block b0 b1); inv H1.
   rewrite H3 in H5; inv H5. rewrite dec_eq_true.
-  decEq. apply Int.translate_cmp.
+  decEq. apply Int.translate_cmpu.
   eapply Mem.valid_pointer_inject_no_overflow; eauto.
   eapply Mem.valid_pointer_inject_no_overflow; eauto.
   exploit Mem.different_pointers_inject; eauto. intros P.
   destruct (eq_block b3 b4); auto.
   destruct P. contradiction.
   destruct c; unfold eval_compare_mismatch in *; inv H2. 
-  unfold Int.cmp. rewrite Int.eq_false; auto. congruence. 
-  unfold Int.cmp. rewrite Int.eq_false; auto. congruence.
+  unfold Int.cmpu. rewrite Int.eq_false; auto. congruence. 
+  unfold Int.cmpu. rewrite Int.eq_false; auto. congruence.
 Qed.
 
 Ltac TrivialExists2 :=
@@ -1099,7 +1099,7 @@ Definition is_trivial_op (op: operation) : bool :=
 
 Definition op_depends_on_memory (op: operation) : bool :=
   match op with
-  | Ocmp (Ccomp _) => true
+  | Ocmp (Ccompu _) => true
   | _ => false
   end.
 

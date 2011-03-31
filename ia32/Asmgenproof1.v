@@ -1009,77 +1009,7 @@ Proof.
   destruct (Int.lt n1 n2); auto.
 Qed.
 
-Lemma testcond_for_signed_comparison_correct_pi:
-  forall c blk n1 n2 rs b,
-  eval_compare_null c n2 = Some b ->
-  eval_testcond (testcond_for_signed_comparison c)
-                (nextinstr (compare_ints (Vptr blk n1) (Vint n2) rs)) = Some b.
-Proof.
-  intros.
-  revert H. unfold eval_compare_null. 
-  generalize (Int.eq_spec n2 Int.zero); destruct (Int.eq n2 Int.zero); intros; try discriminate.
-  subst n2.
-  generalize (compare_ints_spec rs (Vptr blk n1) (Vint Int.zero)).
-  set (rs' := nextinstr (compare_ints (Vptr blk n1) (Vint Int.zero) rs)). 
-  intros [A [B [C D]]].
-  unfold eval_testcond. rewrite A; rewrite B; rewrite C.
-  destruct c; simpl; try discriminate.
-  rewrite <- H0; auto.
-  rewrite <- H0; auto.
-Qed.
-
-Lemma testcond_for_signed_comparison_correct_ip:
-  forall c blk n1 n2 rs b,
-  eval_compare_null c n1 = Some b ->
-  eval_testcond (testcond_for_signed_comparison c)
-                (nextinstr (compare_ints (Vint n1) (Vptr blk n2) rs)) = Some b.
-Proof.
-  intros.
-  revert H. unfold eval_compare_null. 
-  generalize (Int.eq_spec n1 Int.zero); destruct (Int.eq n1 Int.zero); intros; try discriminate.
-  subst n1.
-  generalize (compare_ints_spec rs (Vint Int.zero) (Vptr blk n2)).
-  set (rs' := nextinstr (compare_ints (Vint Int.zero) (Vptr blk n2) rs)). 
-  intros [A [B [C D]]].
-  unfold eval_testcond. rewrite A; rewrite B; rewrite C.
-  destruct c; simpl; try discriminate.
-  rewrite <- H0; auto.
-  rewrite <- H0; auto.
-Qed.
-
-Lemma testcond_for_signed_comparison_correct_pp:
-  forall c b1 n1 b2 n2 rs m b,
-  (if Mem.valid_pointer m b1 (Int.signed n1) && Mem.valid_pointer m b2 (Int.signed n2) 
-   then if eq_block b1 b2 then Some (Int.cmp c n1 n2) else eval_compare_mismatch c
-   else None) = Some b ->
-  eval_testcond (testcond_for_signed_comparison c)
-                (nextinstr (compare_ints (Vptr b1 n1) (Vptr b2 n2) rs)) =
-  Some b.
-Proof.
-  intros.
-  destruct (Mem.valid_pointer m b1 (Int.signed n1) && Mem.valid_pointer m b2 (Int.signed n2)); try discriminate.
-  generalize (compare_ints_spec rs (Vptr b1 n1) (Vptr b2 n2)).
-  set (rs' := nextinstr (compare_ints (Vptr b1 n1) (Vptr b2 n2) rs)). 
-  intros [A [B [C D]]]. unfold eq_block in H.
-  unfold eval_testcond. rewrite A; rewrite B; rewrite C.
-  destruct c; simpl.
-  destruct (zeq b1 b2). inversion H. destruct (Int.eq n1 n2); auto.
-  rewrite <- H; auto.
-  destruct (zeq b1 b2). inversion H. destruct (Int.eq n1 n2); auto.
-  rewrite <- H; auto.
-  destruct (zeq b1 b2). inversion H. destruct (Int.lt n1 n2); auto.
-  discriminate.
-  destruct (zeq b1 b2). inversion H. 
-  rewrite int_not_lt. destruct (Int.lt n1 n2); destruct (Int.eq n1 n2); auto.
-  discriminate.
-  destruct (zeq b1 b2). inversion H. 
-  rewrite (int_lt_not n1 n2). destruct (Int.lt n1 n2); destruct (Int.eq n1 n2); auto.
-  discriminate.
-  destruct (zeq b1 b2). inversion H. destruct (Int.lt n1 n2); auto.
-  discriminate.
-Qed.
-
-Lemma testcond_for_unsigned_comparison_correct:
+Lemma testcond_for_unsigned_comparison_correct_ii:
   forall c n1 n2 rs,
   eval_testcond (testcond_for_unsigned_comparison c)
                 (nextinstr (compare_ints (Vint n1) (Vint n2) rs)) =
@@ -1096,6 +1026,76 @@ Proof.
   rewrite int_not_ltu. destruct (Int.ltu n1 n2); destruct (Int.eq n1 n2); auto.
   rewrite (int_ltu_not n1 n2). destruct (Int.ltu n1 n2); destruct (Int.eq n1 n2); auto.
   destruct (Int.ltu n1 n2); auto.
+Qed.
+
+Lemma testcond_for_unsigned_comparison_correct_pi:
+  forall c blk n1 n2 rs b,
+  eval_compare_null c n2 = Some b ->
+  eval_testcond (testcond_for_unsigned_comparison c)
+                (nextinstr (compare_ints (Vptr blk n1) (Vint n2) rs)) = Some b.
+Proof.
+  intros.
+  revert H. unfold eval_compare_null. 
+  generalize (Int.eq_spec n2 Int.zero); destruct (Int.eq n2 Int.zero); intros; try discriminate.
+  subst n2.
+  generalize (compare_ints_spec rs (Vptr blk n1) (Vint Int.zero)).
+  set (rs' := nextinstr (compare_ints (Vptr blk n1) (Vint Int.zero) rs)). 
+  intros [A [B [C D]]].
+  unfold eval_testcond. rewrite A; rewrite B; rewrite C.
+  destruct c; simpl; try discriminate.
+  rewrite <- H0; auto.
+  rewrite <- H0; auto.
+Qed.
+
+Lemma testcond_for_unsigned_comparison_correct_ip:
+  forall c blk n1 n2 rs b,
+  eval_compare_null c n1 = Some b ->
+  eval_testcond (testcond_for_unsigned_comparison c)
+                (nextinstr (compare_ints (Vint n1) (Vptr blk n2) rs)) = Some b.
+Proof.
+  intros.
+  revert H. unfold eval_compare_null. 
+  generalize (Int.eq_spec n1 Int.zero); destruct (Int.eq n1 Int.zero); intros; try discriminate.
+  subst n1.
+  generalize (compare_ints_spec rs (Vint Int.zero) (Vptr blk n2)).
+  set (rs' := nextinstr (compare_ints (Vint Int.zero) (Vptr blk n2) rs)). 
+  intros [A [B [C D]]].
+  unfold eval_testcond. rewrite A; rewrite B; rewrite C.
+  destruct c; simpl; try discriminate.
+  rewrite <- H0; auto.
+  rewrite <- H0; auto.
+Qed.
+
+Lemma testcond_for_unsigned_comparison_correct_pp:
+  forall c b1 n1 b2 n2 rs m b,
+  (if Mem.valid_pointer m b1 (Int.unsigned n1) && Mem.valid_pointer m b2 (Int.unsigned n2) 
+   then if eq_block b1 b2 then Some (Int.cmpu c n1 n2) else eval_compare_mismatch c
+   else None) = Some b ->
+  eval_testcond (testcond_for_unsigned_comparison c)
+                (nextinstr (compare_ints (Vptr b1 n1) (Vptr b2 n2) rs)) =
+  Some b.
+Proof.
+  intros.
+  destruct (Mem.valid_pointer m b1 (Int.unsigned n1) && Mem.valid_pointer m b2 (Int.unsigned n2)); try discriminate.
+  generalize (compare_ints_spec rs (Vptr b1 n1) (Vptr b2 n2)).
+  set (rs' := nextinstr (compare_ints (Vptr b1 n1) (Vptr b2 n2) rs)). 
+  intros [A [B [C D]]]. unfold eq_block in H.
+  unfold eval_testcond. rewrite A; rewrite B; rewrite C.
+  destruct c; simpl.
+  destruct (zeq b1 b2). inversion H. destruct (Int.eq n1 n2); auto.
+  rewrite <- H; auto.
+  destruct (zeq b1 b2). inversion H. destruct (Int.eq n1 n2); auto.
+  rewrite <- H; auto.
+  destruct (zeq b1 b2). inversion H. destruct (Int.ltu n1 n2); auto.
+  discriminate.
+  destruct (zeq b1 b2). inversion H. 
+  rewrite int_not_ltu. destruct (Int.ltu n1 n2); destruct (Int.eq n1 n2); auto.
+  discriminate.
+  destruct (zeq b1 b2). inversion H. 
+  rewrite (int_ltu_not n1 n2). destruct (Int.ltu n1 n2); destruct (Int.eq n1 n2); auto.
+  discriminate.
+  destruct (zeq b1 b2). inversion H. destruct (Int.ltu n1 n2); auto.
+  discriminate.
 Qed.
 
 Lemma compare_floats_spec:
@@ -1231,25 +1231,18 @@ Proof.
   econstructor. split. apply exec_straight_one. simpl. eauto. auto.
   split. simpl in H0. FuncInv.
   subst b. apply testcond_for_signed_comparison_correct_ii. 
-  apply testcond_for_signed_comparison_correct_ip; auto. 
-  apply testcond_for_signed_comparison_correct_pi; auto.
-  eapply testcond_for_signed_comparison_correct_pp; eauto.
   intros. unfold compare_ints. repeat SOther.
 (* compu *)
   simpl map in H0. 
   rewrite (ireg_of_eq _ _ EQ) in H0. rewrite (ireg_of_eq _ _ EQ1) in H0.
   econstructor. split. apply exec_straight_one. simpl. eauto. auto.
   split. simpl in H0. FuncInv.
-  subst b. apply testcond_for_unsigned_comparison_correct. 
+  subst b. apply testcond_for_unsigned_comparison_correct_ii. 
+  apply testcond_for_unsigned_comparison_correct_ip; auto. 
+  apply testcond_for_unsigned_comparison_correct_pi; auto.
+  eapply testcond_for_unsigned_comparison_correct_pp; eauto.
   intros. unfold compare_ints. repeat SOther.
 (* compimm *)
-  simpl map in H0. rewrite (ireg_of_eq _ _ EQ) in H0.
-  econstructor. split. apply exec_straight_one. simpl; eauto. auto.
-  split. simpl in H0. FuncInv. 
-  subst b. apply testcond_for_signed_comparison_correct_ii. 
-  apply testcond_for_signed_comparison_correct_pi; auto.
-  intros. unfold compare_ints. repeat SOther.
-(* compuimm *)
   simpl map in H0. rewrite (ireg_of_eq _ _ EQ) in H0.
   exists (nextinstr (compare_ints (rs x) (Vint i) rs)).
   split. destruct (Int.eq_dec i Int.zero). 
@@ -1257,7 +1250,14 @@ Proof.
   simpl in H0. FuncInv. simpl. rewrite Int.and_idem. auto. auto.
   apply exec_straight_one; auto.
   split. simpl in H0. FuncInv.
-  subst b. apply testcond_for_unsigned_comparison_correct.
+  subst b. apply testcond_for_signed_comparison_correct_ii.
+  intros. unfold compare_ints. repeat SOther.
+(* compuimm *)
+  simpl map in H0. rewrite (ireg_of_eq _ _ EQ) in H0.
+  econstructor. split. apply exec_straight_one. simpl; eauto. auto.
+  split. simpl in H0. FuncInv. 
+  subst b. apply testcond_for_unsigned_comparison_correct_ii. 
+  apply testcond_for_unsigned_comparison_correct_pi; auto.
   intros. unfold compare_ints. repeat SOther.
 (* compf *)
   simpl map in H0. rewrite (freg_of_eq _ _ EQ) in H0. rewrite (freg_of_eq _ _ EQ1) in H0.

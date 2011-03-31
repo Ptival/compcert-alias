@@ -287,19 +287,19 @@ Definition eval_binop
   | Odivf, Vfloat f1, Vfloat f2 => Some (Vfloat (Float.div f1 f2))
   | Ocmp c, Vint n1, Vint n2 =>
       Some (Val.of_bool(Int.cmp c n1 n2))
-  | Ocmp c, Vptr b1 n1, Vptr b2 n2 =>
-      if Mem.valid_pointer m b1 (Int.signed n1)
-      && Mem.valid_pointer m b2 (Int.signed n2) then
-        if eq_block b1 b2
-        then Some(Val.of_bool(Int.cmp c n1 n2))
-        else eval_compare_mismatch c
-      else None
-  | Ocmp c, Vptr b1 n1, Vint n2 =>
-      eval_compare_null c n2
-  | Ocmp c, Vint n1, Vptr b2 n2 =>
-      eval_compare_null c n1
   | Ocmpu c, Vint n1, Vint n2 =>
       Some (Val.of_bool(Int.cmpu c n1 n2))
+  | Ocmpu c, Vptr b1 n1, Vptr b2 n2 =>
+      if Mem.valid_pointer m b1 (Int.unsigned n1)
+      && Mem.valid_pointer m b2 (Int.unsigned n2) then
+        if eq_block b1 b2
+        then Some(Val.of_bool(Int.cmpu c n1 n2))
+        else eval_compare_mismatch c
+      else None
+  | Ocmpu c, Vptr b1 n1, Vint n2 =>
+      eval_compare_null c n2
+  | Ocmpu c, Vint n1, Vptr b2 n2 =>
+      eval_compare_null c n1
   | Ocmpf c, Vfloat f1, Vfloat f2 =>
       Some (Val.of_bool (Float.cmp c f1 f2))
   | _, _, _ => None

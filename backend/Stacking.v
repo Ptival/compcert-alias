@@ -193,8 +193,8 @@ Definition transl_instr
   by the translation of the function body.
 
   Subtle point: the compiler must check that the frame is no
-  larger than [- Int.min_signed] bytes, otherwise arithmetic overflows
-  could occur during frame accesses using signed machine integers as
+  larger than [Int.max_unsigned] bytes, otherwise arithmetic overflows
+  could occur during frame accesses using unsigned machine integers as
   offsets. *)
 
 Definition transl_code
@@ -210,7 +210,7 @@ Definition transf_function (f: Linear.function) : res Mach.function :=
   let fe := make_env (function_bounds f) in
   if zlt f.(Linear.fn_stacksize) 0 then
     Error (msg "Stacking.transf_function") 
-  else if zlt Int.max_signed (fe.(fe_size) + f.(Linear.fn_stacksize)) then
+  else if zlt Int.max_unsigned (fe.(fe_size) + f.(Linear.fn_stacksize)) then
     Error (msg "Too many spilled variables, stack size exceeded")
   else
     OK (Mach.mkfunction
