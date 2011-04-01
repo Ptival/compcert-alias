@@ -167,9 +167,10 @@ let int32_align n a =
 
 let sp_adjustment sz =
   let sz = camlint_of_coqint sz in
-(* Enforce stack alignment, noting that 4 bytes are already allocated
-   by the call *)
-  let sz = Int32.sub (int32_align (Int32.add sz 4l) stack_alignment) 4l in
+  (* Preserve proper alignment of the stack *)
+  let sz = int32_align sz stack_alignment in
+  (* The top 4 bytes have already been allocated by the "call" instruction. *)
+  let sz = Int32.sub sz 4l in
   assert (sz >= 0l);
   sz
 

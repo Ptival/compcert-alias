@@ -215,7 +215,6 @@ Proof.
   intros. eapply wt_transl_instr; eauto. 
   red; intros. elim H1.
   rewrite EQ; unfold fn_stacksize.
-  generalize (stacksize_pos _ _ H). 
   generalize (size_pos f).
   generalize (size_no_overflow _ _ H).
   unfold fe, b. omega.

@@ -71,32 +71,29 @@ Lemma unfold_transf_function:
   tf = Mach.mkfunction
          f.(Linear.fn_sig)
          (transl_body f fe)
-         (fe.(fe_size) + f.(Linear.fn_stacksize))
+         fe.(fe_size)
          (Int.repr fe.(fe_ofs_link))
          (Int.repr fe.(fe_ofs_retaddr)).
 Proof.
   generalize TRANSF_F. unfold transf_function.
-  destruct (zlt (Linear.fn_stacksize f) 0). intros; discriminate.
-  destruct (zlt Int.max_unsigned (fe_size (make_env (function_bounds f)) + Linear.fn_stacksize f)).
+  destruct (zlt Int.max_unsigned (fe_size (make_env (function_bounds f)))).
   intros; discriminate.
   intros. unfold fe. unfold b. congruence.
 Qed.
 
-Lemma stacksize_pos: f.(Linear.fn_stacksize) >= 0.
+Lemma size_no_overflow: fe.(fe_size) <= Int.max_unsigned.
 Proof.
   generalize TRANSF_F. unfold transf_function.
-  destruct (zlt (Linear.fn_stacksize f) 0). intros; discriminate.
-  auto.
+  destruct (zlt Int.max_unsigned (fe_size (make_env (function_bounds f)))).
+  intros; discriminate.
+  intros. unfold fe. unfold b. omega.
 Qed.
 
-Lemma size_no_overflow: fe.(fe_size) + f.(Linear.fn_stacksize) <= Int.max_unsigned.
+Remark bound_stack_data_stacksize:
+  f.(Linear.fn_stacksize) <= b.(bound_stack_data).
 Proof.
-  generalize TRANSF_F. unfold transf_function.
-  destruct (zlt (Linear.fn_stacksize f) 0). intros; discriminate.
-  destruct (zlt Int.max_unsigned (fe_size (make_env (function_bounds f)) + Linear.fn_stacksize f)).
-  intros; discriminate.
-  intros. unfold fe,b. omega.
-Qed.
+  unfold b, function_bounds, bound_stack_data. apply Zmax1.
+Qed.  
 
 (** A frame index is valid if it lies within the resource bounds
   of the current function. *)
@@ -151,12 +148,13 @@ Ltac AddPosProps :=
   generalize (bound_int_callee_save_pos b); intro;
   generalize (bound_float_callee_save_pos b); intro;
   generalize (bound_outgoing_pos b); intro;
-  generalize (align_float_part b); intro.
+  generalize (bound_stack_data_pos b); intro.
 
-Lemma size_pos: fe.(fe_size) >= 0.
+Lemma size_pos: 0 <= fe.(fe_size).
 Proof.
+  generalize (frame_env_separated b). intuition.
   AddPosProps.
-  unfold fe, make_env, fe_size. omega.
+  unfold fe. omega.
 Qed.
 
 Opaque function_bounds.
@@ -168,20 +166,46 @@ Lemma offset_of_index_disj:
   offset_of_index fe idx1 + AST.typesize (type_of_index idx1) <= offset_of_index fe idx2 \/
   offset_of_index fe idx2 + AST.typesize (type_of_index idx2) <= offset_of_index fe idx1.
 Proof.
+  intros idx1 idx2 V1 V2 DIFF.
+  generalize (frame_env_separated b). intuition. fold fe in H.
   AddPosProps.
-  intros.
   destruct idx1; destruct idx2;
   try (destruct t); try (destruct t0);
-  unfold offset_of_index, fe, make_env,
-    fe_size, fe_ofs_int_local, fe_ofs_int_callee_save,
-    fe_ofs_float_local, fe_ofs_float_callee_save,
-    fe_ofs_link, fe_ofs_retaddr, fe_ofs_arg,
-    type_of_index, AST.typesize;
-  simpl in H5; simpl in H6; simpl in H7;
+  unfold offset_of_index, type_of_index, AST.typesize;
+  simpl in V1; simpl in V2; simpl in DIFF;
   try omega.
   assert (z <> z0). intuition auto. omega.
   assert (z <> z0). intuition auto. omega.
 Qed.
+
+Lemma offset_of_index_disj_stack_data_1:
+  forall idx,
+  index_valid idx ->
+  offset_of_index fe idx + AST.typesize (type_of_index idx) <= fe.(fe_stack_data)
+  \/ fe.(fe_stack_data) + b.(bound_stack_data) <= offset_of_index fe idx.
+Proof.
+  intros idx V.
+  generalize (frame_env_separated b). intuition. fold fe in H.
+  AddPosProps.
+  destruct idx; try (destruct t);
+  unfold offset_of_index, type_of_index, AST.typesize;
+  simpl in V;
+  omega.
+Qed.
+
+Lemma offset_of_index_disj_stack_data_2:
+  forall idx,
+  index_valid idx ->
+  offset_of_index fe idx + AST.typesize (type_of_index idx) <= fe.(fe_stack_data)
+  \/ fe.(fe_stack_data) + f.(Linear.fn_stacksize) <= offset_of_index fe idx.
+Proof.
+  intros. 
+  exploit offset_of_index_disj_stack_data_1; eauto.
+  generalize bound_stack_data_stacksize. 
+  omega.
+Qed.
+
+(** Alignment properties *)
 
 Remark aligned_4_4x: forall x, (4 | 4 * x).
 Proof. intro. exists x; ring. Qed.
@@ -189,37 +213,29 @@ Proof. intro. exists x; ring. Qed.
 Remark aligned_4_8x: forall x, (4 | 8 * x).
 Proof. intro. exists (x * 2); ring. Qed.
 
-Remark aligned_4_align8: forall x, (4 | align x 8).
-Proof. 
-  intro. apply Zdivides_trans with 8. exists 2; auto. apply align_divides. omega.
-Qed.
+Remark aligned_8_4:
+  forall x, (8 | x) -> (4 | x).
+Proof. intros. apply Zdivides_trans with 8; auto. exists 2; auto. Qed.
 
-Hint Resolve Zdivide_0 Zdivide_refl Zdivide_plus_r
-             aligned_4_4x aligned_4_8x aligned_4_align8: align_4.
-
+Hint Resolve Zdivide_0 Zdivide_refl Zdivide_plus_r 
+             aligned_4_4x aligned_4_8x aligned_8_4: align_4.
 Hint Extern 4 (?X | ?Y) => (exists (Y/X); reflexivity) : align_4.
 
 Lemma offset_of_index_aligned:
   forall idx, (4 | offset_of_index fe idx).
 Proof.
   intros.
-  destruct idx;
-  unfold offset_of_index, fe, make_env,
-    fe_size, fe_ofs_int_local, fe_ofs_int_callee_save,
-    fe_ofs_float_local, fe_ofs_float_callee_save,
-    fe_ofs_link, fe_ofs_retaddr, fe_ofs_arg;
+  generalize (frame_env_aligned b). intuition. fold fe in H. intuition.
+  destruct idx; try (destruct t);
+  unfold offset_of_index, type_of_index, AST.typesize;
   auto with align_4.
-  destruct t; auto with align_4.
 Qed.
 
-Lemma frame_size_aligned:
-  (4 | fe_size fe).
+Lemma fe_stack_data_aligned:
+  (4 | fe_stack_data fe).
 Proof.
-  unfold offset_of_index, fe, make_env,
-    fe_size, fe_ofs_int_local, fe_ofs_int_callee_save,
-    fe_ofs_float_local, fe_ofs_float_callee_save,
-    fe_ofs_link, fe_ofs_retaddr, fe_ofs_arg;
-  auto with align_4.
+  intros.
+  generalize (frame_env_aligned b). intuition. fold fe in H. intuition.
 Qed.
 
 (** The following lemmas give sufficient conditions for indices
@@ -274,17 +290,24 @@ Lemma offset_of_index_valid:
   0 <= offset_of_index fe idx /\
   offset_of_index fe idx + AST.typesize (type_of_index idx) <= fe.(fe_size).
 Proof.
+  intros idx V.
+  generalize (frame_env_separated b). intros [A B]. fold fe in A. fold fe in B.
   AddPosProps.
-  intros.
-  destruct idx; try destruct t;
-  unfold offset_of_index, fe, make_env,
-    fe_size, fe_ofs_int_local, fe_ofs_int_callee_save,
-    fe_ofs_float_local, fe_ofs_float_callee_save,
-    fe_ofs_link, fe_ofs_retaddr, fe_ofs_arg,
-    type_of_index, AST.typesize;
-  unfold index_valid in H5; simpl typesize in H5;
+  destruct idx; try (destruct t);
+  unfold offset_of_index, type_of_index, AST.typesize;
+  simpl in V;
   omega.
-Qed. 
+Qed.
+
+(** The image of the Linear stack data block lies within the bounds of the frame. *)
+
+Lemma stack_data_offset_valid:
+  0 <= fe.(fe_stack_data) /\ fe.(fe_stack_data) + b.(bound_stack_data) <= fe.(fe_size).
+Proof.
+  generalize (frame_env_separated b). intros [A B]. fold fe in A. fold fe in B.
+  AddPosProps.
+  omega.
+Qed.
 
 (** Offsets for valid index are representable as signed machine integers
   without loss of precision. *)
@@ -297,10 +320,9 @@ Proof.
   intros.
   generalize (offset_of_index_valid idx H). intros [A B].
   apply Int.unsigned_repr.
-  split. auto.
-  assert (offset_of_index fe idx < fe_size fe).
-    generalize (AST.typesize_pos (type_of_index idx)); intro. omega.
-  generalize size_no_overflow. generalize stacksize_pos. omega.
+  generalize (AST.typesize_pos (type_of_index idx)).
+  generalize size_no_overflow. 
+  omega.
 Qed.
 
 (** Likewise, for offsets within the Linear stack slot, after shifting. *)
@@ -308,11 +330,13 @@ Qed.
 Lemma shifted_stack_offset_no_overflow:
   forall ofs,
   0 <= Int.unsigned ofs < Linear.fn_stacksize f ->
-  Int.unsigned (Int.add ofs (Int.repr fe.(fe_size))) = Int.unsigned ofs + fe.(fe_size).
+  Int.unsigned (Int.add ofs (Int.repr fe.(fe_stack_data))) 
+  = Int.unsigned ofs + fe.(fe_stack_data).
 Proof.
   intros. unfold Int.add.
-  generalize stacksize_pos, size_no_overflow, size_pos; intros.
-  replace (Int.unsigned (Int.repr (fe_size fe))) with (fe_size fe).
+  generalize size_no_overflow stack_data_offset_valid bound_stack_data_stacksize; intros.
+  AddPosProps.
+  replace (Int.unsigned (Int.repr (fe_stack_data fe))) with (fe_stack_data fe).
   apply Int.unsigned_repr. omega. 
   symmetry. apply Int.unsigned_repr. omega.
 Qed.
@@ -380,33 +404,52 @@ Proof.
 Qed.
 
 Lemma store_other_index_contains:
-  forall chunk m b ofs v' m' sp idx v,
-  Mem.store chunk m b ofs v' = Some m' ->
-  b <> sp \/ ofs >= fe.(fe_size) ->
+  forall chunk m blk ofs v' m' sp idx v,
+  Mem.store chunk m blk ofs v' = Some m' ->
+  blk <> sp \/
+    (fe.(fe_stack_data) <= ofs /\ ofs + size_chunk chunk <= fe.(fe_stack_data) + f.(Linear.fn_stacksize)) ->
   index_contains m sp idx v ->
   index_contains m' sp idx v.
 Proof.
   intros. inv H1. constructor; auto. rewrite <- H3. 
   eapply Mem.load_store_other; eauto. 
   destruct H0. auto. right. 
-  exploit offset_of_index_valid; eauto. intros [A B]. 
-  rewrite size_type_chunk. left. omega. 
+  exploit offset_of_index_disj_stack_data_2; eauto. intros.
+  rewrite size_type_chunk.
+  omega.
+Qed.
+
+Definition frame_perm_freeable (m: mem) (sp: block): Prop :=
+  forall ofs,
+  0 <= ofs < fe.(fe_size) ->
+  ofs < fe.(fe_stack_data) \/ fe.(fe_stack_data) + f.(Linear.fn_stacksize) <= ofs ->
+  Mem.perm m sp ofs Freeable.
+
+Lemma offset_of_index_perm:
+  forall m sp idx,
+  index_valid idx ->
+  frame_perm_freeable m sp ->
+  Mem.range_perm m sp (offset_of_index fe idx) (offset_of_index fe idx + AST.typesize (type_of_index idx)) Freeable.
+Proof.
+  intros.
+  exploit offset_of_index_valid; eauto. intros [A B].
+  exploit offset_of_index_disj_stack_data_2; eauto. intros.
+  red; intros. apply H0. omega. omega.
 Qed.
 
 Lemma store_index_succeeds:
   forall m sp idx v,
   index_valid idx ->
-  Mem.range_perm m sp 0 fe.(fe_size) Freeable ->
+  frame_perm_freeable m sp ->
   exists m',
   Mem.store (chunk_of_type (type_of_index idx)) m sp (offset_of_index fe idx) v = Some m'.
 Proof.
   intros.
   destruct (Mem.valid_access_store m (chunk_of_type (type_of_index idx)) sp (offset_of_index fe idx) v) as [m' ST].
   constructor.
-  exploit offset_of_index_valid; eauto. intros [A B].
   rewrite size_type_chunk. 
-  red; intros. apply Mem.perm_implies with Freeable; auto with mem. 
-  apply H0. omega.
+  apply Mem.range_perm_implies with Freeable; auto with mem.
+  apply offset_of_index_perm; auto.
   replace (align_chunk (chunk_of_type (type_of_index idx))) with 4.
   apply offset_of_index_aligned; auto.
   destruct (type_of_index idx); auto.
@@ -458,7 +501,8 @@ Qed.
 Lemma store_other_index_contains_inj:
   forall j chunk m b ofs v' m' sp idx v,
   Mem.store chunk m b ofs v' = Some m' ->
-  b <> sp \/ ofs >= fe.(fe_size) ->
+  b <> sp \/
+    (fe.(fe_stack_data) <= ofs /\ ofs + size_chunk chunk <= fe.(fe_stack_data) + f.(Linear.fn_stacksize)) ->
   index_contains_inj j m sp idx v ->
   index_contains_inj j m' sp idx v.
 Proof.
@@ -478,16 +522,15 @@ Qed.
 Lemma index_contains_inj_undef:
   forall j m sp idx,
   index_valid idx ->
-  Mem.range_perm m sp 0 fe.(fe_size) Freeable ->
+  frame_perm_freeable m sp ->
   index_contains_inj j m sp idx Vundef.
 Proof.
   intros. 
-  exploit offset_of_index_valid; eauto. intros [A B].
   exploit (Mem.valid_access_load m (chunk_of_type (type_of_index idx)) sp (offset_of_index fe idx)).
   constructor. 
-  rewrite size_type_chunk. red; intros. 
-  apply Mem.perm_implies with Freeable; auto with mem.
-  apply H0. omega. 
+  rewrite size_type_chunk.
+  apply Mem.range_perm_implies with Freeable; auto with mem.
+  apply offset_of_index_perm; auto. 
   replace (align_chunk (chunk_of_type (type_of_index idx))) with 4. 
   apply offset_of_index_aligned. destruct (type_of_index idx); auto.
   intros [v C]. 
@@ -557,9 +600,9 @@ Record agree_frame (j: meminj) (ls ls0: locset)
 
     (** Mapping between the Linear stack pointer and the Mach stack pointer *)
     agree_inj:
-      j sp = Some(sp', fe.(fe_size));
+      j sp = Some(sp', fe.(fe_stack_data));
     agree_inj_unique:
-      forall b delta, j b = Some(sp', delta) -> b = sp /\ delta = fe.(fe_size);
+      forall b delta, j b = Some(sp', delta) -> b = sp /\ delta = fe.(fe_stack_data);
 
     (** The Linear and Mach stack pointers are valid *)
     agree_valid_linear:
@@ -573,7 +616,7 @@ Record agree_frame (j: meminj) (ls ls0: locset)
 
     (** Permissions on the frame part of the Mach stack block *)
     agree_perm:
-      Mem.range_perm m' sp' 0 fe.(fe_size) Freeable;
+      frame_perm_freeable m' sp';
 
     (** Current locset is well-typed *)
     agree_wt_ls:
@@ -842,11 +885,12 @@ Lemma agree_frame_invariant:
   (Mem.bounds m1 sp = Mem.bounds m sp) ->
   (Mem.valid_block m' sp' -> Mem.valid_block m1' sp') ->
   (forall chunk ofs v,
-     0 <= ofs -> ofs + size_chunk chunk <= fe.(fe_size) ->
+     ofs + size_chunk chunk <= fe.(fe_stack_data) \/
+     fe.(fe_stack_data) + f.(Linear.fn_stacksize) <= ofs ->
      Mem.load chunk m' sp' ofs = Some v ->
      Mem.load chunk m1' sp' ofs = Some v) ->
   (forall ofs p,
-     0 <= ofs < fe.(fe_size) ->
+     ofs < fe.(fe_stack_data) \/ fe.(fe_stack_data) + f.(Linear.fn_stacksize) <= ofs ->
      Mem.perm m' sp' ofs p -> Mem.perm m1' sp' ofs p) ->
   agree_frame j ls ls0 m1 sp m1' sp' parent retaddr.
 Proof.
@@ -854,14 +898,14 @@ Proof.
   assert (IC: forall idx v,
               index_contains m' sp' idx v -> index_contains m1' sp' idx v).
     intros. inv H5.
-    exploit offset_of_index_valid; eauto. intros [A B].
+    exploit offset_of_index_disj_stack_data_2; eauto. intros. 
     constructor; eauto. apply H3; auto. rewrite size_type_chunk; auto.
   assert (ICI: forall idx v,
               index_contains_inj j m' sp' idx v -> index_contains_inj j m1' sp' idx v).
     intros. destruct H5 as [v' [A B]]. exists v'; split; auto. 
   inv H; constructor; auto; intros.
   rewrite H1; auto.
-  red; auto.
+  red; intros. apply H4; auto.
 Qed.
 
 (** A variant of the latter, for use with external calls *)
@@ -877,10 +921,10 @@ Lemma agree_frame_extcall_invariant:
 Proof.
   intros.
   assert (REACH: forall ofs,
-    0 <= ofs < fe_size fe ->
+     ofs < fe.(fe_stack_data) \/ fe.(fe_stack_data) + f.(Linear.fn_stacksize) <= ofs ->
     loc_out_of_reach j m sp' ofs).
   intros; red; intros. exploit agree_inj_unique; eauto. intros [EQ1 EQ2]; subst.
-  rewrite (agree_bounds _ _ _ _ _ _ _ _ _ H). unfold fst. left. omega. 
+  rewrite (agree_bounds _ _ _ _ _ _ _ _ _ H). unfold fst, snd. omega.
   eapply agree_frame_invariant; eauto.
   intros. apply H3. intros. apply REACH. omega. auto. 
   intros. apply H3; auto. 
@@ -904,14 +948,14 @@ Opaque Int.add.
   eauto with mem.
   eapply Mem.bounds_store; eauto. 
   eauto with mem.
-  intros. rewrite <- H2. eapply Mem.load_store_other; eauto. 
+  intros. rewrite <- H1. eapply Mem.load_store_other; eauto. 
     destruct (zeq sp' b2); auto.
     subst b2. right.
     exploit agree_inj_unique; eauto. intros [P Q]. subst b1 delta.
     exploit Mem.store_valid_access_3. eexact STORE1. intros [A B].
     exploit Mem.range_perm_in_bounds. eexact A. generalize (size_chunk_pos chunk); omega.
     rewrite (agree_bounds _ _ _ _ _ _ _ _ _ AG). unfold fst,snd. intros [C D].
-    left. rewrite shifted_stack_offset_no_overflow. omega.
+    rewrite shifted_stack_offset_no_overflow. omega.
     generalize (size_chunk_pos chunk); omega. 
   intros; eauto with mem.
 Qed.
@@ -1038,7 +1082,8 @@ Inductive stores_in_frame: mem -> mem -> Prop :=
   | stores_in_frame_refl: forall m,
       stores_in_frame m m
   | stores_in_frame_step: forall m1 chunk ofs v m2 m3,
-       ofs + size_chunk chunk <= fe.(fe_size) ->
+       ofs + size_chunk chunk <= fe.(fe_stack_data)
+       \/ fe.(fe_stack_data) + f.(Linear.fn_stacksize) <= ofs ->
        Mem.store chunk m1 sp ofs v = Some m2 ->
        stores_in_frame m2 m3 ->
        stores_in_frame m1 m3.
@@ -1071,7 +1116,7 @@ Lemma save_callee_save_regs_correct:
   forall l k m,
   incl l csregs ->
   list_norepet l ->
-  Mem.range_perm m sp 0 fe.(fe_size) Freeable ->
+  frame_perm_freeable m sp ->
   exists m',
     star step tge 
        (State cs fb (Vptr sp Int.zero)
@@ -1087,7 +1132,7 @@ Lemma save_callee_save_regs_correct:
        index_contains m sp idx v ->
        index_contains m' sp idx v)
   /\ stores_in_frame m m'
-  /\ Mem.range_perm m' sp 0 fe.(fe_size) Freeable.
+  /\ frame_perm_freeable m' sp.
 Proof.
   induction l; intros; simpl save_callee_save_regs.
   (* base case *)
@@ -1127,9 +1172,7 @@ Proof.
   apply C; auto with coqlib.
   eapply gso_index_contains; eauto with coqlib. 
   split. econstructor; eauto.
-  rewrite size_type_chunk. 
-  exploit offset_of_index_valid; eauto with coqlib.
-  intros [P Q]. omega.
+  rewrite size_type_chunk. apply offset_of_index_disj_stack_data_2; eauto with coqlib.
   auto.
   (* no store takes place *)
   exploit (IHl k m); auto with coqlib. 
@@ -1145,7 +1188,7 @@ End SAVE_CALLEE_SAVE.
 Lemma save_callee_save_correct:
   forall j ls rs sp cs fb k m,
   agree_regs j ls rs -> wt_locset ls ->
-  Mem.range_perm m sp 0 fe.(fe_size) Freeable ->
+  frame_perm_freeable m sp ->
   exists m',
     star step tge 
        (State cs fb (Vptr sp Int.zero) (save_callee_save fe k) rs m)
@@ -1162,7 +1205,7 @@ Lemma save_callee_save_correct:
        index_contains m sp idx v ->
        index_contains m' sp idx v)
   /\ stores_in_frame sp m m'
-  /\ Mem.range_perm m' sp 0 fe.(fe_size) Freeable.
+  /\ frame_perm_freeable m' sp.
 Proof.
   intros.
   exploit (save_callee_save_regs_correct 
@@ -1221,7 +1264,7 @@ Qed.
 
 Lemma stores_in_frame_inject:
   forall j sp sp' m,
-  (forall b delta, j b = Some(sp', delta) -> b = sp /\ delta = fe.(fe_size)) ->
+  (forall b delta, j b = Some(sp', delta) -> b = sp /\ delta = fe.(fe_stack_data)) ->
   Mem.bounds m sp = (0, f.(Linear.fn_stacksize)) ->
   forall m1 m2, stores_in_frame sp' m1 m2 -> Mem.inject j m m1 -> Mem.inject j m m2.
 Proof.
@@ -1230,7 +1273,7 @@ Proof.
   apply IHstores_in_frame.
   intros. eapply Mem.store_outside_inject; eauto.
   intros. exploit H; eauto. intros [A B]; subst.
-  right. rewrite H0; unfold fst. omega.
+  rewrite H0; unfold fst, snd. omega.
 Qed.
 
 Lemma stores_in_frame_valid:
@@ -1286,28 +1329,28 @@ Proof.
   rewrite unfold_transf_function.
   unfold fn_stacksize, fn_link_ofs, fn_retaddr_ofs.
   (* Allocation step *)
-  caseEq (Mem.alloc m1' 0 (fe_size fe + Linear.fn_stacksize f)). intros m2' sp' ALLOC'.
+  caseEq (Mem.alloc m1' 0 (fe_size fe)). intros m2' sp' ALLOC'.
   exploit Mem.alloc_left_mapped_inject.
     eapply Mem.alloc_right_inject; eauto.
     eauto.
     instantiate (1 := sp'). eauto with mem.
-    instantiate (1 := fe_size fe). 
-      split. apply Zle_trans with 0. compute; congruence. apply Zge_le. apply size_pos.
-      generalize stacksize_pos, size_no_overflow; omega.
-    right. rewrite (Mem.bounds_alloc _ _ _ _ _ ALLOC'). rewrite dec_eq_true. unfold fst, snd.
-      split. compute; congruence. apply size_no_overflow.
+    instantiate (1 := fe_stack_data fe).
+    generalize stack_data_offset_valid (bound_stack_data_pos b) size_no_overflow; omega.
+    right. rewrite (Mem.bounds_alloc_same _ _ _ _ _ ALLOC'). unfold fst, snd.
+    split. omega. apply size_no_overflow.
     intros. apply Mem.perm_implies with Freeable; auto with mem. 
-    eapply Mem.perm_alloc_2; eauto. generalize size_pos; omega.
+    eapply Mem.perm_alloc_2; eauto.
+    generalize stack_data_offset_valid bound_stack_data_stacksize; omega.
     red. intros. apply Zdivides_trans with 4. 
     destruct chunk; simpl; auto with align_4.
-    apply frame_size_aligned.
+    apply fe_stack_data_aligned.
     intros.
       assert (Mem.valid_block m1' sp'). eapply Mem.valid_block_inject_2; eauto.
       assert (~Mem.valid_block m1' sp') by eauto with mem.
       contradiction.
   intros [j' [INJ2 [INCR [MAP1 MAP2]]]].
-  assert (PERM: Mem.range_perm m2' sp' 0 fe.(fe_size) Freeable).
-    red; intros. eapply Mem.perm_alloc_2; eauto. generalize stacksize_pos; omega. 
+  assert (PERM: frame_perm_freeable m2' sp').
+    red; intros. eapply Mem.perm_alloc_2; eauto.
   (* Store of parent *)
   exploit (store_index_succeeds m2' sp' FI_link parent). red; auto. auto. 
   intros [m3' STORE2].
@@ -1315,7 +1358,7 @@ Proof.
   exploit (store_index_succeeds m3' sp' FI_retaddr ra). red; auto. red; eauto with mem.
   intros [m4' STORE3].
   (* Saving callee-save registers *)
-  assert (PERM4: Mem.range_perm m4' sp' 0 (fe_size fe) Freeable).
+  assert (PERM4: frame_perm_freeable m4' sp').
     red; intros. eauto with mem. 
   exploit save_callee_save_correct. 
     eapply agree_regs_inject_incr; eauto.
@@ -1325,11 +1368,11 @@ Proof.
   (* stores in frames *)
   assert (SIF: stores_in_frame sp' m2' m5').
     econstructor; eauto. 
-    rewrite size_type_chunk. apply offset_of_index_valid. red; auto.
-    econstructor; eauto. 
-    rewrite size_type_chunk. apply offset_of_index_valid. red; auto.
+    rewrite size_type_chunk. apply offset_of_index_disj_stack_data_2; auto. red; auto.
+    econstructor; eauto.
+    rewrite size_type_chunk. apply offset_of_index_disj_stack_data_2; auto. red; auto.
   (* separation *)
-  assert (SEP: forall b0 delta, j' b0 = Some(sp', delta) -> b0 = sp /\ delta = fe_size fe).
+  assert (SEP: forall b0 delta, j' b0 = Some(sp', delta) -> b0 = sp /\ delta = fe_stack_data fe).
     intros. destruct (zeq b0 sp). 
     subst b0. rewrite MAP1 in H; inv H; auto.
     rewrite MAP2 in H; auto. 
@@ -1558,11 +1601,14 @@ Proof.
   (* can free *)
   destruct (Mem.range_perm_free m' sp' 0 (fn_stacksize tf)) as [m1' FREE].
   rewrite unfold_transf_function; unfold fn_stacksize. red; intros.
-  destruct (zlt ofs (fe_size fe)).
-  eapply agree_perm; eauto. omega. 
-  replace ofs with ((ofs - fe_size fe) + fe_size fe) by omega.
+  assert (EITHER: fe_stack_data fe <= ofs < fe_stack_data fe + Linear.fn_stacksize f
+              \/ (ofs < fe_stack_data fe \/ fe_stack_data fe + Linear.fn_stacksize f <= ofs))
+  by omega.
+  destruct EITHER.
+  replace ofs with ((ofs - fe_stack_data fe) + fe_stack_data fe) by omega.
   eapply Mem.perm_inject with (f := j). eapply agree_inj; eauto. eauto. 
   eapply Mem.free_range_perm; eauto. omega.
+  eapply agree_perm; eauto. 
   (* inject after free *)
   assert (INJ1: Mem.inject j m1 m1').
   eapply Mem.free_inject with (l := (sp, 0, f.(Linear.fn_stacksize)) :: nil); eauto.
@@ -2259,8 +2305,10 @@ Proof.
   econstructor; eauto with coqlib.
   eapply Mem.store_outside_inject; eauto. 
     intros. exploit agree_inj_unique; eauto. intros [EQ1 EQ2]; subst b' delta.
-    right. rewrite (agree_bounds _ _ _ _ _ _ _ _ _ _ AGFRAME). simpl fst. rewrite Zplus_0_l. 
-    rewrite size_type_chunk. apply offset_of_index_valid; auto.
+    rewrite (agree_bounds _ _ _ _ _ _ _ _ _ _ AGFRAME). unfold fst, snd. rewrite Zplus_0_l. 
+    rewrite size_type_chunk. 
+    exploit offset_of_index_disj_stack_data_2; eauto.
+    omega.
   apply match_stacks_change_mach_mem with m'; auto.
   eauto with mem. eauto with mem. intros. rewrite <- H4; eapply Mem.load_store_other; eauto. left; unfold block; omega.
   apply agree_regs_set_slot; auto.
