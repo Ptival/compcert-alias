@@ -10,7 +10,7 @@
 (*                                                                     *)
 (* *********************************************************************)
 
-(** Computation of resource bounds forr Linear code. *)
+(** Computation of resource bounds for Linear code. *)
 
 Require Import Coqlib.
 Require Import Maps.

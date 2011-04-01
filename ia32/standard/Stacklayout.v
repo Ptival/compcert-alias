@@ -26,12 +26,6 @@ Require Import Bounds.
 - Saved values of float callee-save registers used by the function.
 - Space for the stack-allocated data declared in Cminor.
 
-To facilitate some of the proofs, the Cminor stack-allocated data
-starts at offset 0; the preceding areas in the activation record
-therefore have negative offsets.  This part (with negative offsets)
-is called the ``frame'', by opposition with the ``Cminor stack data''
-which is the part with positive offsets.
-
 The [frame_env] compilation environment records the positions of
 the boundaries between areas in the frame part.
 *)
