@@ -2396,9 +2396,8 @@ Proof.
 
   (* Lcall *)
   exploit find_function_translated; eauto. intros [bf [tf' [A [B C]]]].
-  exploit Asmgenretaddr.return_address_exists.
-    eapply is_tail_transf_function. eauto. 
-    eapply is_tail_cons_left; eauto.
+  exploit is_tail_transf_function; eauto. intros IST. simpl in IST.
+  exploit Asmgenretaddr.return_address_exists. eexact IST.
   intros [ra D].
   econstructor; split.
   apply plus_one. econstructor; eauto.

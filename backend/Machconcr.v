@@ -147,10 +147,10 @@ Inductive step: state -> trace -> state -> Prop :=
       step (State s f sp (Msetstack src ofs ty :: c) rs m)
         E0 (State s f sp c rs m')
   | exec_Mgetparam:
-      forall s fb f sp parent ofs ty dst c rs m v,
+      forall s fb f sp ofs ty dst c rs m v,
       Genv.find_funct_ptr ge fb = Some (Internal f) ->
-      load_stack m sp Tint f.(fn_link_ofs) = Some parent ->
-      load_stack m parent ty ofs = Some v ->
+      load_stack m sp Tint f.(fn_link_ofs) = Some (parent_sp s) ->
+      load_stack m (parent_sp s) ty ofs = Some v ->
       step (State s fb sp (Mgetparam ofs ty dst :: c) rs m)
         E0 (State s fb sp c (rs # IT1 <- Vundef # dst <- v) m)
   | exec_Mop:

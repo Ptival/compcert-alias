@@ -443,15 +443,19 @@ Definition transl_store (chunk: memory_chunk)
 
 (** Translation of a Mach instruction. *)
 
-Definition transl_instr (f: Mach.function) (i: Mach.instruction) (k: code) :=
+Definition transl_instr (f: Mach.function) (i: Mach.instruction)
+                        (edx_is_parent: bool) (k: code) :=
   match i with
   | Mgetstack ofs ty dst =>
       loadind ESP ofs ty dst k
   | Msetstack src ofs ty =>
       storeind src ESP ofs ty k
   | Mgetparam ofs ty dst =>
-      do k1 <- loadind EDX ofs ty dst k;
-      loadind ESP f.(fn_link_ofs) Tint IT1 k1
+      if edx_is_parent then
+        loadind EDX ofs ty dst k
+      else
+        (do k1 <- loadind EDX ofs ty dst k;
+         loadind ESP f.(fn_link_ofs) Tint IT1 k1)
   | Mop op args res =>
       transl_op op args res k
   | Mload chunk addr args dst =>
@@ -484,10 +488,21 @@ Definition transl_instr (f: Mach.function) (i: Mach.instruction) (k: code) :=
       OK (Pbuiltin ef (List.map preg_of args) (preg_of res) :: k)
   end.
 
-Fixpoint transl_code (f: Mach.function) (il: list Mach.instruction) :=
+(** Translation of a code sequence *)
+
+Definition edx_preserved (before: bool) (i: Mach.instruction) : bool :=
+  match i with
+  | Msetstack src ofs ty => before
+  | Mgetparam ofs ty dst => negb (mreg_eq dst IT1)
+  | _ => false
+  end.
+
+Fixpoint transl_code (f: Mach.function) (il: list Mach.instruction)  (edx_is_parent: bool) :=
   match il with
   | nil => OK nil
-  | i1 :: il' => do k <- transl_code f il'; transl_instr f i1 k
+  | i1 :: il' =>
+      do k <- transl_code f il' (edx_preserved edx_is_parent i1);
+      transl_instr f i1 edx_is_parent k
   end.
 
 (** Translation of a whole function.  Note that we must check
@@ -496,7 +511,7 @@ Fixpoint transl_code (f: Mach.function) (il: list Mach.instruction) :=
   around, leading to incorrect executions. *)
 
 Definition transf_function (f: Mach.function) : res Asm.code :=
-  do c <- transl_code f f.(fn_code);
+  do c <- transl_code f f.(fn_code) true;
   if zlt (list_length_z c) Int.max_unsigned 
   then OK (Pallocframe f.(fn_stacksize) f.(fn_retaddr_ofs) f.(fn_link_ofs) :: c)
   else Error (msg "code size exceeded").
