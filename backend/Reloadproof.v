@@ -692,7 +692,8 @@ Proof.
   unfold call_regs, parameter_of_argument. 
   generalize (loc_arguments_acceptable _ _ H). 
   unfold loc_argument_acceptable. 
-  destruct x. auto.
+  destruct x.
+  intros. destruct (in_dec Loc.eq (R m) temporaries). contradiction. auto.
   destruct s; intros; try contradiction. auto.
 Qed. 
 

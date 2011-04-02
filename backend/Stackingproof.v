@@ -720,9 +720,16 @@ Qed.
 Lemma agree_regs_call_regs:
   forall j ls rs,
   agree_regs j ls rs ->
-  agree_regs j (call_regs ls) rs.
+  agree_regs j (call_regs ls) (undef_temps rs).
 Proof.
-  unfold call_regs; intros; red; intros; auto.
+  intros. 
+  assert (agree_regs j (LTL.undef_temps ls) (undef_temps rs)).
+    apply agree_regs_undef_temps; auto.
+  unfold call_regs; intros; red; intros.
+  destruct (in_dec Loc.eq (R r) temporaries).
+  auto.
+  generalize (H0 r). unfold LTL.undef_temps. rewrite Locmap.guo. auto.
+  apply Loc.reg_notin; auto.
 Qed.
 
 (** ** Properties of [agree_frame] *)
@@ -1316,9 +1323,9 @@ Lemma function_prologue_correct:
   /\ store_stack m2' (Vptr sp' Int.zero) Tint tf.(fn_link_ofs) parent = Some m3'
   /\ store_stack m3' (Vptr sp' Int.zero) Tint tf.(fn_retaddr_ofs) ra = Some m4'
   /\ star step tge 
-         (State cs fb (Vptr sp' Int.zero) (save_callee_save fe k) rs m4')
-      E0 (State cs fb (Vptr sp' Int.zero) k rs m5')
-  /\ agree_regs j' (call_regs ls) rs
+         (State cs fb (Vptr sp' Int.zero) (save_callee_save fe k) (undef_temps rs) m4')
+      E0 (State cs fb (Vptr sp' Int.zero) k (undef_temps rs) m5')
+  /\ agree_regs j' (call_regs ls) (undef_temps rs)
   /\ agree_frame j' (call_regs ls) ls0 m2 sp m5' sp' parent ra
   /\ inject_incr j j'
   /\ inject_separated j j' m1 m1'
@@ -1361,8 +1368,9 @@ Proof.
   assert (PERM4: frame_perm_freeable m4' sp').
     red; intros. eauto with mem. 
   exploit save_callee_save_correct. 
+    apply agree_regs_undef_temps.
     eapply agree_regs_inject_incr; eauto.
-    auto.
+    apply wt_undef_temps. auto.
     eexact PERM4.
   intros [m5' [STEPS [ICS [FCS [OTHERS [STORES PERM5]]]]]].
   (* stores in frames *)
@@ -1396,7 +1404,9 @@ Proof.
   (* agree frame *)
   constructor; intros.
     (* unused regs *)
-    unfold call_regs. apply AGCS. apply mreg_not_within_bounds_callee_save; auto.
+    unfold call_regs. destruct (in_dec Loc.eq (R r) temporaries).
+    elim H. apply temporary_within_bounds; auto.
+    apply AGCS. apply mreg_not_within_bounds_callee_save; auto.
     (* locals *)
     simpl. apply index_contains_inj_undef; auto.
     (* outgoing *)
@@ -1412,9 +1422,17 @@ Proof.
     apply OTHERS; auto. red; auto.
     eapply gss_index_contains; eauto. red; auto.
     (* int callee save *)
-    rewrite <- AGCS. apply ICS; auto. auto.
+    rewrite <- AGCS. replace (ls (R r)) with (LTL.undef_temps ls (R r)).
+    apply ICS; auto.
+    unfold LTL.undef_temps. apply Locmap.guo. apply Loc.reg_notin. 
+    red; intros; exploit int_callee_save_not_destroyed; eauto. 
+    auto.
     (* float callee save *)
-    rewrite <- AGCS. apply FCS; auto. auto.
+    rewrite <- AGCS. replace (ls (R r)) with (LTL.undef_temps ls (R r)).
+    apply FCS; auto.
+    unfold LTL.undef_temps. apply Locmap.guo. apply Loc.reg_notin. 
+    red; intros; exploit float_callee_save_not_destroyed; eauto. 
+    auto.
     (* inj *)
     auto.
     (* inj_unique *)

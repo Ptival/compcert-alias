@@ -624,7 +624,7 @@ Definition exec_instr (c: code) (i: instruction) (rs: regset) (m: mem) : outcome
       | Some m2 =>
           match Mem.storev Mint32 m2 (Val.add sp (Vint ofs_ra)) rs#RA with
           | None => Stuck
-          | Some m3 => Next (nextinstr (rs#ESP <- sp)) m3
+          | Some m3 => Next (nextinstr (rs #EDX <- (rs#ESP) #ESP <- sp)) m3
           end
       end
   | Pfreeframe sz ofs_ra ofs_link =>

@@ -123,7 +123,8 @@ Definition reglist (rs: locset) (rl: list mreg) : list val :=
 
   [call_regs caller] returns the location set at function entry,
   as a function of the location set [caller] of the calling function.
-- Machine registers have the same values as in the caller.
+- Temporary registers are undefined.
+- Other machine registers have the same values as in the caller.
 - Incoming stack slots (used for parameter passing) have the same
   values as the corresponding outgoing stack slots (used for argument
   passing) in the caller.
@@ -133,7 +134,7 @@ Definition reglist (rs: locset) (rl: list mreg) : list val :=
 Definition call_regs (caller: locset) : locset :=
   fun (l: loc) =>
     match l with
-    | R r => caller (R r)
+    | R r => if In_dec Loc.eq (R r) temporaries then Vundef else caller (R r)
     | S (Local ofs ty) => Vundef
     | S (Incoming ofs ty) => caller (S (Outgoing ofs ty))
     | S (Outgoing ofs ty) => Vundef

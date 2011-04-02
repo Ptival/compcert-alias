@@ -234,7 +234,7 @@ Inductive step: state -> trace -> state -> Prop :=
       store_stack m1 sp Tint f.(fn_link_ofs) (parent_sp s) = Some m2 ->
       store_stack m2 sp Tint f.(fn_retaddr_ofs) (parent_ra s) = Some m3 ->
       step (Callstate s fb rs m)
-        E0 (State s fb sp f.(fn_code) rs m3)
+        E0 (State s fb sp f.(fn_code) (undef_temps rs) m3)
   | exec_function_external:
       forall s fb rs m t rs' ef args res m',
       Genv.find_funct_ptr ge fb = Some (External ef) ->

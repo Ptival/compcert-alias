@@ -1099,7 +1099,7 @@ Lemma exec_function_internal_prop:
   store_stack m1 sp Tint f.(fn_link_ofs) (parent_sp s) = Some m2 ->
   store_stack m2 sp Tint f.(fn_retaddr_ofs) (parent_ra s) = Some m3 ->
   exec_instr_prop (Machconcr.Callstate s fb ms m) E0
-                  (Machconcr.State s fb sp (fn_code f) ms m3).
+                  (Machconcr.State s fb sp (fn_code f) (undef_temps ms) m3).
 Proof.
   intros; red; intros; inv MS.
   exploit functions_translated; eauto. intros [tf [A B]]. monadInv B.
@@ -1118,11 +1118,14 @@ Proof.
   simpl. rewrite C. simpl in E. rewrite (sp_val _ _ _ AG) in E. rewrite E.
   rewrite ATLR. simpl in P. rewrite P. eauto. 
   econstructor; eauto. 
-  unfold nextinstr. rewrite Pregmap.gss. rewrite Pregmap.gso; auto with ppcgen. 
+  unfold nextinstr. rewrite Pregmap.gss. repeat rewrite Pregmap.gso; auto with ppcgen. 
   rewrite ATPC. simpl. constructor; eauto.
   subst x. eapply code_tail_next_int. rewrite list_length_z_cons. omega. 
   constructor. 
-  apply agree_nextinstr. eapply agree_change_sp; eauto. congruence. 
+  apply agree_nextinstr. eapply agree_change_sp; eauto.
+  apply agree_exten_temps with rs; eauto.
+  intros. apply Pregmap.gso; auto with ppcgen.
+  congruence. 
 Qed.
 
 Lemma exec_function_external_prop:

@@ -171,6 +171,7 @@ Lemma wt_call_regs:
   forall ls, wt_locset ls -> wt_locset (call_regs ls).
 Proof.
   intros; red; intros. unfold call_regs. destruct l. auto. 
+  destruct (in_dec Loc.eq (R m) temporaries). red; auto. auto.
   destruct s. red; auto. 
   change (Loc.type (S (Incoming z t))) with (Loc.type (S (Outgoing z t))). auto.
   red; auto.
