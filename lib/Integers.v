@@ -1287,29 +1287,6 @@ Proof.
   intros. apply (bitwise_binop_idem andb). destruct a; auto.
 Qed.
 
-Theorem add_and:
-  forall x y z,
-  and y z = zero ->
-  add (and x y) (and x z) = and x (or y z).
-Proof.
-  intros. unfold add, and, bitwise_binop.
-  repeat rewrite unsigned_repr; auto with ints. decEq.
-  apply Z_of_bits_excl; intros.
-  assert (forall a b c, a && b && (a && c) = a && (b && c)).
-    destruct a; destruct b; destruct c; reflexivity.
-  rewrite H1. 
-  replace (bits_of_Z wordsize (unsigned y) i &&
-           bits_of_Z wordsize (unsigned z) i)
-     with (bits_of_Z wordsize (unsigned (and y z)) i).
-  rewrite H. rewrite unsigned_zero.  
-  rewrite bits_of_Z_zero. apply andb_b_false.
-  unfold and, bitwise_binop. rewrite unsigned_repr; auto with ints. 
-  rewrite bits_of_Z_of_bits. reflexivity. auto. 
-  rewrite <- demorgan1.
-  unfold or, bitwise_binop. rewrite unsigned_repr; auto with ints.
-  rewrite bits_of_Z_of_bits; auto.
-Qed.
-
 Theorem or_commut: forall x y, or x y = or y x.
 Proof (bitwise_binop_commut orb orb_comm).
 
@@ -1397,6 +1374,69 @@ Theorem not_involutive:
   forall (x: int), not (not x) = x.
 Proof.
   intros. unfold not. rewrite xor_assoc. rewrite xor_idem. apply xor_zero. 
+Qed.
+
+(** Connections between [add] and bitwise logical operations. *)
+
+Theorem add_is_or:
+  forall x y,
+  and x y = zero ->
+  add x y = or x y.
+Proof.
+  intros. unfold add, or, bitwise_binop.
+  apply eqm_samerepr. eapply eqm_trans. apply eqm_add.
+  apply eqm_sym. apply Z_of_bits_of_Z.
+  apply eqm_sym. apply Z_of_bits_of_Z.
+  apply eqm_refl2. 
+  apply Z_of_bits_excl. 
+  intros. 
+  replace (bits_of_Z wordsize (unsigned x) i &&
+           bits_of_Z wordsize (unsigned y) i)
+     with (bits_of_Z wordsize (unsigned (and x y)) i).
+  rewrite H. rewrite unsigned_zero. rewrite bits_of_Z_zero. auto.
+  unfold and, bitwise_binop. rewrite unsigned_repr; auto with ints. 
+  rewrite bits_of_Z_of_bits. reflexivity. auto. 
+  auto.
+Qed.
+
+Theorem xor_is_or:
+  forall x y, and x y = zero -> xor x y = or x y.
+Proof.
+  intros. unfold xor, or, bitwise_binop. 
+  decEq. apply Z_of_bits_exten; intros.
+  set (bitx := bits_of_Z wordsize (unsigned x) (i + 0)).
+  set (bity := bits_of_Z wordsize (unsigned y) (i + 0)).
+  assert (bitx && bity = false).
+  replace (bitx && bity)
+     with (bits_of_Z wordsize (unsigned (and x y)) (i + 0)).
+  rewrite H. rewrite unsigned_zero. apply bits_of_Z_zero.
+  unfold and, bitwise_binop. rewrite unsigned_repr; auto with ints.
+  unfold bitx, bity. rewrite bits_of_Z_of_bits. reflexivity.
+  omega.
+  destruct bitx; destruct bity; auto; simpl in H1; congruence.
+Qed.
+
+Theorem add_is_xor:
+  forall x y,
+  and x y = zero ->
+  add x y = xor x y.
+Proof.
+  intros. rewrite xor_is_or; auto. apply add_is_or; auto.
+Qed.
+
+Theorem add_and:
+  forall x y z,
+  and y z = zero ->
+  add (and x y) (and x z) = and x (or y z).
+Proof.
+  intros. rewrite add_is_or.
+  rewrite and_or_distrib; auto.
+  rewrite (and_commut x y).
+  rewrite and_assoc. 
+  repeat rewrite <- (and_assoc x). 
+  rewrite (and_commut (and x x)).
+  rewrite <- and_assoc.
+  rewrite H. rewrite and_commut. apply and_zero.
 Qed.
 
 (** ** Properties of shifts *)

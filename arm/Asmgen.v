@@ -55,6 +55,27 @@ Definition is_immed_mem_float (x: int) : bool :=
   Int.eq (Int.and x (Int.repr 3)) Int.zero
   && Int.lt x (Int.repr 1024) && Int.lt (Int.repr (-1024)) x.
   
+(** Decomposition of a 32-bit integer into a list of immediate arguments,
+    whose sum or "or" or "xor" equals the integer.
+    Could be improved. *)
+
+Definition cons_if_not_zero (n: int) (k: list int) :=
+  if Int.eq_dec n Int.zero then k else n :: k.
+
+Definition decompose_int (n: int) : list int :=
+  cons_if_not_zero (Int.and n (Int.repr 255))
+   (cons_if_not_zero (Int.and n (Int.repr 65280))
+     (cons_if_not_zero (Int.and n (Int.repr 16711680))
+       (cons_if_not_zero (Int.and n (Int.repr 4278190080)) nil))).
+
+Definition decompose_op (op1 op2: shift_op -> instruction) (n: int) (k: code) :=
+  match decompose_int n with
+  | nil =>
+      op1 (SOimm Int.zero) :: k
+  | i :: l =>
+      op1 (SOimm i) :: map (fun i => op2 (SOimm i)) l ++ k
+  end.
+
 (** Smart constructors for integer immediate arguments. *)
 
 Definition loadimm (r: ireg) (n: int) (k: code) :=
@@ -62,12 +83,8 @@ Definition loadimm (r: ireg) (n: int) (k: code) :=
     Pmov r (SOimm n) :: k
   else if is_immed_arith (Int.not n) then
     Pmvn r (SOimm (Int.not n)) :: k
-  else                  (* could be much improved! *)
-    Pmov r (SOimm (Int.and n (Int.repr 255))) ::
-    Porr r r (SOimm (Int.and n (Int.repr 65280))) ::
-    Porr r r (SOimm (Int.and n (Int.repr 16711680))) ::
-    Porr r r (SOimm (Int.and n (Int.repr 4278190080))) ::
-    k.
+  else
+    decompose_op (Pmov r) (Porr r r) n k.
 
 Definition addimm (r1 r2: ireg) (n: int) (k: code) :=
   if is_immed_arith n then
@@ -75,11 +92,7 @@ Definition addimm (r1 r2: ireg) (n: int) (k: code) :=
   else if is_immed_arith (Int.neg n) then
     Psub r1 r2 (SOimm (Int.neg n)) :: k
   else
-    Padd r1 r2 (SOimm (Int.and n (Int.repr 255))) ::
-    Padd r1 r1 (SOimm (Int.and n (Int.repr 65280))) ::
-    Padd r1 r1 (SOimm (Int.and n (Int.repr 16711680))) ::
-    Padd r1 r1 (SOimm (Int.and n (Int.repr 4278190080))) ::
-    k.
+    decompose_op (Padd r1 r2) (Padd r1 r1) n k.
 
 Definition andimm (r1 r2: ireg) (n: int) (k: code) :=
   if is_immed_arith n then
@@ -89,12 +102,23 @@ Definition andimm (r1 r2: ireg) (n: int) (k: code) :=
   else
     loadimm IR14 n (Pand r1 r2 (SOreg IR14) :: k).
 
-Definition makeimm (instr: ireg -> ireg -> shift_op -> instruction)
-                   (r1 r2: ireg) (n: int) (k: code) :=
+Definition rsubimm (r1 r2: ireg) (n: int) (k: code) :=
   if is_immed_arith n then
-    instr r1 r2 (SOimm n) :: k
+    Prsb r1 r2 (SOimm n) :: k
   else
-    loadimm IR14 n (instr r1 r2 (SOreg IR14) :: k).
+    decompose_op (Prsb r1 r2) (Padd r1 r1) n k.
+
+Definition orimm  (r1 r2: ireg) (n: int) (k: code) :=
+  if is_immed_arith n then
+    Porr r1 r2 (SOimm n) :: k
+  else
+    decompose_op (Porr r1 r2) (Porr r1 r1) n k.
+
+Definition xorimm  (r1 r2: ireg) (n: int) (k: code) :=
+  if is_immed_arith n then
+    Peor r1 r2 (SOimm n) :: k
+  else
+    decompose_op (Peor r1 r2) (Peor r1 r1) n k.
 
 (** Translation of a shift immediate operation (type [Op.shift]) *)
 
@@ -235,7 +259,7 @@ Definition transl_op
   | Orsubshift s, a1 :: a2 :: nil =>
       Prsb (ireg_of r) (ireg_of a1) (transl_shift s (ireg_of a2)) :: k
   | Orsubimm n, a1 :: nil =>
-      makeimm Prsb (ireg_of r) (ireg_of a1) n k
+      rsubimm (ireg_of r) (ireg_of a1) n k
   | Omul, a1 :: a2 :: nil =>
       if ireg_eq (ireg_of r) (ireg_of a1)
       || ireg_eq (ireg_of r) (ireg_of a2)
@@ -256,13 +280,13 @@ Definition transl_op
   | Oorshift s, a1 :: a2 :: nil =>
       Porr (ireg_of r) (ireg_of a1) (transl_shift s (ireg_of a2)) :: k
   | Oorimm n, a1 :: nil =>
-      makeimm Porr (ireg_of r) (ireg_of a1) n k
+      orimm (ireg_of r) (ireg_of a1) n k
   | Oxor, a1 :: a2 :: nil =>
       Peor (ireg_of r) (ireg_of a1) (SOreg (ireg_of a2)) :: k
   | Oxorshift s, a1 :: a2 :: nil =>
       Peor (ireg_of r) (ireg_of a1) (transl_shift s (ireg_of a2)) :: k
   | Oxorimm n, a1 :: nil =>
-      makeimm Peor (ireg_of r) (ireg_of a1) n k
+      xorimm (ireg_of r) (ireg_of a1) n k
   | Obic, a1 :: a2 :: nil =>
       Pbic (ireg_of r) (ireg_of a1) (SOreg (ireg_of a2)) :: k
   | Obicshift s, a1 :: a2 :: nil =>
@@ -469,12 +493,10 @@ Definition transl_instr (f: Mach.function) (i: Mach.instruction) (k: code) :=
       Pblsymb symb :: k
   | Mtailcall sig (inl r) =>
       loadind_int IR13 f.(fn_retaddr_ofs) IR14
-        (Pfreeframe (-f.(fn_framesize)) f.(fn_stacksize) f.(fn_link_ofs)
-         :: Pbreg (ireg_of r) :: k)
+        (Pfreeframe f.(fn_stacksize) f.(fn_link_ofs) :: Pbreg (ireg_of r) :: k)
   | Mtailcall sig (inr symb) =>
       loadind_int IR13 f.(fn_retaddr_ofs) IR14
-        (Pfreeframe (-f.(fn_framesize)) f.(fn_stacksize) f.(fn_link_ofs)
-         :: Pbsymb symb :: k)
+        (Pfreeframe f.(fn_stacksize) f.(fn_link_ofs) :: Pbsymb symb :: k)
   | Mbuiltin ef args res =>
       Pbuiltin ef (map preg_of args) (preg_of res) :: k
   | Mlabel lbl =>
@@ -488,8 +510,7 @@ Definition transl_instr (f: Mach.function) (i: Mach.instruction) (k: code) :=
       Pbtbl IR14 tbl :: k
   | Mreturn =>
       loadind_int IR13 f.(fn_retaddr_ofs) IR14
-        (Pfreeframe (-f.(fn_framesize)) f.(fn_stacksize) f.(fn_link_ofs)
-         :: Pbreg IR14 :: k)
+        (Pfreeframe f.(fn_stacksize) f.(fn_link_ofs) :: Pbreg IR14 :: k)
   end.
 
 Definition transl_code (f: Mach.function) (il: list Mach.instruction) :=
@@ -501,7 +522,7 @@ Definition transl_code (f: Mach.function) (il: list Mach.instruction) :=
   around, leading to incorrect executions. *)
 
 Definition transl_function (f: Mach.function) :=
-  Pallocframe (- f.(fn_framesize)) f.(fn_stacksize) f.(fn_link_ofs) ::
+  Pallocframe f.(fn_stacksize) f.(fn_link_ofs) ::
   Pstr IR14 IR13 (SAimm f.(fn_retaddr_ofs)) ::
   transl_code f f.(fn_code).
 

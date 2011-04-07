@@ -1388,21 +1388,22 @@ Proof.
     assert (~Mem.valid_block m1' sp') by eauto with mem.
     contradiction.
   (* Conclusions *)
-  exists j'; exists m2'; exists sp'; exists m3'; exists m4'; exists m5'; intuition.
+  exists j'; exists m2'; exists sp'; exists m3'; exists m4'; exists m5'.
+  split. auto.
   (* store parent *)
-  change Tint with (type_of_index FI_link). 
+  split. change Tint with (type_of_index FI_link). 
   change (fe_ofs_link fe) with (offset_of_index fe FI_link).
   apply store_stack_succeeds; auto. red; auto.
   (* store retaddr *)
-  change Tint with (type_of_index FI_retaddr). 
+  split. change Tint with (type_of_index FI_retaddr). 
   change (fe_ofs_retaddr fe) with (offset_of_index fe FI_retaddr).
   apply store_stack_succeeds; auto. red; auto.
   (* saving of registers *)
-  eexact STEPS.
+  split. eexact STEPS.
   (* agree_regs *)
-  apply agree_regs_call_regs. apply agree_regs_inject_incr with j; auto.
+  split. apply agree_regs_call_regs. apply agree_regs_inject_incr with j; auto.
   (* agree frame *)
-  constructor; intros.
+  split. constructor; intros.
     (* unused regs *)
     unfold call_regs. destruct (in_dec Loc.eq (R r) temporaries).
     elim H. apply temporary_within_bounds; auto.
@@ -1447,11 +1448,15 @@ Proof.
     auto.
     (* wt *)
     apply wt_call_regs; auto.
+  (* incr *)
+  split. auto.
   (* separated *)
-  eapply inject_alloc_separated; eauto with mem.
+  split. eapply inject_alloc_separated; eauto with mem.
   (* inject *)
-  eapply stores_in_frame_inject; eauto.
+  split. eapply stores_in_frame_inject; eauto.
   eapply Mem.bounds_alloc_same; eauto.
+  (* stores in frame *)
+  auto.
 Qed.
 
 (** The following lemmas show the correctness of the register reloading
