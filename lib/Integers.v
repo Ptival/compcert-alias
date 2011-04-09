@@ -1370,10 +1370,64 @@ Proof.
   auto.
 Qed.  
 
+(** Properties of bitwise complement.*)
+
 Theorem not_involutive:
   forall (x: int), not (not x) = x.
 Proof.
   intros. unfold not. rewrite xor_assoc. rewrite xor_idem. apply xor_zero. 
+Qed.
+
+Theorem not_zero:
+  not zero = mone.
+Proof.
+  unfold not. rewrite xor_commut. apply xor_zero.
+Qed.
+
+Theorem not_mone:
+  not mone = zero.
+Proof.
+  rewrite <- (not_involutive zero). symmetry. decEq. apply not_zero.
+Qed.
+
+Theorem not_or_and_not:
+  forall x y, not (or x y) = and (not x) (not y).
+Proof.
+  intros; unfold not, xor, and, or, bitwise_binop.
+  repeat rewrite unsigned_repr; auto with ints.
+  decEq; apply Z_of_bits_exten; intros.
+  repeat rewrite bits_of_Z_of_bits; repeat rewrite Zplus_0_r; auto.
+  rewrite unsigned_mone. rewrite bits_of_Z_mone; auto.
+  assert (forall a b, xorb (a || b) true = xorb a true && xorb b true).
+    destruct a; destruct b; reflexivity.
+  auto.
+Qed.
+
+Theorem not_and_or_not:
+  forall x y, not (and x y) = or (not x) (not y).
+Proof.
+  intros. rewrite <- (not_involutive x) at 1. rewrite <- (not_involutive y) at 1.
+  rewrite <- not_or_and_not. apply not_involutive.
+Qed.
+
+Theorem and_not_self:
+  forall x, and x (not x) = zero.
+Proof.
+  intros. unfold not. rewrite and_xor_distrib. 
+  rewrite and_idem. rewrite and_mone. apply xor_idem.
+Qed.
+
+Theorem or_not_self:
+  forall x, or x (not x) = mone.
+Proof.
+  intros. rewrite <- (not_involutive x) at 1. rewrite or_commut.
+  rewrite <- not_and_or_not. rewrite and_not_self. apply not_zero. 
+Qed.
+
+Theorem xor_not_self:
+  forall x, xor x (not x) = mone.
+Proof.
+  intros. unfold not. rewrite <- xor_assoc. rewrite xor_idem. apply not_zero. 
 Qed.
 
 (** Connections between [add] and bitwise logical operations. *)

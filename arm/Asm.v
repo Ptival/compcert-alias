@@ -499,7 +499,7 @@ Definition exec_instr (c: code) (i: instruction) (rs: regset) (m: mem) : outcome
       let sp := (Vptr stk Int.zero) in
       match Mem.storev Mint32 m1 (Val.add sp (Vint pos)) rs#IR13 with
       | None => Error
-      | Some m2 => OK (nextinstr (rs#IR13 <- sp)) m2
+      | Some m2 => OK (nextinstr (rs #IR12 <- (rs#IR13) #IR13 <- sp)) m2
       end
   | Pfreeframe sz pos =>
       match Mem.loadv Mint32 m (Val.add rs#IR13 (Vint pos)) with

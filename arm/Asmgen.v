@@ -36,7 +36,7 @@ Require Import Asm.
 
 Fixpoint is_immed_arith_aux (n: nat) (x msk: int) {struct n}: bool :=
   match n with
-  | O => false
+  | Datatypes.O => false
   | Datatypes.S n' =>
       Int.eq (Int.and x (Int.not msk)) Int.zero ||
       is_immed_arith_aux n' x (Int.ror msk (Int.repr 2))
@@ -56,69 +56,64 @@ Definition is_immed_mem_float (x: int) : bool :=
   && Int.lt x (Int.repr 1024) && Int.lt (Int.repr (-1024)) x.
   
 (** Decomposition of a 32-bit integer into a list of immediate arguments,
-    whose sum or "or" or "xor" equals the integer.
-    Could be improved. *)
+    whose sum or "or" or "xor" equals the integer. *)
 
-Definition cons_if_not_zero (n: int) (k: list int) :=
-  if Int.eq_dec n Int.zero then k else n :: k.
+Fixpoint decompose_int_rec (N: nat) (n p: int) : list int :=
+  match N with
+  | Datatypes.O =>
+      if Int.eq_dec n Int.zero then nil else n :: nil
+  | Datatypes.S M =>
+      if Int.eq_dec (Int.and n (Int.shl (Int.repr 3) p)) Int.zero then
+        decompose_int_rec M n (Int.add p (Int.repr 2))
+      else
+        let m := Int.shl (Int.repr 255) p in
+        Int.and n m ::
+        decompose_int_rec M (Int.and n (Int.not m)) (Int.add p (Int.repr 2))
+  end.
 
 Definition decompose_int (n: int) : list int :=
-  cons_if_not_zero (Int.and n (Int.repr 255))
-   (cons_if_not_zero (Int.and n (Int.repr 65280))
-     (cons_if_not_zero (Int.and n (Int.repr 16711680))
-       (cons_if_not_zero (Int.and n (Int.repr 4278190080)) nil))).
+  match decompose_int_rec 12%nat n Int.zero with
+  | nil => Int.zero :: nil
+  | l   => l
+  end.
 
-Definition decompose_op (op1 op2: shift_op -> instruction) (n: int) (k: code) :=
-  match decompose_int n with
+Definition iterate_op (op1 op2: shift_op -> instruction) (l: list int) (k: code) :=
+  match l with
   | nil =>
-      op1 (SOimm Int.zero) :: k
-  | i :: l =>
-      op1 (SOimm i) :: map (fun i => op2 (SOimm i)) l ++ k
+      op1 (SOimm Int.zero) :: k                 (**r should never happen *)
+  | i :: l' =>
+      op1 (SOimm i) :: map (fun i => op2 (SOimm i)) l' ++ k
   end.
 
 (** Smart constructors for integer immediate arguments. *)
 
 Definition loadimm (r: ireg) (n: int) (k: code) :=
-  if is_immed_arith n then
-    Pmov r (SOimm n) :: k
-  else if is_immed_arith (Int.not n) then
-    Pmvn r (SOimm (Int.not n)) :: k
-  else
-    decompose_op (Pmov r) (Porr r r) n k.
+  let d1 := decompose_int n in
+  let d2 := decompose_int (Int.not n) in
+  if le_dec (List.length d1) (List.length d2)
+  then iterate_op (Pmov r) (Porr r r) d1 k
+  else iterate_op (Pmvn r) (Pbic r r) d2 k.
 
 Definition addimm (r1 r2: ireg) (n: int) (k: code) :=
-  if is_immed_arith n then
-    Padd r1 r2 (SOimm n) :: k
-  else if is_immed_arith (Int.neg n) then
-    Psub r1 r2 (SOimm (Int.neg n)) :: k
-  else
-    decompose_op (Padd r1 r2) (Padd r1 r1) n k.
+  let d1 := decompose_int n in
+  let d2 := decompose_int (Int.neg n) in
+  if le_dec (List.length d1) (List.length d2)
+  then iterate_op (Padd r1 r2) (Padd r1 r1) d1 k
+  else iterate_op (Psub r1 r2) (Psub r1 r1) d2 k.
 
 Definition andimm (r1 r2: ireg) (n: int) (k: code) :=
-  if is_immed_arith n then
-    Pand r1 r2 (SOimm n) :: k
-  else if is_immed_arith (Int.not n) then
-    Pbic r1 r2 (SOimm (Int.not n)) :: k
-  else
-    loadimm IR14 n (Pand r1 r2 (SOreg IR14) :: k).
+  if is_immed_arith n 
+  then Pand r1 r2 (SOimm n) :: k
+  else iterate_op (Pbic r1 r2) (Pbic r1 r1) (decompose_int (Int.not n)) k.
 
 Definition rsubimm (r1 r2: ireg) (n: int) (k: code) :=
-  if is_immed_arith n then
-    Prsb r1 r2 (SOimm n) :: k
-  else
-    decompose_op (Prsb r1 r2) (Padd r1 r1) n k.
+  iterate_op (Prsb r1 r2) (Padd r1 r1) (decompose_int n) k.
 
 Definition orimm  (r1 r2: ireg) (n: int) (k: code) :=
-  if is_immed_arith n then
-    Porr r1 r2 (SOimm n) :: k
-  else
-    decompose_op (Porr r1 r2) (Porr r1 r1) n k.
+  iterate_op (Porr r1 r2) (Porr r1 r1) (decompose_int n) k.
 
 Definition xorimm  (r1 r2: ireg) (n: int) (k: code) :=
-  if is_immed_arith n then
-    Peor r1 r2 (SOimm n) :: k
-  else
-    decompose_op (Peor r1 r2) (Peor r1 r1) n k.
+  iterate_op (Peor r1 r2) (Peor r1 r1) (decompose_int n) k.
 
 (** Translation of a shift immediate operation (type [Op.shift]) *)
 

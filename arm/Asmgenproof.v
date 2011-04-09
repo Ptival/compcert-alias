@@ -330,26 +330,25 @@ Section TRANSL_LABEL.
 
 Variable lbl: label.
 
-Remark decompose_op_label:
-  forall op1 op2 n k,
+Remark iterate_op_label:
+  forall op1 op2 l k,
   (forall so, is_label lbl (op1 so) = false) ->
   (forall so, is_label lbl (op2 so) = false) ->
-  find_label lbl (decompose_op op1 op2 n k) = find_label lbl k.
+  find_label lbl (iterate_op op1 op2 l k) = find_label lbl k.
 Proof.
-  intros. unfold decompose_op.
-  destruct (decompose_int n) as [ | hd tl].
+  intros. unfold iterate_op.
+  destruct l as [ | hd tl].
   simpl. rewrite H. auto.
   simpl. rewrite H.  
   induction tl; simpl. auto. rewrite H0; auto.
 Qed.
-Hint Resolve decompose_op_label: labels.
+Hint Resolve iterate_op_label: labels.
 
 Remark loadimm_label:
   forall r n k, find_label lbl (loadimm r n k) = find_label lbl k.
 Proof.
-  intros. unfold loadimm. 
-  destruct (is_immed_arith n). reflexivity. 
-  destruct (is_immed_arith (Int.not n)). reflexivity.
+  intros. unfold loadimm.
+  destruct (le_dec (length (decompose_int n)) (length (decompose_int (Int.not n))));
   auto with labels.
 Qed.
 Hint Rewrite loadimm_label: labels.
@@ -358,8 +357,7 @@ Remark addimm_label:
   forall r1 r2 n k, find_label lbl (addimm r1 r2 n k) = find_label lbl k.
 Proof.
   intros; unfold addimm.
-  destruct (is_immed_arith n). reflexivity.
-  destruct (is_immed_arith (Int.neg n)). reflexivity. 
+  destruct (le_dec (length (decompose_int n)) (length (decompose_int (Int.neg n))));
   auto with labels.
 Qed.
 Hint Rewrite addimm_label: labels.
@@ -368,36 +366,28 @@ Remark andimm_label:
   forall r1 r2 n k, find_label lbl (andimm r1 r2 n k) = find_label lbl k.
 Proof.
   intros; unfold andimm.
-  destruct (is_immed_arith n). reflexivity.
-  destruct (is_immed_arith (Int.not n)). reflexivity. 
-  autorewrite with labels. reflexivity.
+  destruct (is_immed_arith n). reflexivity. auto with labels.
 Qed.
 Hint Rewrite andimm_label: labels.
 
 Remark rsubimm_label:
   forall r1 r2 n k, find_label lbl (rsubimm r1 r2 n k) = find_label lbl k.
 Proof.
-  intros; unfold rsubimm.
-  destruct (is_immed_arith n). reflexivity.
-  auto with labels.
+  intros; unfold rsubimm. auto with labels.
 Qed.
 Hint Rewrite rsubimm_label: labels.
 
 Remark orimm_label:
   forall r1 r2 n k, find_label lbl (orimm r1 r2 n k) = find_label lbl k.
 Proof.
-  intros; unfold orimm.
-  destruct (is_immed_arith n). reflexivity.
-  auto with labels.
+  intros; unfold orimm. auto with labels.
 Qed.
 Hint Rewrite orimm_label: labels.
 
 Remark xorimm_label:
   forall r1 r2 n k, find_label lbl (xorimm r1 r2 n k) = find_label lbl k.
 Proof.
-  intros; unfold xorimm.
-  destruct (is_immed_arith n). reflexivity.
-  auto with labels.
+  intros; unfold xorimm. auto with labels.
 Qed.
 Hint Rewrite xorimm_label: labels.
 
@@ -714,7 +704,7 @@ Proof.
   rewrite (sp_val _ _ _ AG) in A.
   exploit loadind_correct. eexact A. reflexivity. 
   intros [rs2 [EX [RES OTH]]].
-  left; eapply exec_straight_steps; eauto with coqlib.
+  left; eapply exec_straight_steps. auto. eauto. auto. eauto with coqlib. eauto. eauto. 
   exists m'; split; auto.
   simpl. exists rs2; split. eauto. 
   apply agree_set_mreg with rs; auto. congruence. auto with ppcgen. 
@@ -737,9 +727,9 @@ Proof.
   rewrite (sp_val _ _ _ AG) in B.
   exploit storeind_correct. eexact B. reflexivity. congruence.
   intros [rs2 [EX OTH]].
-  left; eapply exec_straight_steps; eauto with coqlib.
+  left; eapply exec_straight_steps. auto. eauto. auto. eauto with coqlib. eauto. eauto. 
   exists m2; split; auto.
-  exists rs2; split; eauto.
+  simpl. exists rs2; split. eauto.
   apply agree_exten with rs; auto with ppcgen.
 Qed.
 
@@ -771,7 +761,7 @@ Proof.
                 (transl_code f c) rs1 m' v').
   rewrite RES1. auto. auto. 
   intros [rs2 [EX2 [RES2 OTH2]]].
-  left. eapply exec_straight_steps; eauto with coqlib.
+  left; eapply exec_straight_steps. auto. eauto. auto. eauto with coqlib. eauto. eauto. 
   exists m'; split; auto.
   exists rs2; split; simpl.
   eapply exec_straight_trans; eauto.
@@ -797,7 +787,7 @@ Proof.
     rewrite <- A. apply eval_operation_preserved. exact symbols_preserved.
   rewrite (sp_val _ _ _ AG) in C.
   exploit transl_op_correct; eauto. intros [rs' [P [Q R]]].
-  left; eapply exec_straight_steps; eauto with coqlib.
+  left; eapply exec_straight_steps. auto. eauto. auto. eauto with coqlib. eauto. eauto. 
   exists m'; split; auto.
   exists rs'; split. simpl. eexact P. 
   assert (agree (Regmap.set res v ms) sp rs').
@@ -831,7 +821,8 @@ Proof.
   eauto; intros; reflexivity.
 Qed.
 
-Lemma storev_8_signed_unsigned:  forall m a v,  Mem.storev Mint8signed m a v = Mem.storev Mint8unsigned m a v.Proof.  intros. unfold Mem.storev. destruct a; auto.  apply Mem.store_signed_unsigned_8.Qed.Lemma storev_16_signed_unsigned:  forall m a v,  Mem.storev Mint16signed m a v = Mem.storev Mint16unsigned m a v.Proof.  intros. unfold Mem.storev. destruct a; auto.  apply Mem.store_signed_unsigned_16.Qed.
+Lemma storev_8_signed_unsigned:  forall m a v,  Mem.storev Mint8signed m a v = Mem.storev Mint8unsigned m a v.Proof.  intros. unfold Mem.storev. 
+  destruct a; auto.  apply Mem.store_signed_unsigned_8.Qed.Lemma storev_16_signed_unsigned:  forall m a v,  Mem.storev Mint16signed m a v = Mem.storev Mint16unsigned m a v.Proof.  intros. unfold Mem.storev. destruct a; auto.  apply Mem.store_signed_unsigned_16.Qed.
 
 Lemma exec_Mstore_prop:
   forall (s : list stackframe) (fb : block) (sp : val)
@@ -848,7 +839,7 @@ Proof.
   intro WTI; inv WTI.
   assert (eval_addressing tge sp addr ms##args = Some a).
     rewrite <- H. apply eval_addressing_preserved. exact symbols_preserved.
-  left; eapply exec_straight_steps; eauto with coqlib. 
+  left; eapply exec_straight_steps. auto. eauto. auto. eauto with coqlib. eauto. eauto. 
   destruct chunk; simpl; simpl in H6;
   try (rewrite storev_8_signed_unsigned in H0);
   try (rewrite storev_16_signed_unsigned in H0);
@@ -917,7 +908,6 @@ Proof.
   intros. inv H. split. apply Pregmap.gss. auto. 
   intros. rewrite Pregmap.gso; auto with ppcgen.
 Qed.
-
 
 Lemma exec_Mtailcall_prop:
   forall (s : list stackframe) (fb stk : block) (soff : int)
@@ -1244,7 +1234,7 @@ Proof.
     inversion TY; auto.
   exploit functions_transl; eauto. intro TFIND.
   generalize (functions_transl_no_overflow _ _ H); intro NOOV.
-  set (rs2 := nextinstr (rs#IR13 <- sp)).
+  set (rs2 := nextinstr (rs#IR12 <- (rs#IR13) #IR13 <- sp)).
   set (rs3 := nextinstr rs2).
   exploit Mem.alloc_extends; eauto. apply Zle_refl. apply Zle_refl.
   intros [m1' [A B]].
@@ -1261,7 +1251,7 @@ Proof.
   unfold transl_function at 2.
   apply exec_straight_two with rs2 m2'.
   unfold exec_instr. rewrite A. fold sp. 
-  rewrite <- (sp_val ms (parent_sp s) rs); auto. rewrite C. auto.
+  rewrite (sp_val ms (parent_sp s) rs) in C; auto. rewrite C. auto.
   unfold exec_instr. unfold eval_shift_addr. unfold exec_store.
   change (rs2 IR13) with sp. change (rs2 IR14) with (rs IR14). rewrite ATLR.
   rewrite E. auto. 
@@ -1274,17 +1264,19 @@ Proof.
     eapply code_tail_next_int; auto.
     change (Int.unsigned Int.zero) with 0. 
     unfold transl_function. constructor.
-  assert (AG3: agree ms sp rs3).
+  assert (AG3: agree (undef_temps ms) sp rs3).
     unfold rs3. apply agree_nextinstr.
     unfold rs2. apply agree_nextinstr. 
-    apply agree_change_sp with (parent_sp s); auto. 
+    apply agree_change_sp with (parent_sp s).
+    apply agree_exten_temps with rs; auto.
+    intros. apply Pregmap.gso; auto with ppcgen.
     unfold sp. congruence.
   left; exists (State rs3 m3'); split.
   (* execution *)
   eapply exec_straight_steps_1; eauto.
   change (Int.unsigned Int.zero) with 0. constructor.
   (* match states *)
-  econstructor; eauto with coqlib. apply agree_undef_temps; auto.
+  econstructor; eauto with coqlib.
 Qed.
 
 Lemma exec_function_external_prop:

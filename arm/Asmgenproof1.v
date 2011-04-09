@@ -443,237 +443,133 @@ Qed.
 
 (** Decomposition of an integer constant *)
 
-(*
-Remark decompose_int_fold:
-  forall f n,
-  (forall x, f Int.zero x = x) ->
-  (forall x, f x Int.zero = x) ->
-  List.fold_right f Int.zero (decompose_int n) =
-  f (Int.and n (Int.repr 255))
-    (f (Int.and n (Int.repr 65280))
-       (f (Int.and n (Int.repr 16711680)) (Int.and n (Int.repr 4278190080)))).
+Lemma decompose_int_rec_or:
+  forall N n p x, List.fold_left Int.or (decompose_int_rec N n p) x = Int.or x n.
 Proof.
-  intros.
-  assert (forall i k,
-          List.fold_right f Int.zero (cons_if_not_zero i k) =
-          f i (List.fold_right f Int.zero k)).
-  intros. unfold cons_if_not_zero.
-  destruct (Int.eq_dec i Int.zero).
-  rewrite e. rewrite H. auto.
-  simpl. auto.
-  unfold decompose_int. repeat rewrite H1.
-  simpl fold_right. rewrite H0. auto.
+  induction N; intros; simpl.
+  destruct (Int.eq_dec n Int.zero); simpl. 
+  subst n. rewrite Int.or_zero. auto.
+  auto.
+  destruct (Int.eq_dec (Int.and n (Int.shl (Int.repr 3) p)) Int.zero).
+  auto.
+  simpl. rewrite IHN. rewrite Int.or_assoc. decEq. rewrite <- Int.and_or_distrib.
+  rewrite Int.or_not_self. apply Int.and_mone.
 Qed.
 
-Lemma decompose_int_or:
-  forall n, List.fold_right Int.or Int.zero (decompose_int n) = n.
+Lemma decompose_int_rec_xor:
+  forall N n p x, List.fold_left Int.xor (decompose_int_rec N n p) x = Int.xor x n.
 Proof.
-  intros. rewrite decompose_int_fold. 
-  repeat rewrite <- Int.and_or_distrib.
-  apply Int.and_mone. 
-  intros. rewrite Int.or_commut. apply Int.or_zero.
-  intros. apply Int.or_zero.
+  induction N; intros; simpl.
+  destruct (Int.eq_dec n Int.zero); simpl. 
+  subst n. rewrite Int.xor_zero. auto.
+  auto.
+  destruct (Int.eq_dec (Int.and n (Int.shl (Int.repr 3) p)) Int.zero).
+  auto.
+  simpl. rewrite IHN. rewrite Int.xor_assoc. decEq. rewrite <- Int.and_xor_distrib.
+  rewrite Int.xor_not_self. apply Int.and_mone.
 Qed.
 
-Lemma decompose_int_xor:
-  forall n, List.fold_right Int.xor Int.zero (decompose_int n) = n.
+Lemma decompose_int_rec_add:
+  forall N n p x, List.fold_left Int.add (decompose_int_rec N n p) x = Int.add x n.
 Proof.
-  intros. rewrite decompose_int_fold. 
-  repeat rewrite <- Int.and_xor_distrib.
-  apply Int.and_mone. 
-  intros. rewrite Int.xor_commut. apply Int.xor_zero.
-  intros. apply Int.xor_zero.
+  induction N; intros; simpl.
+  destruct (Int.eq_dec n Int.zero); simpl. 
+  subst n. rewrite Int.add_zero. auto.
+  auto.
+  destruct (Int.eq_dec (Int.and n (Int.shl (Int.repr 3) p)) Int.zero).
+  auto.
+  simpl. rewrite IHN. rewrite Int.add_assoc. decEq. rewrite Int.add_and. 
+  rewrite Int.or_not_self. apply Int.and_mone. apply Int.and_not_self.
 Qed.
 
-Lemma decompose_int_add:
-  forall n, List.fold_right Int.add Int.zero (decompose_int n) = n.
+Remark decompose_int_rec_nil:
+  forall N n p, decompose_int_rec N n p = nil -> n = Int.zero.
 Proof.
-  intros. rewrite decompose_int_fold. 
-  repeat rewrite Int.add_and.
-  apply Int.and_mone.
-  vm_compute; reflexivity.
-  vm_compute; reflexivity.
-  vm_compute; reflexivity.
-  intros. rewrite Int.add_commut. apply Int.add_zero.
-  intros. apply Int.add_zero.
-Qed.
-*)
-
-Lemma val_lessdef_trans:
-  forall v1 v2 v3, Val.lessdef v1 v2 -> Val.lessdef v2 v3 -> Val.lessdef v1 v3.
-Proof.
-  intros. destruct H. auto. auto.
+  intros. generalize (decompose_int_rec_or N n p Int.zero). rewrite H. simpl. 
+  rewrite Int.or_commut; rewrite Int.or_zero; auto.
 Qed.
 
-Remark recombine_or:
-  forall n,
-  Int.or (Int.and n (Int.repr 255))
-     (Int.or (Int.and n (Int.repr 65280))
-        (Int.or (Int.and n (Int.repr 16711680))
-                (Int.and n (Int.repr 4278190080)))) = n.
+Lemma decompose_int_general:
+  forall (f: val -> int -> val) (g: int -> int -> int),
+  (forall v1 n2 n3, f (f v1 n2) n3 = f v1 (g n2 n3)) ->
+  (forall n1 n2 n3, g (g n1 n2) n3 = g n1 (g n2 n3)) ->
+  (forall n, g Int.zero n = n) ->
+  (forall N n p x, List.fold_left g (decompose_int_rec N n p) x = g x n) ->
+  forall n v,
+  List.fold_left f (decompose_int n) v = f v n.
 Proof.
-  intros. repeat rewrite <- Int.and_or_distrib. 
-  replace (Int.or (Int.repr 255)
-                 (Int.or (Int.repr 65280)
-                    (Int.or (Int.repr 16711680) (Int.repr 4278190080))))
-        with Int.mone.
-  apply Int.and_mone.
-  apply Int.mkint_eq; vm_compute; reflexivity.
-Qed.
-
-Remark recombine_add:
-  forall n,
-  Int.add (Int.and n (Int.repr 255))
-     (Int.add (Int.and n (Int.repr 65280))
-        (Int.add (Int.and n (Int.repr 16711680))
-           (Int.and n (Int.repr 4278190080)))) = n.
-Proof.
-  intros. repeat rewrite Int.add_and.
-  replace (Int.or (Int.repr 255)
-                 (Int.or (Int.repr 65280)
-                    (Int.or (Int.repr 16711680) (Int.repr 4278190080))))
-        with Int.mone.
-  apply Int.and_mone.
-  apply Int.mkint_eq; vm_compute; reflexivity.
-  apply Int.mkint_eq; vm_compute; reflexivity.
-  apply Int.mkint_eq; vm_compute; reflexivity.
-  apply Int.mkint_eq; vm_compute; reflexivity.
-Qed.
-
-Remark recombine_xor:
-  forall n,
-  Int.xor (Int.and n (Int.repr 255))
-     (Int.xor (Int.and n (Int.repr 65280))
-        (Int.xor (Int.and n (Int.repr 16711680))
-                 (Int.and n (Int.repr 4278190080)))) = n.
-Proof.
-  intros. repeat rewrite <- Int.and_xor_distrib. 
-  replace (Int.xor (Int.repr 255)
-                 (Int.xor (Int.repr 65280)
-                    (Int.xor (Int.repr 16711680) (Int.repr 4278190080))))
-        with Int.mone.
-  apply Int.and_mone.
-  apply Int.mkint_eq; vm_compute; reflexivity.
-Qed.
-
-Lemma decompose_int_empty:
-  forall n,  decompose_int n = nil -> n = Int.zero.
-Proof.
-  intros.
-  assert (CONS: forall i l, cons_if_not_zero i l = nil -> i = Int.zero /\ l = nil).
-  unfold cons_if_not_zero; intros. 
-  destruct (Int.eq_dec i Int.zero). auto. congruence.
-  unfold decompose_int in H.
-  exploit CONS; eauto. clear H. intros [A H].
-  exploit CONS; eauto. clear H. intros [B H].
-  exploit CONS; eauto. clear H. intros [C H].
-  exploit CONS; eauto. clear H. intros [D H].
-  rewrite <- (recombine_or n).
-  rewrite A; rewrite B; rewrite C; rewrite D.
-  apply Int.mkint_eq; vm_compute; reflexivity.
-Qed.
-
-Lemma decompose_int_notempty:
-  forall n,
-  is_immed_arith n = false ->
-  decompose_int n <> nil.
-Proof.
-  intros; red; intros.
-  assert (n = Int.zero) by (apply decompose_int_empty; auto).
-  subst n. vm_compute in H. congruence.
-Qed.
-
-Lemma decompose_int_fold:
-  forall f domain n v,
-  (forall v', domain v' = true -> f v' Int.zero = v') ->
-  (forall v' n, domain v' = true -> domain (f v' n) = true) ->
-  (forall v' n, domain v' = false -> f v' n = Vundef) ->
-  domain Vundef = false ->
-  decompose_int n <> nil ->
-  List.fold_left f (decompose_int n) v =
-  f (f (f (f v (Int.and n (Int.repr 255)))
-               (Int.and n (Int.repr 65280)))
-       (Int.and n (Int.repr 16711680)))
-    (Int.and n (Int.repr 4278190080)).
-Proof.
-  intros until v; intros ZERO DOM1 DOM2 DOM3 NOTNIL.
-  assert (CONS1: forall n l v',
-                 domain v' = true ->
-                 fold_left f (cons_if_not_zero n l) v' = fold_left f l (f v' n)).
-    intros. unfold cons_if_not_zero. destruct (Int.eq_dec n0 Int.zero).
-    subst n0. rewrite ZERO; auto.
+  intros f g DISTR ASSOC ZERO DECOMP.
+  assert (A: forall l x y, g x (fold_left g l y) = fold_left g l (g x y)).
+    induction l; intros; simpl. auto. rewrite IHl. decEq. rewrite ASSOC; auto.
+  assert (B: forall l v n, fold_left f l (f v n) = f v (fold_left g l n)).
+    induction l; intros; simpl.
     auto.
-
-  case_eq (domain v); intros.
-  unfold decompose_int; simpl.
-  do 4 (rewrite CONS1; auto).
-
-  assert (FOLD_UNDEF: forall l, fold_left f l Vundef = Vundef).
-    induction l; simpl. auto. rewrite DOM2; auto.
-  transitivity Vundef. 
-  destruct (decompose_int n). congruence. simpl. rewrite DOM2; auto.
-  repeat rewrite DOM2; auto.
+    rewrite IHl. rewrite DISTR. decEq. decEq. auto.
+  intros. unfold decompose_int. 
+  destruct (decompose_int_rec 12 n Int.zero) as []_eqn. 
+  simpl. exploit decompose_int_rec_nil; eauto. congruence.
+  simpl. rewrite B. decEq.  
+  generalize (DECOMP 12%nat n Int.zero Int.zero).
+  rewrite Heql. simpl. repeat rewrite ZERO. auto.
 Qed.
 
 Lemma decompose_int_or:
-  forall v n,
-  is_immed_arith n = false ->
-  List.fold_left (fun v n => Val.or v (Vint n)) (decompose_int n) v = Val.or v (Vint n).
+  forall n v,
+  List.fold_left (fun v i => Val.or v (Vint i)) (decompose_int n) v = Val.or v (Vint n).
 Proof.
-  intros.
-  exploit (decompose_int_fold
-             (fun v n => Val.or v (Vint n))
-             (fun v => match v with Vint _ => true | _ => false end) n v).
-  intros. destruct v'; try discriminate. simpl. rewrite Int.or_zero; auto.
-  intros. destruct v'; simpl; auto.
-  intros. destruct v'; try discriminate; auto.
-  auto. apply decompose_int_notempty; auto.
-  intro EQ; rewrite EQ; clear EQ.
-  destruct v; simpl Val.or; auto.
-  repeat rewrite Int.or_assoc.
-  rewrite recombine_or. auto.
+  intros. apply decompose_int_general with (f := fun v n => Val.or v (Vint n)) (g := Int.or).
+  intros. rewrite Val.or_assoc. auto.
+  apply Int.or_assoc.
+  intros. rewrite Int.or_commut. apply Int.or_zero.
+  apply decompose_int_rec_or.
 Qed.
 
-Lemma decompose_int_add:
-  forall v n,
-  is_immed_arith n = false ->
-  List.fold_left (fun v n => Val.add v (Vint n)) (decompose_int n) v =
-  Val.add v (Vint n).
+Lemma decompose_int_bic:
+  forall n v,
+  List.fold_left (fun v i => Val.and v (Vint (Int.not i))) (decompose_int n) v = Val.and v (Vint (Int.not n)).
 Proof.
-  intros.
-  exploit (decompose_int_fold (fun v n => Val.add v (Vint n))
-              (fun v => match v with Vint _ => true
-                                   | Vptr _ _ => true
-                                   | _ => false end)
-              n v).
-  intros. destruct v'; try discriminate; simpl; rewrite Int.add_zero; auto.
-  intros. destruct v'; simpl; auto.
-  intros. destruct v'; try discriminate; auto.
-  auto. apply decompose_int_notempty; auto.
-  intro EQ; rewrite EQ.
-  repeat rewrite Val.add_assoc. 
-  simpl Val.add. rewrite recombine_add. auto.
+  intros. apply decompose_int_general with (f := fun v n => Val.and v (Vint (Int.not n))) (g := Int.or).
+  intros. rewrite Val.and_assoc. simpl. decEq. decEq. rewrite Int.not_or_and_not. auto.
+  apply Int.or_assoc.
+  intros. rewrite Int.or_commut. apply Int.or_zero.
+  apply decompose_int_rec_or.
 Qed.
 
 Lemma decompose_int_xor:
-  forall v n,
-  is_immed_arith n = false ->
-  List.fold_left (fun v n => Val.xor v (Vint n)) (decompose_int n) v = Val.xor v (Vint n).
+  forall n v,
+  List.fold_left (fun v i => Val.xor v (Vint i)) (decompose_int n) v = Val.xor v (Vint n).
 Proof.
-  intros.
-  exploit (decompose_int_fold
-             (fun v n => Val.xor v (Vint n))
-             (fun v => match v with Vint _ => true | _ => false end) n v).
-  intros. destruct v'; try discriminate. simpl. rewrite Int.xor_zero; auto.
-  intros. destruct v'; simpl; auto.
-  intros. destruct v'; try discriminate; auto.
-  auto. apply decompose_int_notempty; auto.
-  intro EQ; rewrite EQ; clear EQ.
-  destruct v; simpl Val.xor; auto.
-  repeat rewrite Int.xor_assoc. rewrite recombine_xor. auto.
+  intros. apply decompose_int_general with (f := fun v n => Val.xor v (Vint n)) (g := Int.xor).
+  intros. rewrite Val.xor_assoc. auto. 
+  apply Int.xor_assoc.
+  intros. rewrite Int.xor_commut. apply Int.xor_zero.
+  apply decompose_int_rec_xor.
 Qed.
 
-Lemma decompose_op_correct:
+Lemma decompose_int_add:
+  forall n v,
+  List.fold_left (fun v i => Val.add v (Vint i)) (decompose_int n) v = Val.add v (Vint n).
+Proof.
+  intros. apply decompose_int_general with (f := fun v n => Val.add v (Vint n)) (g := Int.add).
+  intros. rewrite Val.add_assoc. auto. 
+  apply Int.add_assoc.
+  intros. rewrite Int.add_commut. apply Int.add_zero.
+  apply decompose_int_rec_add.
+Qed.
+
+Lemma decompose_int_sub:
+  forall n v,
+  List.fold_left (fun v i => Val.sub v (Vint i)) (decompose_int n) v = Val.sub v (Vint n).
+Proof.
+  intros. apply decompose_int_general with (f := fun v n => Val.sub v (Vint n)) (g := Int.add).
+  intros. repeat rewrite Val.sub_add_opp. rewrite Val.add_assoc. decEq. simpl. decEq. 
+  rewrite Int.neg_add_distr; auto.
+  apply Int.add_assoc.
+  intros. rewrite Int.add_commut. apply Int.add_zero.
+  apply decompose_int_rec_add.
+Qed.
+
+Lemma iterate_op_correct:
   forall op1 op2 (f: val -> int -> val) (rs: regset) (r: ireg) m v0 n k,
   (forall (rs:regset) n,
     exec_instr ge fn (op2 (SOimm n)) rs m =
@@ -681,17 +577,15 @@ Lemma decompose_op_correct:
   (forall n,
     exec_instr ge fn (op1 (SOimm n)) rs m =
     OK (nextinstr (rs#r <- (f v0 n))) m) ->
-  is_immed_arith n = false ->
   exists rs',
-     exec_straight (decompose_op op1 op2 n k) rs m  k rs' m
+     exec_straight (iterate_op op1 op2 (decompose_int n) k) rs m  k rs' m
   /\ rs'#r = List.fold_left f (decompose_int n) v0
   /\ forall r': preg, r' <> r -> r' <> PC -> rs'#r' = rs#r'.
 Proof.
-  intros until k; intros SEM2 SEM1 NONZERO.
-  unfold decompose_op.
+  intros until k; intros SEM2 SEM1.
+  unfold iterate_op.
   destruct (decompose_int n) as [ | i tl] _eqn.
-  assert (n = Int.zero). apply decompose_int_empty; auto.
-  subst n. vm_compute in NONZERO; discriminate.
+  unfold decompose_int in Heql. destruct (decompose_int_rec 12%nat n Int.zero); congruence.
   revert k. pattern tl. apply List.rev_ind.
   (* base case *)
   intros; simpl. econstructor.
@@ -720,34 +614,19 @@ Lemma loadimm_correct:
   /\ forall r': preg, r' <> r -> r' <> PC -> rs'#r' = rs#r'.
 Proof.
   intros. unfold loadimm.
-  case_eq (is_immed_arith n); intro IMM.
-  (* single move *)
-  exists (nextinstr (rs#r <- (Vint n))).
-  split. apply exec_straight_one. reflexivity. reflexivity.  
-  split. rewrite nextinstr_inv; auto with ppcgen.
-   apply Pregmap.gss. 
-  intros. rewrite nextinstr_inv; auto. apply Pregmap.gso; auto.
-  case (is_immed_arith (Int.not n)).
-  (* single move-complement *)
-  exists (nextinstr (rs#r <- (Vint n))).
-  split. apply exec_straight_one.
-  simpl. change (Int.xor (Int.not n) Int.mone) with (Int.not (Int.not n)).
-  rewrite Int.not_involutive. auto.
-  reflexivity.
-  split. rewrite nextinstr_inv; auto with ppcgen.
-   apply Pregmap.gss. 
-  intros. rewrite nextinstr_inv; auto. apply Pregmap.gso; auto.
-  (* mov - or* *)
-  exploit (decompose_op_correct (Pmov r) (Porr r r)
-                                (fun v n => Val.or v (Vint n)) rs r m
-                                (Vint Int.zero) n k).
-  intros. auto.
-  intros. simpl. rewrite Int.or_commut. rewrite Int.or_zero. auto.
-  auto.  
-  intros [rs' [A [B C]]].
-  exists rs'; intuition.
-  rewrite B. rewrite decompose_int_or; auto.
-  simpl. rewrite Int.or_commut. rewrite Int.or_zero. auto.
+  destruct (le_dec (length (decompose_int n)) (length (decompose_int (Int.not n)))).
+  (* mov - orr* *)
+  replace (Vint n) with (List.fold_left (fun v i => Val.or v (Vint i)) (decompose_int n) Vzero).
+  apply iterate_op_correct.
+  auto.
+  intros; simpl. rewrite Int.or_commut; rewrite Int.or_zero; auto.
+  rewrite decompose_int_or. simpl. rewrite Int.or_commut; rewrite Int.or_zero; auto.
+  (* mvn - bic* *)
+  replace (Vint n) with (List.fold_left (fun v i => Val.and v (Vint (Int.not i))) (decompose_int (Int.not n)) (Vint Int.mone)).
+  apply iterate_op_correct.
+  auto.
+  intros. simpl. rewrite Int.and_commut; rewrite Int.and_mone; auto.
+  rewrite decompose_int_bic. simpl. rewrite Int.not_involutive. rewrite Int.and_commut. rewrite Int.and_mone; auto.
 Qed.
 
 (** Add integer immediate. *)
@@ -760,29 +639,21 @@ Lemma addimm_correct:
   /\ forall r': preg, r' <> r1 -> r' <> PC -> rs'#r' = rs#r'.
 Proof.
   intros. unfold addimm.
-  (* addi *)
-  case_eq (is_immed_arith n); intro IMM.
-  exists (nextinstr (rs#r1 <- (Val.add rs#r2 (Vint n)))).
-  split. apply exec_straight_one; auto.
-  split. rewrite nextinstr_inv; auto with ppcgen. rewrite Pregmap.gss. auto.
-  intros. rewrite nextinstr_inv; auto. apply Pregmap.gso; auto.
-  (* subi *)
-  case (is_immed_arith (Int.neg n)).
-  exists (nextinstr (rs#r1 <- (Val.sub rs#r2 (Vint (Int.neg n))))).
-  split. apply exec_straight_one; auto.
-  split. rewrite nextinstr_inv; auto with ppcgen. rewrite Pregmap.gss.
-    rewrite Val.sub_opp_add. auto.
-  intros. rewrite nextinstr_inv; auto. apply Pregmap.gso; auto.
-  (* addi multiple *)
-  exploit (decompose_op_correct (Padd r1 r2) (Padd r1 r1)
-                                (fun v n => Val.add v (Vint n)) rs r1 m
-                                (rs r2) n k).
-  intros. auto.
-  intros. simpl. auto.
+  destruct (le_dec (length (decompose_int n)) (length (decompose_int (Int.neg n)))).
+  (* add - add* *)
+  replace (Val.add (rs r2) (Vint n))
+     with (List.fold_left (fun v i => Val.add v (Vint i)) (decompose_int n) (rs r2)).
+  apply iterate_op_correct.
   auto.
-  intros [rs' [A [B C]]].
-  generalize (decompose_int_add (rs r2) n). rewrite <- B. intros D.
-  exists rs'; intuition.
+  auto.
+  apply decompose_int_add.
+  (* sub - sub* *)
+  replace (Val.add (rs r2) (Vint n))
+     with (List.fold_left (fun v i => Val.sub v (Vint i)) (decompose_int (Int.neg n)) (rs r2)).
+  apply iterate_op_correct.
+  auto.
+  auto.
+  rewrite decompose_int_sub. apply Val.sub_opp_add.
 Qed.
 
 (* And integer immediate *)
@@ -793,7 +664,7 @@ Lemma andimm_correct:
   exists rs',
      exec_straight (andimm r1 r2 n k) rs m  k rs' m
   /\ rs'#r1 = Val.and rs#r2 (Vint n)
-  /\ forall r': preg, r' <> r1 -> r' <> IR14 -> r' <> PC -> rs'#r' = rs#r'.
+  /\ forall r': preg, r' <> r1 -> r' <> PC -> rs'#r' = rs#r'.
 Proof.
   intros. unfold andimm.
   (* andi *)
@@ -802,22 +673,13 @@ Proof.
   split. apply exec_straight_one; auto.
   split. rewrite nextinstr_inv; auto with ppcgen. apply Pregmap.gss. 
   intros. rewrite nextinstr_inv; auto. apply Pregmap.gso; auto.
-  (* bici *)
-  case (is_immed_arith (Int.not n)).
-  exists (nextinstr (rs#r1 <- (Val.and rs#r2 (Vint n)))).
-  split. apply exec_straight_one; auto. simpl.
-    change (Int.xor (Int.not n) Int.mone) with (Int.not (Int.not n)).
-    rewrite Int.not_involutive. auto.
-  split. rewrite nextinstr_inv; auto with ppcgen. apply Pregmap.gss.
-  intros. rewrite nextinstr_inv; auto. apply Pregmap.gso; auto.
-  (* general *)
-  exploit loadimm_correct. intros [rs' [A [B C]]].
-  exists (nextinstr (rs'#r1 <- (Val.and rs#r2 (Vint n)))).
-  split. eapply exec_straight_trans. eauto. apply exec_straight_one.
-  simpl. rewrite B. rewrite C; auto with ppcgen. 
+  (* bic - bic* *)
+  replace (Val.and (rs r2) (Vint n))
+     with (List.fold_left (fun v i => Val.and v (Vint (Int.not i))) (decompose_int (Int.not n)) (rs r2)).
+  apply iterate_op_correct.
   auto.
-  split. rewrite nextinstr_inv; auto with ppcgen. apply Pregmap.gss.
-  intros. rewrite nextinstr_inv; auto. rewrite Pregmap.gso; auto.
+  auto.
+  rewrite decompose_int_bic. rewrite Int.not_involutive. auto.
 Qed.
 
 (** Reverse sub immediate *)
@@ -830,25 +692,15 @@ Lemma rsubimm_correct:
   /\ forall r': preg, r' <> r1 -> r' <> PC -> rs'#r' = rs#r'.
 Proof.
   intros. unfold rsubimm.
-  (* rsbi *)
-  case_eq (is_immed_arith n); intro IMM.
-  exists (nextinstr (rs#r1 <- (Val.sub (Vint n) rs#r2))).
-  split. apply exec_straight_one; auto.
-  split. rewrite nextinstr_inv; auto with ppcgen. rewrite Pregmap.gss. auto.
-  intros. rewrite nextinstr_inv; auto. apply Pregmap.gso; auto.
-  (* rsbi - addi multiple *)
-  exploit (decompose_op_correct (Prsb r1 r2) (Padd r1 r1)
-                                (fun v n => Val.add v (Vint n)) rs r1 m
-                                (Val.neg (rs r2)) n k).
-  intros. auto.
-  intros. simpl. destruct (rs r2); auto. simpl. rewrite Int.sub_add_opp. 
-  rewrite Int.add_commut; auto.
+  (* rsb - add* *)
+  replace (Val.sub (Vint n) (rs r2))
+     with (List.fold_left (fun v i => Val.add v (Vint i)) (decompose_int n) (Val.neg (rs r2))).
+  apply iterate_op_correct.
   auto.
-  intros [rs' [A [B C]]].
-  exists rs'; intuition.
-  rewrite B. rewrite decompose_int_add; auto.  
-  destruct (rs r2); simpl; auto. 
-  rewrite Int.sub_add_opp. rewrite Int.add_commut. auto.
+  intros. simpl. destruct (rs r2); auto. simpl. rewrite Int.sub_add_opp.
+  rewrite Int.add_commut; auto.
+  rewrite decompose_int_add. 
+  destruct (rs r2); simpl; auto. rewrite Int.sub_add_opp. rewrite Int.add_commut; auto.
 Qed.
 
 (** Or immediate *)
@@ -861,22 +713,13 @@ Lemma orimm_correct:
   /\ forall r': preg, r' <> r1 -> r' <> PC -> rs'#r' = rs#r'.
 Proof.
   intros. unfold orimm.
-  (* ori *)
-  case_eq (is_immed_arith n); intro IMM.
-  exists (nextinstr (rs#r1 <- (Val.or rs#r2 (Vint n)))).
-  split. apply exec_straight_one; auto.
-  split. rewrite nextinstr_inv; auto with ppcgen. rewrite Pregmap.gss. auto.
-  intros. rewrite nextinstr_inv; auto. apply Pregmap.gso; auto.
-  (* orii multiple *)
-  exploit (decompose_op_correct (Porr r1 r2) (Porr r1 r1)
-                                (fun v n => Val.or v (Vint n)) rs r1 m
-                                (rs r2) n k).
-  intros. auto.
-  intros. simpl. auto.
+  (* ori - ori* *)
+  replace (Val.or (rs r2) (Vint n))
+     with (List.fold_left (fun v i => Val.or v (Vint i)) (decompose_int n) (rs r2)).
+  apply iterate_op_correct.
   auto.
-  intros [rs' [A [B C]]].
-  exists rs'; intuition.
-  rewrite B. rewrite decompose_int_or; auto. 
+  auto.
+  apply decompose_int_or.
 Qed.
 
 (** Xor immediate *)
@@ -889,22 +732,13 @@ Lemma xorimm_correct:
   /\ forall r': preg, r' <> r1 -> r' <> PC -> rs'#r' = rs#r'.
 Proof.
   intros. unfold xorimm.
-  (* xori *)
-  case_eq (is_immed_arith n); intro IMM.
-  exists (nextinstr (rs#r1 <- (Val.xor rs#r2 (Vint n)))).
-  split. apply exec_straight_one; auto.
-  split. rewrite nextinstr_inv; auto with ppcgen. rewrite Pregmap.gss. auto.
-  intros. rewrite nextinstr_inv; auto. apply Pregmap.gso; auto.
-  (* xori multiple *)
-  exploit (decompose_op_correct (Peor r1 r2) (Peor r1 r1)
-                                (fun v n => Val.xor v (Vint n)) rs r1 m
-                                (rs r2) n k).
-  intros. auto.
-  intros. simpl. auto.
+  (* xori - xori* *)
+  replace (Val.xor (rs r2) (Vint n))
+     with (List.fold_left (fun v i => Val.xor v (Vint i)) (decompose_int n) (rs r2)).
+  apply iterate_op_correct.
   auto.
-  intros [rs' [A [B C]]].
-  exists rs'; intuition.
-  rewrite B. rewrite decompose_int_xor; auto.
+  auto.
+  apply decompose_int_xor.
 Qed.
 
 (** Indexed memory loads. *)

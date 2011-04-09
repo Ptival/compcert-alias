@@ -102,15 +102,15 @@ Ltac IsTail :=
   | _ => idtac
   end.
 
-Lemma decompose_op_tail:
-  forall op1 op2 n k, is_tail k (decompose_op op1 op2 n k).
+Lemma iterate_op_tail:
+  forall op1 op2 l k, is_tail k (iterate_op op1 op2 l k).
 Proof. 
-  intros. unfold decompose_op. 
-  destruct (decompose_int n).
+  intros. unfold iterate_op. 
+  destruct l.
   auto with coqlib.
   constructor. revert l; induction l; simpl; auto with coqlib.
 Qed.
-Hint Resolve decompose_op_tail: ppcretaddr.
+Hint Resolve iterate_op_tail: ppcretaddr.
 
 Lemma loadimm_tail:
   forall r n k, is_tail k (loadimm r n k).
