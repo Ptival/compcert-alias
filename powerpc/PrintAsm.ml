@@ -437,8 +437,7 @@ let print_instruction oc labels = function
       let sz = camlint_of_coqint sz
       and ofs = camlint_of_coqint ofs in
       assert (ofs = 0l);
-      (* Keep stack 16-aligned *)
-      let adj = Int32.neg (Int32.logand (Int32.add sz 15l) 0xFFFF_FFF0l) in
+      let adj = Int32.neg sz in
       if adj >= -0x8000l then
         fprintf oc "	stwu	%a, %ld(%a)\n" ireg GPR1 adj ireg GPR1
       else begin

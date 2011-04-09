@@ -63,7 +63,7 @@ Definition make_env (b: bounds) :=
   let ofl := align oendi 8 in       (* float locals *)
   let ofcs := ofl + 8 * b.(bound_float_local) in (* float callee-saves *)
   let ostkdata := ofcs + 8 * b.(bound_float_callee_save) in (* stack data *)
-  let sz := ostkdata + b.(bound_stack_data) in
+  let sz := align (ostkdata + b.(bound_stack_data)) 16 in
   mk_frame_env sz 0 ora
                   oil oics b.(bound_int_callee_save)
                   ofl ofcs b.(bound_float_callee_save)
@@ -86,6 +86,7 @@ Remark frame_env_separated:
 Proof.
   intros.
   generalize (align_le (fe.(fe_ofs_int_callee_save) + 4 * b.(bound_int_callee_save)) 8 (refl_equal _)).
+  generalize (align_le (fe.(fe_stack_data) + b.(bound_stack_data)) 16 (refl_equal _)).
   unfold fe, make_env, fe_size, fe_ofs_link, fe_ofs_retaddr,
     fe_ofs_int_local, fe_ofs_int_callee_save,
     fe_num_int_callee_save,
@@ -112,7 +113,8 @@ Remark frame_env_aligned:
   /\ (8 | fe.(fe_ofs_float_local))
   /\ (8 | fe.(fe_ofs_float_callee_save))
   /\ (4 | fe.(fe_ofs_retaddr))
-  /\ (4 | fe.(fe_stack_data)).
+  /\ (4 | fe.(fe_stack_data))
+  /\ (16 | fe.(fe_size)).
 Proof.
   intros.
   unfold fe, make_env, fe_size, fe_ofs_link, fe_ofs_retaddr,
@@ -134,16 +136,7 @@ Proof.
   assert (4 | x6).
     apply Zdivides_trans with 8. exists 2; auto.
     unfold x6. apply Zdivide_plus_r; auto. exists (bound_float_callee_save b); ring.
+  set (x7 := align (x6 + bound_stack_data b) 16).
+  assert (16 | x7). unfold x7; apply align_divides. omega.
   intuition.
 Qed.
-
-(*
-Remark align_float_part:
-  forall b,
-  8 + 4 * bound_outgoing b + 4 * bound_int_local b + 4 + 4 * bound_int_callee_save b <=
-  align (8 + 4 * bound_outgoing b + 4 * bound_int_local b + 4 + 4 * bound_int_callee_save b) 8.
-Proof.
-  intros. apply align_le. omega.
-Qed.
-*)
-
