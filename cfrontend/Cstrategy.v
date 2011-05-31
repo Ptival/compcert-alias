@@ -1179,10 +1179,32 @@ Qed.
 
 End STRATEGY.
 
-(** The main simulation result. *)
+(** The semantics that follows the strategy. *)
 
 Definition semantics (p: program) :=
   mk_semantics step (initial_state p) final_state (Genv.globalenv p).
+
+(** This semantics is receptive to changes in events. *)
+
+Lemma semantics_receptive: 
+  forall p, sem_receptive (semantics p).
+Proof.
+  intros. constructor; simpl; intros.
+(* receptiveness *)
+  assert (t1 = E0 -> exists s2, step (Genv.globalenv p) s t2 s2).
+    intros. subst. inv H0. exists s1; auto.
+  inversion H; subst.
+  inv H2; auto.
+  inv H2; auto. 
+  exploit external_call_receptive; eauto. intros [vres2 [m2 EC2]]. 
+  exists (Returnstate vres2 k m2). right; econstructor; eauto.
+(* trace length *)
+  inv H. 
+  inv H0; simpl; omega.
+  inv H0; simpl; try omega. eapply external_call_trace_length; eauto.
+Qed.
+
+(** The main simulation result. *)
 
 Theorem strategy_simulation:
   forall p, backward_simulation (Csem.semantics p) (semantics p).
@@ -1192,9 +1214,7 @@ Proof.
 (* symbols *)
   auto.
 (* trace length *)
-  intros. inv H. 
-  inv H0; simpl; omega.
-  inv H0; simpl; try omega. eapply external_call_trace_length; eauto.
+  intros. eapply sr_traces. apply semantics_receptive. simpl. eauto.
 (* initial states exist *)
   intros. exists s1; auto.
 (* initial states match *)
