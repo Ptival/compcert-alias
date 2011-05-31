@@ -1182,11 +1182,27 @@ Inductive final_state: state -> int -> Prop :=
   | final_state_intro: forall r m,
       final_state (Returnstate (Vint r) Kstop m) r.
 
-(** Execution of a whole program: [exec_program p beh]
-  holds if the application of [p]'s main function to no arguments
-  in the initial memory state for [p] has [beh] as observable
-  behavior. *)
+(** Wrapping up these definitions in a small-step semantics. *)
 
-Definition exec_program (p: program) (beh: program_behavior) : Prop :=
-  program_behaves step (initial_state p) final_state (Genv.globalenv p) beh.
+Definition semantics (p: program) :=
+  mk_semantics step (initial_state p) final_state (Genv.globalenv p).
 
+(** This semantics is receptive to changes in events. *)
+
+Lemma semantics_receptive: 
+  forall p, sem_receptive (semantics p).
+Proof.
+  intros. constructor; simpl; intros.
+(* receptiveness *)
+  assert (t1 = E0 -> exists s2, step (Genv.globalenv p) s t2 s2).
+    intros. subst. inv H0. exists s1; auto.
+  inversion H; subst.
+  inv H2; auto.
+  inv H2; auto. 
+  exploit external_call_receptive; eauto. intros [vres2 [m2 EC2]]. 
+  exists (Returnstate vres2 k m2). right; econstructor; eauto.
+(* trace length *)
+  inv H. 
+  inv H0; simpl; omega.
+  inv H0; simpl; try omega. eapply external_call_trace_length; eauto.
+Qed.
