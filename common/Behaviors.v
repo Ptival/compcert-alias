@@ -123,22 +123,21 @@ Qed.
 Section PROGRAM_BEHAVIORS.
 
 Variable L: semantics.
-Variable ge: globalenv L.  
 
 Inductive state_behaves (s: state L): program_behavior -> Prop :=
   | state_terminates: forall t s' r,
-      star L ge s t s' ->
+      star L (genv L) s t s' ->
       final_state L s' r ->
       state_behaves s (Terminates t r)
   | state_diverges: forall t s',
-      star L ge s t s' -> forever_silent L ge s' ->
+      star L (genv L) s t s' -> forever_silent L (genv L) s' ->
       state_behaves s (Diverges t)
   | state_reacts: forall T,
-      forever_reactive L ge s T ->
+      forever_reactive L (genv L) s T ->
       state_behaves s (Reacts T)
   | state_goes_wrong: forall t s',
-      star L ge s t s' ->
-      nostep L ge s' ->
+      star L (genv L) s t s' ->
+      nostep L (genv L) s' ->
       (forall r, ~final_state L s' r) ->
       state_behaves s (Goes_wrong t).
 
@@ -152,7 +151,7 @@ Inductive program_behaves: program_behavior -> Prop :=
 
 Lemma state_behaves_app:
   forall s1 t s2 beh,
-  star L ge s1 t s2 -> state_behaves s2 beh -> state_behaves s1 (behavior_app t beh).
+  star L (genv L) s1 t s2 -> state_behaves s2 beh -> state_behaves s1 (behavior_app t beh).
 Proof.
   intros. inv H0; simpl; econstructor; eauto; try (eapply star_trans; eauto). 
   eapply star_forever_reactive; eauto.
@@ -172,12 +171,12 @@ Section TRACEINF_REACTS.
 Variable s0: state L.
 
 Hypothesis reacts:
-  forall s1 t1, star L ge s0 t1 s1 ->
-  exists s2, exists t2, star L ge s1 t2 s2 /\ t2 <> E0.
+  forall s1 t1, star L (genv L) s0 t1 s1 ->
+  exists s2, exists t2, star L (genv L) s1 t2 s2 /\ t2 <> E0.
 
 Lemma reacts':
-  forall s1 t1, star L ge s0 t1 s1 ->
-  { s2 : state L & { t2 : trace | star L ge s1 t2 s2 /\ t2 <> E0 } }.
+  forall s1 t1, star L (genv L) s0 t1 s1 ->
+  { s2 : state L & { t2 : trace | star L (genv L) s1 t2 s2 /\ t2 <> E0 } }.
 Proof.
   intros. 
   destruct (constructive_indefinite_description _ (reacts H)) as [s2 A].
@@ -185,7 +184,7 @@ Proof.
   exists s2; exists t2; auto.
 Qed.
 
-CoFixpoint build_traceinf' (s1: state L) (t1: trace) (ST: star L ge s0 t1 s1) : traceinf' :=
+CoFixpoint build_traceinf' (s1: state L) (t1: trace) (ST: star L (genv L) s0 t1 s1) : traceinf' :=
   match reacts' ST with
   | existT s2 (exist t2 (conj A B)) =>
       Econsinf' t2 
@@ -194,8 +193,8 @@ CoFixpoint build_traceinf' (s1: state L) (t1: trace) (ST: star L ge s0 t1 s1) : 
   end.
 
 Lemma reacts_forever_reactive_rec:
-  forall s1 t1 (ST: star L ge s0 t1 s1),
-  forever_reactive L ge s1 (traceinf_of_traceinf' (build_traceinf' ST)).
+  forall s1 t1 (ST: star L (genv L) s0 t1 s1),
+  forever_reactive L (genv L) s1 (traceinf_of_traceinf' (build_traceinf' ST)).
 Proof.
   cofix COINDHYP; intros.
   rewrite (unroll_traceinf' (build_traceinf' ST)). simpl. 
@@ -205,9 +204,9 @@ Proof.
 Qed.
 
 Lemma reacts_forever_reactive:
-  exists T, forever_reactive L ge s0 T.
+  exists T, forever_reactive L (genv L) s0 T.
 Proof.
-  exists (traceinf_of_traceinf' (build_traceinf' (star_refl L ge s0))).
+  exists (traceinf_of_traceinf' (build_traceinf' (star_refl L (genv L) s0))).
   apply reacts_forever_reactive_rec.
 Qed.
 
@@ -215,8 +214,8 @@ End TRACEINF_REACTS.
 
 Lemma diverges_forever_silent:
   forall s0,
-  (forall s1 t1, star L ge s0 t1 s1 -> exists s2, L ge s1 E0 s2) ->
-  forever_silent L ge s0.
+  (forall s1 t1, star L (genv L) s0 t1 s1 -> exists s2, L (genv L) s1 E0 s2) ->
+  forever_silent L (genv L) s0.
 Proof.
   cofix COINDHYP; intros. 
   destruct (H s0 E0) as [s1 ST]. constructor. 
@@ -228,11 +227,11 @@ Lemma state_behaves_exists:
   forall s, exists beh, state_behaves s beh.
 Proof.
   intros s0.
-  destruct (classic (forall s1 t1, star L ge s0 t1 s1 -> exists s2, exists t2, L ge s1 t2 s2)).
+  destruct (classic (forall s1 t1, star L (genv L) s0 t1 s1 -> exists s2, exists t2, L (genv L) s1 t2 s2)).
 (* 1 Divergence (silent or reactive) *)
-  destruct (classic (exists s1, exists t1, star L ge s0 t1 s1 /\
-                       (forall s2 t2, star L ge s1 t2 s2 ->
-                        exists s3, L ge s2 E0 s3))).
+  destruct (classic (exists s1, exists t1, star L (genv L) s0 t1 s1 /\
+                       (forall s2 t2, star L (genv L) s1 t2 s2 ->
+                        exists s3, L (genv L) s2 E0 s3))).
 (* 1.1 Silent divergence *)
   destruct H0 as [s1 [t1 [A B]]].
   exists (Diverges t1); econstructor; eauto. 
@@ -279,23 +278,18 @@ Qed.
 
 End PROGRAM_BEHAVIORS.
 
-Implicit Arguments state_behaves [].
-Implicit Arguments program_behaves [].
-
 (** * Forward simulations and program behaviors *)
 
 Section FORWARD_SIMULATIONS.
 
 Variable L1: semantics.
 Variable L2: semantics.
-Variable ge1: globalenv L1.
-Variable ge2: globalenv L2.
-Variable S: forward_simulation L1 L2 ge1 ge2.
+Variable S: forward_simulation L1 L2.
 
 Lemma forward_simulation_state_behaves:
   forall i s1 s2 beh1,
-  S i s1 s2 -> state_behaves L1 ge1 s1 beh1 ->
-  exists beh2, state_behaves L2 ge2 s2 beh2 /\ behavior_improves beh1 beh2.
+  S i s1 s2 -> state_behaves L1 s1 beh1 ->
+  exists beh2, state_behaves L2 s2 beh2 /\ behavior_improves beh1 beh2.
 Proof.
   intros. inv H0. 
 (* termination *)
@@ -314,7 +308,7 @@ Proof.
   apply behavior_improves_refl.
 (* going wrong *)
   exploit simulation_star; eauto. intros [i' [s2' [A B]]].
-  destruct (state_behaves_exists ge2 s2') as [beh' SB].
+  destruct (state_behaves_exists L2 s2') as [beh' SB].
   exists (behavior_app t beh'); split. 
   eapply state_behaves_app; eauto. 
   replace (Goes_wrong t) with (behavior_app t (Goes_wrong E0)).
@@ -323,8 +317,8 @@ Proof.
 Qed.
 
 Theorem forward_simulation_behavior_improves:
-  forall beh1, program_behaves L1 ge1 beh1 ->
-  exists beh2, program_behaves L2 ge2 beh2 /\ behavior_improves beh1 beh2.
+  forall beh1, program_behaves L1 beh1 ->
+  exists beh2, program_behaves L2 beh2 /\ behavior_improves beh1 beh2.
 Proof.
   intros. inv H.
 (* initial state defined *)
@@ -334,7 +328,7 @@ Proof.
 (* initial state undefined *)
   destruct (classic (exists s', initial_state L2 s')).
   destruct H as [s' INIT]. 
-  destruct (state_behaves_exists ge2 s') as [beh' SB].
+  destruct (state_behaves_exists L2 s') as [beh' SB].
   exists beh'; split. econstructor; eauto. apply behavior_improves_bot.
   exists (Goes_wrong E0); split.
   apply program_goes_initially_wrong. 
@@ -344,8 +338,8 @@ Qed.
 
 Corollary forward_simulation_same_safe_behavior:
   forall beh,
-  program_behaves L1 ge1 beh -> not_wrong beh ->
-  program_behaves L2 ge2 beh.
+  program_behaves L1 beh -> not_wrong beh ->
+  program_behaves L2 beh.
 Proof.
   intros. exploit forward_simulation_behavior_improves; eauto. 
   intros [beh' [A B]]. destruct B. 
@@ -361,17 +355,15 @@ Section BACKWARD_SIMULATIONS.
 
 Variable L1: semantics.
 Variable L2: semantics.
-Variable ge1: globalenv L1.
-Variable ge2: globalenv L2.
-Variable S: backward_simulation L1 L2 ge1 ge2.
+Variable S: backward_simulation L1 L2.
 
 Definition safe_along_behavior (s: state L1) (b: program_behavior) : Prop :=
-  forall t1 s' b2, star L1 ge1 s t1 s' -> b = behavior_app t1 b2 ->
+  forall t1 s' b2, star L1 (genv L1) s t1 s' -> b = behavior_app t1 b2 ->
      (exists r, final_state L1 s' r)
-  \/ (exists t2, exists s'', L1 ge1 s' t2 s'').
+  \/ (exists t2, exists s'', L1 (genv L1) s' t2 s'').
 
 Remark safe_along_safe:
-  forall s b, safe_along_behavior s b -> safe L1 ge1 s.
+  forall s b, safe_along_behavior s b -> safe L1 (genv L1) s.
 Proof.
   intros; red; intros. eapply H; eauto. symmetry; apply behavior_app_E0. 
 Qed.
@@ -379,7 +371,7 @@ Qed.
 Remark star_safe_along:
   forall s b t1 s' b2,
   safe_along_behavior s b ->
-  star L1 ge1 s t1 s' -> b = behavior_app t1 b2 ->
+  star L1 (genv L1) s t1 s' -> b = behavior_app t1 b2 ->
   safe_along_behavior s' b2.
 Proof.
   intros; red; intros. eapply H. eapply star_trans; eauto.
@@ -390,7 +382,10 @@ Remark not_safe_along_behavior:
   forall s b,
   ~ safe_along_behavior s b ->
   exists t, exists s',
-    behavior_prefix t b /\ star L1 ge1 s t s' /\ nostep L1 ge1 s' /\ (forall r, ~(final_state L1 s' r)).
+     behavior_prefix t b 
+  /\ star L1 (genv L1) s t s'
+  /\ nostep L1 (genv L1) s'
+  /\ (forall r, ~(final_state L1 s' r)).
 Proof.
   intros. 
   destruct (not_all_ex_not _ _ H) as [t1 A]; clear H.
@@ -407,15 +402,15 @@ Proof.
 Qed.
 
 Lemma backward_simulation_star:
-  forall s2 t s2', star L2 ge2 s2 t s2' ->
+  forall s2 t s2', star L2 (genv L2) s2 t s2' ->
   forall i s1 b, S i s1 s2 -> safe_along_behavior s1 (behavior_app t b) ->
-  exists i', exists s1', star L1 ge1 s1 t s1' /\ S i' s1' s2'.
+  exists i', exists s1', star L1 (genv L1) s1 t s1' /\ S i' s1' s2'.
 Proof.
   induction 1; intros.
   exists i; exists s1; split; auto. apply star_refl.
   exploit (bsim_simulation S); eauto. eapply safe_along_safe; eauto. 
   intros [i' [s1' [A B]]].
-  assert (star L1 ge1 s0 t1 s1'). intuition. apply plus_star; auto.
+  assert (star L1 (genv L1) s0 t1 s1'). intuition. apply plus_star; auto.
   exploit IHstar; eauto. eapply star_safe_along; eauto.
   subst t; apply behavior_app_assoc.
   intros [i'' [s2'' [C D]]].
@@ -424,12 +419,12 @@ Qed.
 
 Lemma backward_simulation_forever_silent:
   forall i s1 s2,
-  forever_silent L2 ge2 s2 -> S i s1 s2 -> safe L1 ge1 s1 ->
-  forever_silent L1 ge1 s1.
+  forever_silent L2 (genv L2) s2 -> S i s1 s2 -> safe L1 (genv L1) s1 ->
+  forever_silent L1 (genv L1) s1.
 Proof.
   assert (forall i s1 s2,
-         forever_silent L2 ge2 s2 -> S i s1 s2 -> safe L1 ge1 s1 ->
-         forever_silent_N L1 (bsim_order S) ge1 i s1).
+         forever_silent L2 (genv L2) s2 -> S i s1 s2 -> safe L1 (genv L1) s1 ->
+         forever_silent_N L1 (bsim_order S) (genv L1) i s1).
     cofix COINDHYP; intros.
     inv H.  destruct (bsim_simulation S _ _ _ H2 _ H0 H1) as [i' [s2' [A B]]].
     destruct A as [C | [C D]].
@@ -442,8 +437,8 @@ Qed.
 
 Lemma backward_simulation_forever_reactive:
   forall i s1 s2 T,
-  forever_reactive L2 ge2 s2 T -> S i s1 s2 -> safe_along_behavior s1 (Reacts T) ->
-  forever_reactive L1 ge1 s1 T.
+  forever_reactive L2 (genv L2) s2 T -> S i s1 s2 -> safe_along_behavior s1 (Reacts T) ->
+  forever_reactive L1 (genv L1) s1 T.
 Proof.
   cofix COINDHYP; intros. inv H. 
   destruct (backward_simulation_star H2 _ (Reacts T0) H0) as [i' [s1' [A B]]]; eauto.
@@ -452,8 +447,8 @@ Qed.
 
 Lemma backward_simulation_state_behaves:
   forall i s1 s2 beh2,
-  S i s1 s2 -> state_behaves L2 ge2 s2 beh2 ->
-  exists beh1, state_behaves L1 ge1 s1 beh1 /\ behavior_improves beh1 beh2.
+  S i s1 s2 -> state_behaves L2 s2 beh2 ->
+  exists beh1, state_behaves L1 s1 beh1 /\ behavior_improves beh1 beh2.
 Proof.
   intros. destruct (classic (safe_along_behavior s1 beh2)).
 (* 1. Safe along *)
@@ -499,8 +494,8 @@ Proof.
 Qed.
 
 Theorem backward_simulation_behavior_improves:
-  forall beh2, program_behaves L2 ge2 beh2 ->
-  exists beh1, program_behaves L1 ge1 beh1 /\ behavior_improves beh1 beh2.
+  forall beh2, program_behaves L2 beh2 ->
+  exists beh1, program_behaves L1 beh1 /\ behavior_improves beh1 beh2.
 Proof.
   intros. inv H.
 (* L2's initial state is defined. *)
@@ -524,8 +519,8 @@ Proof.
 Qed.
 
 Corollary backward_simulation_same_safe_behavior:
-  (forall beh, program_behaves L1 ge1 beh -> not_wrong beh) ->
-  (forall beh, program_behaves L2 ge2 beh -> program_behaves L1 ge1 beh).
+  (forall beh, program_behaves L1 beh -> not_wrong beh) ->
+  (forall beh, program_behaves L2 beh -> program_behaves L1 beh).
 Proof.
   intros. exploit backward_simulation_behavior_improves; eauto. 
   intros [beh' [A B]]. destruct B. 

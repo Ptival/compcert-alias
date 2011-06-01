@@ -20,6 +20,7 @@ Require Import Values.
 Require Import Events.
 Require Import Globalenvs.
 Require Import Smallstep.
+Require Import Behaviors.
 
 (** This file uses classical logic (the axiom of excluded middle), as
   well as the following extensionality property over infinite
@@ -200,46 +201,38 @@ Proof.
   inv H3. simpl. auto. econstructor; eauto. econstructor; eauto. unfold E0; congruence.
 Qed.
 
-(** * Properties of deterministic semantics *)
+(** * Definition and properties of deterministic semantics *)
+
+Record deterministic (L: semantics) := mk_deterministic {
+  det_step: forall s0 t1 s1 t2 s2,
+    L (genv L) s0 t1 s1 -> L (genv L) s0 t2 s2 -> s1 = s2 /\ t1 = t2;
+  det_initial_state: forall s1 s2,
+    initial_state L s1 -> initial_state L s2 -> s1 = s2;
+  det_final_state: forall s r1 r2,
+    final_state L s r1 -> final_state L s r2 -> r1 = r2;
+  det_final_nostep: forall s r,
+    final_state L s r -> nostep L (genv L) s
+}.
 
 Section DETERM_SEM.
 
-(** We assume given a semantics that is deterministic, in the following sense. *)
-
-Variable genv: Type.
-Variable state: Type.
-Variable step: genv -> state -> trace -> state -> Prop.
-Variable initial_state: state -> Prop.
-Variable final_state: state -> int -> Prop.
-
-Hypothesis step_deterministic:
-  forall ge s0 t1 s1 t2 s2,
-  step ge s0 t1 s1 -> step ge s0 t2 s2 ->
-  s1 = s2 /\ t1 = t2.
-
-Hypothesis initial_state_determ:
-  forall s1 s2, initial_state s1 -> initial_state s2 -> s1 = s2.
-
-Hypothesis final_state_determ:
-  forall st r1 r2, final_state st r1 -> final_state st r2 -> r1 = r2.
-
-Hypothesis final_state_nostep:
-  forall ge st r, final_state st r -> nostep step ge st.
+Variable L: semantics.
+Hypothesis DET: deterministic L.
 
 Ltac use_step_deterministic :=
   match goal with
-  | [ S1: step _ _ ?t1 _, S2: step _ _ ?t2 _ |- _ ] =>
-    destruct (step_deterministic _ _ _ _ _ _ S1 S2) as [EQ1 EQ2]; subst
+  | [ S1: step L (genv L) _ ?t1 _, S2: step L (genv L) _ ?t2 _ |- _ ] =>
+    destruct (det_step L DET _ _ _ _ _ S1 S2) as [EQ1 EQ2]; subst
   end.
 
 (** Determinism for finite transition sequences. *)
 
 Lemma star_step_diamond:
-  forall ge s0 t1 s1, star step ge s0 t1 s1 -> 
-  forall t2 s2, star step ge s0 t2 s2 -> 
+  forall s0 t1 s1, star L (genv L) s0 t1 s1 -> 
+  forall t2 s2, star L (genv L) s0 t2 s2 -> 
   exists t,
-     (star step ge s1 t s2 /\ t2 = t1 ** t)
-  \/ (star step ge s2 t s1 /\ t1 = t2 ** t).
+     (star L (genv L) s1 t s2 /\ t2 = t1 ** t)
+  \/ (star L (genv L) s2 t s1 /\ t1 = t2 ** t).
 Proof.
   induction 1; intros. 
   exists t2; auto. 
@@ -252,24 +245,24 @@ Qed.
 
 Ltac use_star_step_diamond :=
   match goal with
-  | [ S1: star step _ _ ?t1 _, S2: star step _ _ ?t2 _ |- _ ] =>
+  | [ S1: star (step L) (genv L) _ ?t1 _, S2: star (step L) (genv L) _ ?t2 _ |- _ ] =>
     let t := fresh "t" in let P := fresh "P" in let EQ := fresh "EQ" in
-    destruct (star_step_diamond _ _ _ _ S1 _ _ S2)
+    destruct (star_step_diamond _ _ _ S1 _ _ S2)
     as [t [ [P EQ] | [P EQ] ]]; subst
  end.
 
 Ltac use_nostep :=
   match goal with
-  | [ S: step _ ?s _ _, NO: nostep step _ ?s |- _ ] => elim (NO _ _ S)
+  | [ S: step L (genv L) ?s _ _, NO: nostep (step L) (genv L) ?s |- _ ] => elim (NO _ _ S)
   end.
 
 Lemma star_step_triangle:
-  forall ge s0 t1 s1 t2 s2,
-  star step ge s0 t1 s1 -> 
-  star step ge s0 t2 s2 -> 
-  nostep step ge s2 ->
+  forall s0 t1 s1 t2 s2,
+  star L (genv L) s0 t1 s1 -> 
+  star L (genv L) s0 t2 s2 -> 
+  nostep L (genv L) s2 ->
   exists t,
-  star step ge s1 t s2 /\ t2 = t1 ** t.
+  star L (genv L) s1 t s2 /\ t2 = t1 ** t.
 Proof.
   intros. use_star_step_diamond.
   exists t; auto.
@@ -279,17 +272,17 @@ Qed.
 
 Ltac use_star_step_triangle :=
   match goal with
-  | [ S1: star step _ _ ?t1 _, S2: star step _ _ ?t2 ?s2,
-      NO: nostep step _ ?s2 |- _ ] =>
+  | [ S1: star (step L) (genv L) _ ?t1 _, S2: star (step L) (genv L) _ ?t2 ?s2,
+      NO: nostep (step L) (genv L) ?s2 |- _ ] =>
     let t := fresh "t" in let P := fresh "P" in let EQ := fresh "EQ" in
-    destruct (star_step_triangle _ _ _ _ _ _ S1 S2 NO)
+    destruct (star_step_triangle _ _ _ _ _ S1 S2 NO)
     as [t [P EQ]]; subst
   end.
 
 Lemma steps_deterministic:
-  forall ge s0 t1 s1 t2 s2,
-  star step ge s0 t1 s1 -> star step ge s0 t2 s2 -> 
-  nostep step ge s1 -> nostep step ge s2 ->
+  forall s0 t1 s1 t2 s2,
+  star L (genv L) s0 t1 s1 -> star L (genv L) s0 t2 s2 -> 
+  nostep L (genv L) s1 -> nostep L (genv L) s2 ->
   t1 = t2 /\ s1 = s2.
 Proof.
   intros. use_star_step_triangle. inv P.
@@ -297,23 +290,23 @@ Proof.
 Qed.
 
 Lemma terminates_not_goes_wrong:
-  forall ge s t1 s1 r t2 s2,
-  star step ge s t1 s1 -> final_state s1 r ->
-  star step ge s t2 s2 -> nostep step ge s2 ->
-  (forall r, ~final_state s2 r) -> False.
+  forall s t1 s1 r t2 s2,
+  star L (genv L) s t1 s1 -> final_state L s1 r ->
+  star L (genv L) s t2 s2 -> nostep L (genv L) s2 ->
+  (forall r, ~final_state L s2 r) -> False.
 Proof.
   intros.
   assert (t1 = t2 /\ s1 = s2). 
-    eapply steps_deterministic; eauto. 
+    eapply steps_deterministic; eauto. eapply det_final_nostep; eauto. 
   destruct H4; subst. elim (H3 _ H0).
 Qed.
 
 (** Determinism for infinite transition sequences. *)
 
 Lemma star_final_not_forever_silent:
-  forall ge s t s', star step ge s t s' ->
-  nostep step ge s' ->
-  forever_silent step ge s -> False.
+  forall s t s', star L (genv L) s t s' ->
+  nostep L (genv L) s' ->
+  forever_silent L (genv L) s -> False.
 Proof.
   induction 1; intros. 
   inv H0. use_nostep. 
@@ -321,9 +314,9 @@ Proof.
 Qed.
 
 Lemma star2_final_not_forever_silent:
-  forall ge s t1 s1 t2 s2,
-  star step ge s t1 s1 -> nostep step ge s1 ->
-  star step ge s t2 s2 -> forever_silent step ge s2 ->
+  forall s t1 s1 t2 s2,
+  star L (genv L) s t1 s1 -> nostep L (genv L) s1 ->
+  star L (genv L) s t2 s2 -> forever_silent L (genv L) s2 ->
   False.
 Proof.
   intros. use_star_step_triangle.
@@ -331,8 +324,8 @@ Proof.
 Qed.
 
 Lemma star_final_not_forever_reactive:
-  forall ge s t s', star step ge s t s' -> 
-  forall T, nostep step ge s' -> forever_reactive step ge s T -> False.
+  forall s t s', star L (genv L) s t s' -> 
+  forall T, nostep L (genv L) s' -> forever_reactive L (genv L) s T -> False.
 Proof.
   induction 1; intros.
   inv H0. inv H1. congruence. use_nostep. 
@@ -343,9 +336,9 @@ Proof.
 Qed.
 
 Lemma star_forever_silent_inv:
-  forall ge s t s', star step ge s t s' ->
-  forever_silent step ge s -> 
-  t = E0 /\ forever_silent step ge s'.
+  forall s t s', star L (genv L) s t s' ->
+  forever_silent L (genv L) s -> 
+  t = E0 /\ forever_silent L (genv L) s'.
 Proof.
   induction 1; intros.
   auto.
@@ -353,24 +346,24 @@ Proof.
 Qed.
 
 Lemma forever_silent_reactive_exclusive:
-  forall ge s T,
-  forever_silent step ge s -> forever_reactive step ge s T -> False.
+  forall s T,
+  forever_silent L (genv L) s -> forever_reactive L (genv L) s T -> False.
 Proof.
   intros. inv H0. exploit star_forever_silent_inv; eauto. 
   intros [A B]. contradiction.
 Qed.
 
 Lemma forever_reactive_inv2:
-  forall ge s t1 s1, star step ge s t1 s1 ->
+  forall s t1 s1, star L (genv L) s t1 s1 ->
   forall t2 s2 T1 T2,
-  star step ge s t2 s2 ->
+  star L (genv L) s t2 s2 ->
   t1 <> E0 -> t2 <> E0 ->
-  forever_reactive step ge s1 T1 ->
-  forever_reactive step ge s2 T2 ->
+  forever_reactive L (genv L) s1 T1 ->
+  forever_reactive L (genv L) s2 T2 ->
   exists s', exists t, exists T1', exists T2',
   t <> E0 /\
-  forever_reactive step ge s' T1' /\
-  forever_reactive step ge s' T2' /\
+  forever_reactive L (genv L) s' T1' /\
+  forever_reactive L (genv L) s' T2' /\
   t1 *** T1 = t *** T1' /\
   t2 *** T2 = t *** T2'.
 Proof.
@@ -390,32 +383,32 @@ Proof.
 Qed.
 
 Lemma forever_reactive_determ':
-  forall ge s T1 T2,
-  forever_reactive step ge s T1 ->
-  forever_reactive step ge s T2 ->
+  forall s T1 T2,
+  forever_reactive L (genv L) s T1 ->
+  forever_reactive L (genv L) s T2 ->
   traceinf_sim' T1 T2.
 Proof.
   cofix COINDHYP; intros.
   inv H. inv H0.
-  destruct (forever_reactive_inv2 _ _ _ _ H t s2 T0 T)
+  destruct (forever_reactive_inv2 _ _ _ H t s2 T0 T)
   as [s' [t' [T1' [T2' [A [B [C [D E]]]]]]]]; auto.
   rewrite D; rewrite E. constructor. auto. 
   eapply COINDHYP; eauto. 
 Qed.
 
 Lemma forever_reactive_determ:
-  forall ge s T1 T2,
-  forever_reactive step ge s T1 ->
-  forever_reactive step ge s T2 ->
+  forall s T1 T2,
+  forever_reactive L (genv L) s T1 ->
+  forever_reactive L (genv L) s T2 ->
   traceinf_sim T1 T2.
 Proof.
   intros. apply traceinf_sim'_sim. eapply forever_reactive_determ'; eauto.
 Qed.
 
 Lemma star_forever_reactive_inv:
-  forall ge s t s', star step ge s t s' ->
-  forall T, forever_reactive step ge s T ->
-  exists T', forever_reactive step ge s' T' /\ T = t *** T'.
+  forall s t s', star L (genv L) s t s' ->
+  forall T, forever_reactive L (genv L) s T ->
+  exists T', forever_reactive L (genv L) s' T' /\ T = t *** T'.
 Proof.
   induction 1; intros. 
   exists T; auto.
@@ -426,9 +419,9 @@ Proof.
 Qed.
 
 Lemma forever_silent_reactive_exclusive2:
-  forall ge s t s' T,
-  star step ge s t s' -> forever_silent step ge s' ->
-  forever_reactive step ge s T ->
+  forall s t s' T,
+  star L (genv L) s t s' -> forever_silent L (genv L) s' ->
+  forever_reactive L (genv L) s T ->
   False.
 Proof.
   intros. exploit star_forever_reactive_inv; eauto. 
@@ -438,26 +431,16 @@ Qed.
 
 (** Determinism for program executions *)
 
-Ltac use_init_state :=
-  match goal with
-  | [ H1: (initial_state _), H2: (initial_state _) |- _ ] =>
-        generalize (initial_state_determ _ _ H1 H2); intro; subst; clear H2
-  | [ H1: (initial_state _), H2: (forall s, ~initial_state s) |- _ ] =>
-        elim (H2 _ H1)
-  | _ => idtac
-  end.
-
-Theorem program_behaves_deterministic:
-  forall ge beh1 beh2,
-  program_behaves step initial_state final_state ge beh1 ->
-  program_behaves step initial_state final_state ge beh2 ->
-  beh1 = beh2.
+Lemma state_behaves_deterministic:
+  forall s beh1 beh2,
+  state_behaves L s beh1 -> state_behaves L s beh2 -> beh1 = beh2.
 Proof.
+  generalize (det_final_nostep L DET); intro dfns.
   intros until beh2; intros BEH1 BEH2.
-  inv BEH1; inv BEH2; use_init_state.
+  inv BEH1; inv BEH2.
 (* terminates, terminates *)
   assert (t = t0 /\ s' = s'0). eapply steps_deterministic; eauto.
-  destruct H2. f_equal; auto. subst. eauto. 
+  destruct H3. f_equal; auto. subst. eapply det_final_state; eauto. 
 (* terminates, diverges *)
   byContradiction. eapply star2_final_not_forever_silent with (s1 := s') (s2 := s'0); eauto.
 (* terminates, reacts *)
@@ -493,9 +476,23 @@ Proof.
   byContradiction. eapply star_final_not_forever_reactive; eauto.
 (* goes wrong, goes wrong *)
   assert (t = t0 /\ s' = s'0). eapply steps_deterministic; eauto.
-  destruct H3. congruence.
-(* goes initially wrong, goes initially wrong *)
-  reflexivity.
+  destruct H5. congruence.
+Qed.
+
+Theorem program_behaves_deterministic:
+  forall beh1 beh2,
+  program_behaves L beh1 -> program_behaves L beh2 ->
+  beh1 = beh2.
+Proof.
+  intros until beh2; intros BEH1 BEH2. inv BEH1; inv BEH2.
+(* both initial states defined *)
+  assert (s = s0) by (eapply det_initial_state; eauto). subst s0. 
+  eapply state_behaves_deterministic; eauto.
+(* one initial state defined, the other undefined *)
+  elim (H1 _ H).
+  elim (H _ H0).
+(* both initial states undefined *)
+  auto.
 Qed.
 
 End DETERM_SEM.
