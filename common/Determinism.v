@@ -81,7 +81,9 @@ Inductive possible_event: world -> event -> world -> Prop :=
       possible_event w1 (Event_vload chunk id ofs evres) w2
   | possible_event_vstore: forall w1 chunk id ofs evarg w2,
       nextworld_vstore w1 chunk id ofs evarg = Some w2 ->
-      possible_event w1 (Event_vstore chunk id ofs evarg) w2.
+      possible_event w1 (Event_vstore chunk id ofs evarg) w2
+  | possible_event_annot: forall w1 id args,
+      possible_event w1 (Event_annot id args) w1.
 
 Inductive possible_trace: world -> trace -> world -> Prop :=
   | possible_trace_nil: forall w,
@@ -111,6 +113,20 @@ Proof.
   exists w1; split. econstructor; eauto. auto.
 Qed.
 
+Lemma match_possible_traces:
+  forall (F V: Type) (ge: Genv.t F V) t1 t2 w0 w1 w2,
+  match_traces ge t1 t2 -> possible_trace w0 t1 w1 -> possible_trace w0 t2 w2 ->
+  t1 = t2 /\ w1 = w2.
+Proof.
+  intros. inv H; inv H1; inv H0.
+  auto.
+  inv H7; inv H6. inv H9; inv H10. split; congruence.
+  inv H7; inv H6. inv H9; inv H10. split; congruence.
+  inv H4; inv H3. inv H6; inv H7. split; congruence. 
+  inv H4; inv H3. inv H7; inv H6. auto.
+Qed.
+
+(*
 Lemma possible_event_final_world:
   forall w ev w1 w2,
   possible_event w ev w1 -> possible_event w ev w2 -> w1 = w2.
@@ -127,6 +143,7 @@ Proof.
   inv H1. assert (w2 = w5) by (eapply possible_event_final_world; eauto). 
   subst; eauto.
 Qed.
+*)
 
 CoInductive possible_traceinf: world -> traceinf -> Prop :=
   | possible_traceinf_cons: forall w1 ev w2 T,
@@ -203,7 +220,7 @@ Qed.
 
 (** * Definition and properties of deterministic semantics *)
 
-Record deterministic (L: semantics) := mk_deterministic {
+Record sem_deterministic (L: semantics) := mk_deterministic {
   det_step: forall s0 t1 s1 t2 s2,
     L (genv L) s0 t1 s1 -> L (genv L) s0 t2 s2 -> s1 = s2 /\ t1 = t2;
   det_initial_state: forall s1 s2,
@@ -217,7 +234,7 @@ Record deterministic (L: semantics) := mk_deterministic {
 Section DETERM_SEM.
 
 Variable L: semantics.
-Hypothesis DET: deterministic L.
+Hypothesis DET: sem_deterministic L.
 
 Ltac use_step_deterministic :=
   match goal with
@@ -505,6 +522,48 @@ End DETERM_SEM.
 
 Section WORLD_SEM.
 
+Variable L: semantics.
+Variable initial_world: world.
+
+Notation "s #1" := (fst s) (at level 9, format "s '#1'") : pair_scope.
+Notation "s #2" := (snd s) (at level 9, format "s '#2'") : pair_scope.
+Local Open Scope pair_scope.
+
+Definition world_sem : semantics := @mk_semantics
+  (state L * world)%type
+  (funtype L)
+  (vartype L)
+  (fun ge s t s' => L ge s#1 t s'#1 /\ possible_trace s#2 t s'#2)
+  (fun s => initial_state L s#1 /\ s#2 = initial_world)
+  (fun s r => final_state L s#1 r)
+  (genv L).
+
+(** If the original semantics is determinate, the world-aware semantics is deterministic. *)
+
+Hypothesis D: sem_determinate L.
+
+Theorem world_sem_deterministic: sem_deterministic world_sem.
+Proof.
+  constructor; simpl; intros.
+(* steps *)
+  destruct H; destruct H0.
+  exploit (sd_match D). eexact H. eexact H0. intros MT.
+  exploit match_possible_traces; eauto. intros [EQ1 EQ2]. subst t2.
+  exploit (sd_determ D). eexact H. eexact H0. intros EQ3. 
+  split; auto. rewrite (surjective_pairing s1). rewrite (surjective_pairing s2). congruence.
+(* initial states *)
+  destruct H; destruct H0.
+  rewrite (surjective_pairing s1). rewrite (surjective_pairing s2). decEq. 
+  eapply (sd_initial_determ D); eauto. 
+  congruence.
+(* final states *)
+  eapply (sd_final_determ D); eauto.
+(* final no step *)
+  red; simpl; intros. red; intros [A B]. exploit (sd_final_nostep D); eauto. 
+Qed.
+
+
+
 Variable genv: Type.
 Variable state: Type.
 Variable step: genv -> state -> trace -> state -> Prop.
@@ -514,9 +573,6 @@ Variable initial_world: world.
 
 Definition wstate : Type := (state * world)%type.
 
-Notation "s #1" := (fst s) (at level 9, format "s '#1'") : pair_scope.
-Notation "s #2" := (snd s) (at level 9, format "s '#2'") : pair_scope.
-Local Open Scope pair_scope.
 
 Definition wstep (ge: genv) (S: wstate) (t: trace) (S': wstate) :=
   step ge S#1 t S'#1 /\ possible_trace S#2 t S'#2.
