@@ -872,6 +872,5 @@ Inductive final_state: state -> int -> Prop :=
       rs#GPR3 = Vint r ->
       final_state (State rs m) r.
       
-Definition exec_program (p: program) (beh: program_behavior) : Prop :=
-  program_behaves step (initial_state p) final_state (Genv.globalenv p) beh.
-
+Definition semantics (p: program) :=
+  Semantics step (initial_state p) final_state (Genv.globalenv p).

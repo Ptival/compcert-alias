@@ -126,18 +126,18 @@ Variable L: semantics.
 
 Inductive state_behaves (s: state L): program_behavior -> Prop :=
   | state_terminates: forall t s' r,
-      star L (genv L) s t s' ->
+      Star L s t s' ->
       final_state L s' r ->
       state_behaves s (Terminates t r)
   | state_diverges: forall t s',
-      star L (genv L) s t s' -> forever_silent L (genv L) s' ->
+      Star L s t s' -> Forever_silent L s' ->
       state_behaves s (Diverges t)
   | state_reacts: forall T,
-      forever_reactive L (genv L) s T ->
+      Forever_reactive L s T ->
       state_behaves s (Reacts T)
   | state_goes_wrong: forall t s',
-      star L (genv L) s t s' ->
-      nostep L (genv L) s' ->
+      Star L s t s' ->
+      Nostep L s' ->
       (forall r, ~final_state L s' r) ->
       state_behaves s (Goes_wrong t).
 
@@ -151,7 +151,7 @@ Inductive program_behaves: program_behavior -> Prop :=
 
 Lemma state_behaves_app:
   forall s1 t s2 beh,
-  star L (genv L) s1 t s2 -> state_behaves s2 beh -> state_behaves s1 (behavior_app t beh).
+  Star L s1 t s2 -> state_behaves s2 beh -> state_behaves s1 (behavior_app t beh).
 Proof.
   intros. inv H0; simpl; econstructor; eauto; try (eapply star_trans; eauto). 
   eapply star_forever_reactive; eauto.
@@ -171,12 +171,12 @@ Section TRACEINF_REACTS.
 Variable s0: state L.
 
 Hypothesis reacts:
-  forall s1 t1, star L (genv L) s0 t1 s1 ->
-  exists s2, exists t2, star L (genv L) s1 t2 s2 /\ t2 <> E0.
+  forall s1 t1, Star L s0 t1 s1 ->
+  exists s2, exists t2, Star L s1 t2 s2 /\ t2 <> E0.
 
 Lemma reacts':
-  forall s1 t1, star L (genv L) s0 t1 s1 ->
-  { s2 : state L & { t2 : trace | star L (genv L) s1 t2 s2 /\ t2 <> E0 } }.
+  forall s1 t1, Star L s0 t1 s1 ->
+  { s2 : state L & { t2 : trace | Star L s1 t2 s2 /\ t2 <> E0 } }.
 Proof.
   intros. 
   destruct (constructive_indefinite_description _ (reacts H)) as [s2 A].
@@ -184,7 +184,7 @@ Proof.
   exists s2; exists t2; auto.
 Qed.
 
-CoFixpoint build_traceinf' (s1: state L) (t1: trace) (ST: star L (genv L) s0 t1 s1) : traceinf' :=
+CoFixpoint build_traceinf' (s1: state L) (t1: trace) (ST: Star L s0 t1 s1) : traceinf' :=
   match reacts' ST with
   | existT s2 (exist t2 (conj A B)) =>
       Econsinf' t2 
@@ -193,8 +193,8 @@ CoFixpoint build_traceinf' (s1: state L) (t1: trace) (ST: star L (genv L) s0 t1 
   end.
 
 Lemma reacts_forever_reactive_rec:
-  forall s1 t1 (ST: star L (genv L) s0 t1 s1),
-  forever_reactive L (genv L) s1 (traceinf_of_traceinf' (build_traceinf' ST)).
+  forall s1 t1 (ST: Star L s0 t1 s1),
+  Forever_reactive L s1 (traceinf_of_traceinf' (build_traceinf' ST)).
 Proof.
   cofix COINDHYP; intros.
   rewrite (unroll_traceinf' (build_traceinf' ST)). simpl. 
@@ -204,9 +204,9 @@ Proof.
 Qed.
 
 Lemma reacts_forever_reactive:
-  exists T, forever_reactive L (genv L) s0 T.
+  exists T, Forever_reactive L s0 T.
 Proof.
-  exists (traceinf_of_traceinf' (build_traceinf' (star_refl L (genv L) s0))).
+  exists (traceinf_of_traceinf' (build_traceinf' (star_refl (step L) (globalenv L) s0))).
   apply reacts_forever_reactive_rec.
 Qed.
 
@@ -214,8 +214,8 @@ End TRACEINF_REACTS.
 
 Lemma diverges_forever_silent:
   forall s0,
-  (forall s1 t1, star L (genv L) s0 t1 s1 -> exists s2, L (genv L) s1 E0 s2) ->
-  forever_silent L (genv L) s0.
+  (forall s1 t1, Star L s0 t1 s1 -> exists s2, Step L s1 E0 s2) ->
+  Forever_silent L s0.
 Proof.
   cofix COINDHYP; intros. 
   destruct (H s0 E0) as [s1 ST]. constructor. 
@@ -227,11 +227,11 @@ Lemma state_behaves_exists:
   forall s, exists beh, state_behaves s beh.
 Proof.
   intros s0.
-  destruct (classic (forall s1 t1, star L (genv L) s0 t1 s1 -> exists s2, exists t2, L (genv L) s1 t2 s2)).
+  destruct (classic (forall s1 t1, Star L s0 t1 s1 -> exists s2, exists t2, Step L s1 t2 s2)).
 (* 1 Divergence (silent or reactive) *)
-  destruct (classic (exists s1, exists t1, star L (genv L) s0 t1 s1 /\
-                       (forall s2 t2, star L (genv L) s1 t2 s2 ->
-                        exists s3, L (genv L) s2 E0 s3))).
+  destruct (classic (exists s1, exists t1, Star L s0 t1 s1 /\
+                       (forall s2 t2, Star L s1 t2 s2 ->
+                        exists s3, Step L s2 E0 s3))).
 (* 1.1 Silent divergence *)
   destruct H0 as [s1 [t1 [A B]]].
   exists (Diverges t1); econstructor; eauto. 
@@ -358,12 +358,12 @@ Variable L2: semantics.
 Variable S: backward_simulation L1 L2.
 
 Definition safe_along_behavior (s: state L1) (b: program_behavior) : Prop :=
-  forall t1 s' b2, star L1 (genv L1) s t1 s' -> b = behavior_app t1 b2 ->
+  forall t1 s' b2, Star L1 s t1 s' -> b = behavior_app t1 b2 ->
      (exists r, final_state L1 s' r)
-  \/ (exists t2, exists s'', L1 (genv L1) s' t2 s'').
+  \/ (exists t2, exists s'', Step L1 s' t2 s'').
 
 Remark safe_along_safe:
-  forall s b, safe_along_behavior s b -> safe L1 (genv L1) s.
+  forall s b, safe_along_behavior s b -> safe L1 s.
 Proof.
   intros; red; intros. eapply H; eauto. symmetry; apply behavior_app_E0. 
 Qed.
@@ -371,7 +371,7 @@ Qed.
 Remark star_safe_along:
   forall s b t1 s' b2,
   safe_along_behavior s b ->
-  star L1 (genv L1) s t1 s' -> b = behavior_app t1 b2 ->
+  Star L1 s t1 s' -> b = behavior_app t1 b2 ->
   safe_along_behavior s' b2.
 Proof.
   intros; red; intros. eapply H. eapply star_trans; eauto.
@@ -383,8 +383,8 @@ Remark not_safe_along_behavior:
   ~ safe_along_behavior s b ->
   exists t, exists s',
      behavior_prefix t b 
-  /\ star L1 (genv L1) s t s'
-  /\ nostep L1 (genv L1) s'
+  /\ Star L1 s t s'
+  /\ Nostep L1 s'
   /\ (forall r, ~(final_state L1 s' r)).
 Proof.
   intros. 
@@ -402,15 +402,15 @@ Proof.
 Qed.
 
 Lemma backward_simulation_star:
-  forall s2 t s2', star L2 (genv L2) s2 t s2' ->
+  forall s2 t s2', Star L2 s2 t s2' ->
   forall i s1 b, S i s1 s2 -> safe_along_behavior s1 (behavior_app t b) ->
-  exists i', exists s1', star L1 (genv L1) s1 t s1' /\ S i' s1' s2'.
+  exists i', exists s1', Star L1 s1 t s1' /\ S i' s1' s2'.
 Proof.
   induction 1; intros.
   exists i; exists s1; split; auto. apply star_refl.
   exploit (bsim_simulation S); eauto. eapply safe_along_safe; eauto. 
   intros [i' [s1' [A B]]].
-  assert (star L1 (genv L1) s0 t1 s1'). intuition. apply plus_star; auto.
+  assert (Star L1 s0 t1 s1'). intuition. apply plus_star; auto.
   exploit IHstar; eauto. eapply star_safe_along; eauto.
   subst t; apply behavior_app_assoc.
   intros [i'' [s2'' [C D]]].
@@ -419,12 +419,12 @@ Qed.
 
 Lemma backward_simulation_forever_silent:
   forall i s1 s2,
-  forever_silent L2 (genv L2) s2 -> S i s1 s2 -> safe L1 (genv L1) s1 ->
-  forever_silent L1 (genv L1) s1.
+  Forever_silent L2 s2 -> S i s1 s2 -> safe L1 s1 ->
+  Forever_silent L1 s1.
 Proof.
   assert (forall i s1 s2,
-         forever_silent L2 (genv L2) s2 -> S i s1 s2 -> safe L1 (genv L1) s1 ->
-         forever_silent_N L1 (bsim_order S) (genv L1) i s1).
+         Forever_silent L2 s2 -> S i s1 s2 -> safe L1 s1 ->
+         forever_silent_N (step L1) (bsim_order S) (globalenv L1) i s1).
     cofix COINDHYP; intros.
     inv H.  destruct (bsim_simulation S _ _ _ H2 _ H0 H1) as [i' [s2' [A B]]].
     destruct A as [C | [C D]].
@@ -437,8 +437,8 @@ Qed.
 
 Lemma backward_simulation_forever_reactive:
   forall i s1 s2 T,
-  forever_reactive L2 (genv L2) s2 T -> S i s1 s2 -> safe_along_behavior s1 (Reacts T) ->
-  forever_reactive L1 (genv L1) s1 T.
+  Forever_reactive L2 s2 T -> S i s1 s2 -> safe_along_behavior s1 (Reacts T) ->
+  Forever_reactive L1 s1 T.
 Proof.
   cofix COINDHYP; intros. inv H. 
   destruct (backward_simulation_star H2 _ (Reacts T0) H0) as [i' [s1' [A B]]]; eauto.
@@ -535,8 +535,8 @@ End BACKWARD_SIMULATIONS.
 (** We now show that any infinite sequence of reductions is either of
   the "reactive" kind or of the "silent" kind (after a finite number
   of non-silent transitions).  The proof necessitates the axiom of
-  excluded middle.  This result is used in [Csem] and [Cminor] to
-  relate the coinductive big-step semantics for divergence with the
+  excluded middle.  This result is used below to relate
+  the coinductive big-step semantics for divergence with the
   small-step notions of divergence. *)
 
 Unset Implicit Arguments.
@@ -549,46 +549,46 @@ Variable step: genv -> state -> trace -> state -> Prop.
 
 Variable ge: genv.
 
-Inductive State: Type :=
-  ST: forall (s: state) (T: traceinf), forever step ge s T -> State.
+Inductive tstate: Type :=
+  ST: forall (s: state) (T: traceinf), forever step ge s T -> tstate.
 
-Definition state_of_State (S: State): state :=
+Definition state_of_tstate (S: tstate): state :=
   match S with ST s T F => s end.
-Definition traceinf_of_State (S: State) : traceinf :=
+Definition traceinf_of_tstate (S: tstate) : traceinf :=
   match S with ST s T F => T end.
 
-Inductive Step: trace -> State -> State -> Prop :=
-  | Step_intro: forall s1 t T s2 S F,
-      Step t (ST s1 (t *** T) (@forever_intro genv state step ge s1 t s2 T S F))
-             (ST s2 T F).
+Inductive tstep: trace -> tstate -> tstate -> Prop :=
+  | tstep_intro: forall s1 t T s2 S F,
+      tstep t (ST s1 (t *** T) (@forever_intro genv state step ge s1 t s2 T S F))
+              (ST s2 T F).
 
-Inductive Steps: State -> State -> Prop :=
-  | Steps_refl: forall S, Steps S S
-  | Steps_left: forall t S1 S2 S3, Step t S1 S2 -> Steps S2 S3 -> Steps S1 S3.
+Inductive tsteps: tstate -> tstate -> Prop :=
+  | tsteps_refl: forall S, tsteps S S
+  | tsteps_left: forall t S1 S2 S3, tstep t S1 S2 -> tsteps S2 S3 -> tsteps S1 S3.
 
-Remark Steps_trans:
-  forall S1 S2, Steps S1 S2 -> forall S3, Steps S2 S3 -> Steps S1 S3.
+Remark tsteps_trans:
+  forall S1 S2, tsteps S1 S2 -> forall S3, tsteps S2 S3 -> tsteps S1 S3.
 Proof.
   induction 1; intros. auto. econstructor; eauto.
 Qed.
 
-Let Reactive (S: State) : Prop :=
+Let treactive (S: tstate) : Prop :=
   forall S1, 
-  Steps S S1 ->
-  exists S2, exists S3, exists t, Steps S1 S2 /\ Step t S2 S3 /\ t <> E0.
+  tsteps S S1 ->
+  exists S2, exists S3, exists t, tsteps S1 S2 /\ tstep t S2 S3 /\ t <> E0.
 
-Let Silent (S: State) : Prop :=
-  forall S1 t S2, Steps S S1 -> Step t S1 S2 -> t = E0.
+Let tsilent (S: tstate) : Prop :=
+  forall S1 t S2, tsteps S S1 -> tstep t S1 S2 -> t = E0.
 
-Lemma Reactive_or_Silent:
-  forall S, Reactive S \/ (exists S', Steps S S' /\ Silent S').
+Lemma treactive_or_tsilent:
+  forall S, treactive S \/ (exists S', tsteps S S' /\ tsilent S').
 Proof.
-  intros. destruct (classic (exists S', Steps S S' /\ Silent S')).
+  intros. destruct (classic (exists S', tsteps S S' /\ tsilent S')).
   auto.
   left. red; intros. 
   generalize (not_ex_all_not _ _ H S1). intros.
   destruct (not_and_or _ _ H1). contradiction. 
-  unfold Silent in H2. 
+  unfold tsilent in H2. 
   generalize (not_all_ex_not _ _ H2). intros [S2 A].
   generalize (not_all_ex_not _ _ A). intros [t B].
   generalize (not_all_ex_not _ _ B). intros [S3 C].
@@ -597,51 +597,51 @@ Proof.
   exists S2; exists S3; exists t. auto.  
 Qed.
 
-Lemma Steps_star:
-  forall S1 S2, Steps S1 S2 ->
-  exists t, star step ge (state_of_State S1) t (state_of_State S2)
-         /\ traceinf_of_State S1 = t *** traceinf_of_State S2.
+Lemma tsteps_star:
+  forall S1 S2, tsteps S1 S2 ->
+  exists t, star step ge (state_of_tstate S1) t (state_of_tstate S2)
+         /\ traceinf_of_tstate S1 = t *** traceinf_of_tstate S2.
 Proof.
   induction 1.
   exists E0; split. apply star_refl. auto.
-  inv H. destruct IHSteps as [t' [A B]].
+  inv H. destruct IHtsteps as [t' [A B]].
   exists (t ** t'); split.
   simpl; eapply star_left; eauto.
   simpl in *. subst T. traceEq.
 Qed.
 
-Lemma Silent_forever_silent:
+Lemma tsilent_forever_silent:
   forall S,
-  Silent S -> forever_silent step ge (state_of_State S).
+  tsilent S -> forever_silent step ge (state_of_tstate S).
 Proof.
   cofix COINDHYP; intro S. case S. intros until f. simpl. case f. intros.
-  assert (Step t (ST s1 (t *** T0) (forever_intro s1 t s0 f0))
-                 (ST s2 T0 f0)). 
+  assert (tstep t (ST s1 (t *** T0) (forever_intro s1 t s0 f0))
+                  (ST s2 T0 f0)). 
     constructor.
   assert (t = E0). 
-    red in H. eapply H; eauto. apply Steps_refl.
-  apply forever_silent_intro with (state_of_State (ST s2 T0 f0)).
+    red in H. eapply H; eauto. apply tsteps_refl.
+  apply forever_silent_intro with (state_of_tstate (ST s2 T0 f0)).
   rewrite <- H1. assumption. 
   apply COINDHYP. 
-  red; intros. eapply H. eapply Steps_left; eauto. eauto. 
+  red; intros. eapply H. eapply tsteps_left; eauto. eauto. 
 Qed.
 
-Lemma Reactive_forever_reactive:
+Lemma treactive_forever_reactive:
   forall S,
-  Reactive S -> forever_reactive step ge (state_of_State S) (traceinf_of_State S).
+  treactive S -> forever_reactive step ge (state_of_tstate S) (traceinf_of_tstate S).
 Proof.
   cofix COINDHYP; intros.
-  destruct (H S) as [S1 [S2 [t [A [B C]]]]]. apply Steps_refl. 
-  destruct (Steps_star _ _ A) as [t' [P Q]].
+  destruct (H S) as [S1 [S2 [t [A [B C]]]]]. apply tsteps_refl. 
+  destruct (tsteps_star _ _ A) as [t' [P Q]].
   inv B. simpl in *. rewrite Q. rewrite <- Eappinf_assoc. 
   apply forever_reactive_intro with s2. 
   eapply star_right; eauto. 
   red; intros. destruct (Eapp_E0_inv _ _ H0). contradiction.
-  change (forever_reactive step ge (state_of_State (ST s2 T F)) (traceinf_of_State (ST s2 T F))).
+  change (forever_reactive step ge (state_of_tstate (ST s2 T F)) (traceinf_of_tstate (ST s2 T F))).
   apply COINDHYP. 
   red; intros. apply H.
-  eapply Steps_trans. eauto.
-  eapply Steps_left. constructor. eauto.
+  eapply tsteps_trans. eauto.
+  eapply tsteps_left. constructor. eauto.
 Qed.
 
 Theorem forever_silent_or_reactive:
@@ -652,17 +652,49 @@ Theorem forever_silent_or_reactive:
   star step ge s t s' /\ forever_silent step ge s' /\ T = t *** T'.
 Proof.
   intros. 
-  destruct (Reactive_or_Silent (ST s T H)).
+  destruct (treactive_or_tsilent (ST s T H)).
   left. 
-  change (forever_reactive step ge (state_of_State (ST s T H)) (traceinf_of_State (ST s T H))).
-  apply Reactive_forever_reactive. auto.
+  change (forever_reactive step ge (state_of_tstate (ST s T H)) (traceinf_of_tstate (ST s T H))).
+  apply treactive_forever_reactive. auto.
   destruct H0 as [S' [A B]].
-  exploit Steps_star; eauto. intros [t [C D]]. simpl in *.
-  right. exists t; exists (state_of_State S'); exists (traceinf_of_State S').
+  exploit tsteps_star; eauto. intros [t [C D]]. simpl in *.
+  right. exists t; exists (state_of_tstate S'); exists (traceinf_of_tstate S').
   split. auto. 
-  split. apply Silent_forever_silent. auto.
+  split. apply tsilent_forever_silent. auto.
   auto.
 Qed.
 
 End INF_SEQ_DECOMP.
 
+Set Implicit Arguments.
+
+(** * Big-step semantics and program behaviors *)
+
+Section BIGSTEP_BEHAVIORS.
+
+Variable B: bigstep_semantics.
+Variable L: semantics.
+Hypothesis sound: bigstep_sound B L.
+
+Lemma behavior_bigstep_terminates:
+  forall t r,
+  bigstep_terminates B t r -> program_behaves L (Terminates t r).
+Proof.
+  intros. exploit (bigstep_terminates_sound sound); eauto. 
+  intros [s1 [s2 [P [Q R]]]].
+  econstructor; eauto. econstructor; eauto.
+Qed.
+
+Lemma behavior_bigstep_diverges:
+  forall T,
+  bigstep_diverges B T ->
+  program_behaves L (Reacts T)
+  \/ exists t, program_behaves L (Diverges t) /\ traceinf_prefix t T.
+Proof.
+  intros. exploit (bigstep_diverges_sound sound); eauto. intros [s1 [P Q]].
+  exploit forever_silent_or_reactive; eauto. intros [X | [t [s' [T' [X [Y Z]]]]]].
+  left. econstructor; eauto. constructor; auto.
+  right. exists t; split. econstructor; eauto. econstructor; eauto. exists T'; auto.
+Qed.
+
+End BIGSTEP_BEHAVIORS.

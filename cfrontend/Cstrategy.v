@@ -636,7 +636,7 @@ Lemma eval_simple_steps:
                   E0 (ExprState f (C (Eloc b ofs (typeof a))) k e m)).
 Proof.
 
-Ltac Step REC C' := eapply star_safe; eauto; [apply (REC C'); eauto | intros].
+Ltac Steps REC C' := eapply star_safe; eauto; [apply (REC C'); eauto | intros].
 Ltac FinishR := apply star_one; left; apply step_rred; eauto; simpl; try (econstructor; eauto; fail).
 Ltac FinishL := apply star_one; left; apply step_lred; eauto; simpl; try (econstructor; eauto; fail).
 
@@ -644,17 +644,17 @@ Ltac FinishL := apply star_one; left; apply step_lred; eauto; simpl; try (econst
 (* val *)
   apply star_refl.
 (* valof *)
-  Step H0 (fun x => C(Evalof x ty)). rewrite <- H1 in *. FinishR.
+  Steps H0 (fun x => C(Evalof x ty)). rewrite <- H1 in *. FinishR.
 (* addrof *)
-  Step H0 (fun x => C(Eaddrof x ty)). FinishR.
+  Steps H0 (fun x => C(Eaddrof x ty)). FinishR.
 (* unop *)
-  Step H0 (fun x => C(Eunop op x ty)). FinishR.
+  Steps H0 (fun x => C(Eunop op x ty)). FinishR.
 (* binop *)
-  Step H0 (fun x => C(Ebinop op x r2 ty)).
-  Step H2 (fun x => C(Ebinop op (Eval v1 (typeof r1)) x ty)).
+  Steps H0 (fun x => C(Ebinop op x r2 ty)).
+  Steps H2 (fun x => C(Ebinop op (Eval v1 (typeof r1)) x ty)).
   FinishR.
 (* cast *)
-  Step H0 (fun x => C(Ecast x ty)). FinishR. 
+  Steps H0 (fun x => C(Ecast x ty)). FinishR. 
 (* sizeof *)
   FinishR.
 (* loc *)
@@ -664,11 +664,11 @@ Ltac FinishL := apply star_one; left; apply step_lred; eauto; simpl; try (econst
 (* var global *)
   FinishL. apply red_var_global; auto.
 (* deref *)
-  Step H0 (fun x => C(Ederef x ty)). FinishL. 
+  Steps H0 (fun x => C(Ederef x ty)). FinishL. 
 (* field struct *)
-  Step H0 (fun x => C(Efield x f0 ty)). rewrite H1 in *. FinishL.
+  Steps H0 (fun x => C(Efield x f0 ty)). rewrite H1 in *. FinishL.
 (* field union *)
-  Step H0 (fun x => C(Efield x f0 ty)). rewrite H1 in *. FinishL.
+  Steps H0 (fun x => C(Efield x f0 ty)). rewrite H1 in *. FinishL.
 Qed.
 
 Lemma eval_simple_rvalue_steps:
@@ -1182,12 +1182,12 @@ End STRATEGY.
 (** The semantics that follows the strategy. *)
 
 Definition semantics (p: program) :=
-  mk_semantics step (initial_state p) final_state (Genv.globalenv p).
+  Semantics step (initial_state p) final_state (Genv.globalenv p).
 
 (** This semantics is receptive to changes in events. *)
 
 Lemma semantics_receptive: 
-  forall p, sem_receptive (semantics p).
+  forall p, receptive (semantics p).
 Proof.
   intros. constructor; simpl; intros.
 (* receptiveness *)
@@ -2601,36 +2601,22 @@ Inductive bigstep_program_diverges (p: program): traceinf -> Prop :=
       evalinf_funcall ge m0 f nil t ->
       bigstep_program_diverges p t.
 
-(* FIXME
-Theorem bigstep_program_terminates_exec:
-  forall prog t r,
-  bigstep_program_terminates prog t r -> exec_program prog (Terminates t r).
-Proof.
-  intros. inv H. 
-  econstructor.
-  econstructor; eauto.
-  apply eval_funcall_to_steps. eauto. red; auto. 
-  econstructor.
-Qed.
+Definition bigstep_semantics (p: program) :=
+  Bigstep_semantics (bigstep_program_terminates p) (bigstep_program_diverges p).
 
-Theorem bigstep_program_diverges_exec:
-  forall prog T,
-  bigstep_program_diverges prog T ->
-  exec_program prog (Reacts T) \/
-  exists t, exec_program prog (Diverges t) /\ traceinf_prefix t T.
+Theorem bigstep_semantics_sound:
+  forall p, bigstep_sound (bigstep_semantics p) (semantics p).
 Proof.
-  intros. inv H.
-  set (st := Callstate f nil Kstop m0).
-  assert (forever step ge st T). 
-    eapply forever_N_forever with (order := lt).
-    apply lt_wf. 
-    eapply evalinf_funcall_steps; eauto. 
-  destruct (forever_silent_or_reactive _ _ _ _ _ _ H)
-  as [A | [t [s' [T' [B [C D]]]]]]. 
-  left. econstructor. econstructor; eauto. eauto.
-  right. exists t. split.
-  econstructor. econstructor; eauto. eauto. auto. 
-  subst T. rewrite <- (E0_right t) at 1. apply traceinf_prefix_app. constructor.
+  intros; constructor; intros.
+(* termination *)
+  inv H. econstructor; econstructor. 
+  split. econstructor; eauto.
+  split. apply eval_funcall_to_steps. eauto. red; auto.
+  econstructor.
+(* divergence *)
+  inv H. econstructor.
+  split. econstructor; eauto.
+  eapply forever_N_forever with (order := lt).
+  apply lt_wf.
+  eapply evalinf_funcall_steps; eauto.
 Qed.
-*)
-
