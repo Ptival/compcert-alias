@@ -186,7 +186,12 @@ Inductive instruction: Type :=
   | Plabel(l: label)
   | Pallocframe(sz: Z)(ofs_ra ofs_link: int)
   | Pfreeframe(sz: Z)(ofs_ra ofs_link: int)
-  | Pbuiltin(ef: external_function)(args: list preg)(res: preg).
+  | Pbuiltin(ef: external_function)(args: list preg)(res: preg)
+  | Pannot(ef: external_function)(args: list annot_param)
+
+with annot_param : Type :=
+  | APreg: preg -> annot_param
+  | APstack: memory_chunk -> Z -> annot_param.
 
 Definition code := list instruction.
 Definition fundef := AST.fundef code.
@@ -655,6 +660,8 @@ Definition exec_instr (c: code) (i: instruction) (rs: regset) (m: mem) : outcome
       end
   | Pbuiltin ef args res =>
       Stuck                             (**r treated specially below *)
+  | Pannot ef args =>
+      Stuck                             (**r treated specially below *)
   end.
 
 (** Translation of the LTL/Linear/Mach view of machine registers
@@ -696,19 +703,26 @@ Inductive extcall_arg (rs: regset) (m: mem): loc -> val -> Prop :=
       Mem.loadv Mfloat64 m (Val.add (rs (IR ESP)) (Vint (Int.repr bofs))) = Some v ->
       extcall_arg rs m (S (Outgoing ofs Tfloat)) v.
 
-Inductive extcall_args (rs: regset) (m: mem): list loc -> list val -> Prop :=
-  | extcall_args_nil:
-      extcall_args rs m nil nil
-  | extcall_args_cons: forall l1 ll v1 vl,
-      extcall_arg rs m l1 v1 -> extcall_args rs m ll vl ->
-      extcall_args rs m (l1 :: ll) (v1 :: vl).
-
 Definition extcall_arguments
     (rs: regset) (m: mem) (sg: signature) (args: list val) : Prop :=
-  extcall_args rs m (loc_arguments sg) args.
+  list_forall2 (extcall_arg rs m) (loc_arguments sg) args.
 
 Definition loc_external_result (sg: signature) : preg :=
   preg_of (loc_result sg).
+
+(** Extract the values of the arguments of an annotation. *)
+
+Inductive annot_arg (rs: regset) (m: mem): annot_param -> val -> Prop :=
+  | annot_arg_reg: forall r,
+      annot_arg rs m (APreg r) (rs r)
+  | annot_arg_stack: forall chunk ofs stk base v,
+      rs (IR ESP) = Vptr stk base ->
+      Mem.load chunk m stk (Int.unsigned base + ofs) = Some v ->
+      annot_arg rs m (APstack chunk ofs) v.
+
+Definition annot_arguments
+    (rs: regset) (m: mem) (params: list annot_param) (args: list val) : Prop :=
+  list_forall2 (annot_arg rs m) params args.
 
 (** Execution of the instruction at [rs#PC]. *)
 
@@ -734,13 +748,22 @@ Inductive step: state -> trace -> state -> Prop :=
                                 #XMM6 <- Vundef #XMM7 <- Vundef
                                 #ST0 <- Vundef
                                 #res <- v)) m')
+  | exec_step_annot:
+      forall b ofs c ef args rs m vargs t v m',
+      rs PC = Vptr b ofs ->
+      Genv.find_funct_ptr ge b = Some (Internal c) ->
+      find_instr (Int.unsigned ofs) c = Some (Pannot ef args) ->
+      annot_arguments rs m args vargs ->
+      external_call ef ge vargs m t v m' ->
+      step (State rs m) t
+           (State (nextinstr rs) m')
   | exec_step_external:
       forall b ef args res rs m t rs' m',
       rs PC = Vptr b Int.zero ->
       Genv.find_funct_ptr ge b = Some (External ef) ->
       external_call ef ge args m t res m' ->
-      extcall_arguments rs m ef.(ef_sig) args ->
-      rs' = (rs#(loc_external_result ef.(ef_sig)) <- res
+      extcall_arguments rs m (ef_sig ef) args ->
+      rs' = (rs#(loc_external_result (ef_sig ef)) <- res
                #PC <- (rs RA)) ->
       step (State rs m) t (State rs' m').
 
@@ -775,7 +798,8 @@ Remark extcall_arguments_determ:
   extcall_arguments rs m sg args1 -> extcall_arguments rs m sg args2 -> args1 = args2.
 Proof.
   intros until m.
-  assert (forall ll vl1, extcall_args rs m ll vl1 -> forall vl2, extcall_args rs m ll vl2 -> vl1 = vl2).
+  assert (forall ll vl1, list_forall2 (extcall_arg rs m) ll vl1 ->
+          forall vl2, list_forall2 (extcall_arg rs m) ll vl2 -> vl1 = vl2).
     induction 1; intros vl2 EA; inv EA.
     auto.
     f_equal; auto. 
@@ -783,23 +807,36 @@ Proof.
   intros. red in H0; red in H1. eauto. 
 Qed.
 
+Remark annot_arguments_determ:
+  forall rs m params args1 args2,
+  annot_arguments rs m params args1 -> annot_arguments rs m params args2 -> args1 = args2.
+Proof.
+  unfold annot_arguments. intros. revert params args1 H args2 H0. 
+  induction 1; intros. 
+  inv H0; auto.
+  inv H1. decEq; eauto. inv H; inv H4. auto. congruence. 
+Qed.
+
 Lemma semantics_determinate: forall p, determinate (semantics p).
 Proof.
-
 Ltac Equalities :=
   match goal with
   | [ H1: ?a = ?b, H2: ?a = ?c |- _ ] =>
       rewrite H1 in H2; inv H2; Equalities
   | _ => idtac
   end.
-
   intros; constructor; simpl; intros.
 (* determ *)
   inv H; inv H0; Equalities.
   split. constructor. auto.
   discriminate.
   discriminate.
+  inv H11. 
   exploit external_call_determ. eexact H4. eexact H11. intros [A B].
+  split. auto. intros. destruct B; auto. subst. auto.
+  inv H12.
+  assert (vargs0 = vargs) by (eapply annot_arguments_determ; eauto). subst vargs0.
+  exploit external_call_determ. eexact H5. eexact H13. intros [A B].
   split. auto. intros. destruct B; auto. subst. auto.
   assert (args0 = args) by (eapply extcall_arguments_determ; eauto). subst args0.
   exploit external_call_determ. eexact H3. eexact H8. intros [A B].
@@ -807,6 +844,7 @@ Ltac Equalities :=
 (* trace length *)
   inv H; simpl.
   omega.
+  eapply external_call_trace_length; eauto.
   eapply external_call_trace_length; eauto.
   eapply external_call_trace_length; eauto.
 (* initial states *)

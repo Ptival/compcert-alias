@@ -127,10 +127,12 @@ Definition label := positive.
 
 Inductive instruction : Type :=
   | Padd: ireg -> ireg -> ireg -> instruction                 (**r integer addition *)
+  | Padde: ireg -> ireg -> ireg -> instruction                 (**r integer addition with carry *)
   | Paddi: ireg -> ireg -> constant -> instruction            (**r add immediate *)
+  | Paddic: ireg -> ireg -> constant -> instruction            (**r add immediate and set carry *)
   | Paddis: ireg -> ireg -> constant -> instruction           (**r add immediate high *)
-  | Paddze: ireg -> ireg -> instruction                       (**r add Carry bit *)
-  | Pallocframe: Z -> int -> instruction                 (**r allocate new stack frame *)
+  | Paddze: ireg -> ireg -> instruction                       (**r add carry *)
+  | Pallocframe: Z -> int -> instruction                      (**r allocate new stack frame *)
   | Pand_: ireg -> ireg -> ireg -> instruction                (**r bitwise and *)
   | Pandc: ireg -> ireg -> ireg -> instruction                (**r bitwise and-complement *)
   | Pandi_: ireg -> ireg -> constant -> instruction           (**r and immediate and set conditions *)
@@ -154,7 +156,7 @@ Inductive instruction : Type :=
   | Peqv: ireg -> ireg -> ireg -> instruction                 (**r bitwise not-xor *)
   | Pextsb: ireg -> ireg -> instruction                       (**r 8-bit sign extension *)
   | Pextsh: ireg -> ireg -> instruction                       (**r 16-bit sign extension *)
-  | Pfreeframe: Z -> int -> instruction                  (**r deallocate stack frame and restore previous frame *)
+  | Pfreeframe: Z -> int -> instruction                       (**r deallocate stack frame and restore previous frame *)
   | Pfabs: freg -> freg -> instruction                        (**r float absolute value *)
   | Pfadd: freg -> freg -> freg -> instruction                (**r float addition *)
   | Pfcmpu: freg -> freg -> instruction                       (**r float comparison *)
@@ -195,6 +197,7 @@ Inductive instruction : Type :=
   | Pori: ireg -> ireg -> constant -> instruction             (**r or with immediate *)
   | Poris: ireg -> ireg -> constant -> instruction            (**r or with immediate high *)
   | Prlwinm: ireg -> ireg -> int -> int -> instruction        (**r rotate and mask *)
+  | Prlwimi: ireg -> ireg -> int -> int -> instruction        (**r rotate and insert *)
   | Pslw: ireg -> ireg -> ireg -> instruction                 (**r shift left *)
   | Psraw: ireg -> ireg -> ireg -> instruction                (**r shift right signed *)
   | Psrawi: ireg -> ireg -> int -> instruction                (**r shift right signed immediate *)
@@ -210,12 +213,18 @@ Inductive instruction : Type :=
   | Pstw: ireg -> constant -> ireg -> instruction             (**r store 32-bit int *)
   | Pstwx: ireg -> ireg -> ireg -> instruction                (**r same, with 2 index regs *)
   | Psubfc: ireg -> ireg -> ireg -> instruction               (**r reversed integer subtraction *)
+  | Psubfe: ireg -> ireg -> ireg -> instruction               (**r reversed integer subtraction with carry *)
   | Psubfic: ireg -> ireg -> constant -> instruction          (**r integer subtraction from immediate *)
   | Pxor: ireg -> ireg -> ireg -> instruction                 (**r bitwise xor *)
   | Pxori: ireg -> ireg -> constant -> instruction            (**r bitwise xor with immediate *)
   | Pxoris: ireg -> ireg -> constant -> instruction           (**r bitwise xor with immediate high *)
   | Plabel: label -> instruction                              (**r define a code label *)
-  | Pbuiltin: external_function -> list preg -> preg -> instruction. (**r built-in *)
+  | Pbuiltin: external_function -> list preg -> preg -> instruction (**r built-in function *)
+  | Pannot: external_function -> list annot_param -> instruction (**r annotation statement *)
+
+with annot_param : Type :=
+  | APreg: preg -> annot_param
+  | APstack: memory_chunk -> Z -> annot_param.
 
 (** The pseudo-instructions are the following:
 
@@ -521,12 +530,19 @@ Definition exec_instr (c: code) (i: instruction) (rs: regset) (m: mem) : outcome
   match i with
   | Padd rd r1 r2 =>
       OK (nextinstr (rs#rd <- (Val.add rs#r1 rs#r2))) m
+  | Padde rd r1 r2 =>
+      OK (nextinstr (rs #rd <- (Val.add (Val.add rs#r1 rs#r2) rs#CARRY)
+                        #CARRY <- (Val.add_carry rs#r1 rs#r2 rs#CARRY))) m
   | Paddi rd r1 cst =>
       OK (nextinstr (rs#rd <- (Val.add (gpr_or_zero rs r1) (const_low cst)))) m
+  | Paddic rd r1 cst =>
+      OK (nextinstr (rs#rd <- (Val.add (gpr_or_zero rs r1) (const_low cst))
+                       #CARRY <- (Val.add_carry (gpr_or_zero rs r1) (const_low cst) Vzero))) m
   | Paddis rd r1 cst =>
       OK (nextinstr (rs#rd <- (Val.add (gpr_or_zero rs r1) (const_high cst)))) m
   | Paddze rd r1 =>
-      OK (nextinstr (rs#rd <- (Val.add rs#r1 rs#CARRY))) m
+      OK (nextinstr (rs#rd <- (Val.add rs#r1 rs#CARRY)
+                       #CARRY <- (Val.add_carry rs#r1 Vzero rs#CARRY))) m
   | Pallocframe sz ofs =>
       let (m1, stk) := Mem.alloc m 0 sz in
       let sp := Vptr stk Int.zero in
@@ -692,6 +708,9 @@ Definition exec_instr (c: code) (i: instruction) (rs: regset) (m: mem) : outcome
       OK (nextinstr (rs#rd <- (Val.or rs#r1 (const_high cst)))) m
   | Prlwinm rd r1 amount mask =>
       OK (nextinstr (rs#rd <- (Val.rolm rs#r1 amount mask))) m
+  | Prlwimi rd r1 amount mask =>
+      OK (nextinstr (rs#rd <- (Val.or (Val.and rs#rd (Vint (Int.not mask)))
+                                     (Val.rolm rs#r1 amount mask)))) m
   | Pslw rd r1 r2 =>
       OK (nextinstr (rs#rd <- (Val.shl rs#r1 rs#r2))) m
   | Psraw rd r1 r2 =>
@@ -727,9 +746,14 @@ Definition exec_instr (c: code) (i: instruction) (rs: regset) (m: mem) : outcome
   | Pstwx rd r1 r2 =>
       store2 Mint32 rd r1 r2 rs m
   | Psubfc rd r1 r2 =>
-      OK (nextinstr (rs#rd <- (Val.sub rs#r2 rs#r1) #CARRY <- Vundef)) m
+      OK (nextinstr (rs#rd <- (Val.sub rs#r2 rs#r1)
+                       #CARRY <- (Val.add_carry rs#r2 (Val.notint rs#r1) Vone))) m
+  | Psubfe rd r1 r2 =>
+      OK (nextinstr (rs#rd <- (Val.add (Val.add rs#r2 (Val.notint rs#r1)) rs#CARRY)
+                       #CARRY <- (Val.add_carry rs#r2 (Val.notint rs#r1) rs#CARRY))) m
   | Psubfic rd r1 cst =>
-      OK (nextinstr (rs#rd <- (Val.sub (const_low cst) rs#r1) #CARRY <- Vundef)) m
+      OK (nextinstr (rs#rd <- (Val.sub (const_low cst) rs#r1)
+                       #CARRY <- (Val.add_carry (const_low cst) (Val.notint rs#r1) Vone))) m
   | Pxor rd r1 r2 =>
       OK (nextinstr (rs#rd <- (Val.xor rs#r1 rs#r2))) m
   | Pxori rd r1 cst =>
@@ -739,6 +763,8 @@ Definition exec_instr (c: code) (i: instruction) (rs: regset) (m: mem) : outcome
   | Plabel lbl =>
       OK (nextinstr rs) m
   | Pbuiltin ef args res =>
+      Error    (**r treated specially below *)
+  | Pannot ef args =>
       Error    (**r treated specially below *)
   end.
 
@@ -803,19 +829,26 @@ Inductive extcall_arg (rs: regset) (m: mem): loc -> val -> Prop :=
       Mem.loadv Mfloat64 m (Val.add (rs (IR GPR1)) (Vint (Int.repr bofs))) = Some v ->
       extcall_arg rs m (S (Outgoing ofs Tfloat)) v.
 
-Inductive extcall_args (rs: regset) (m: mem): list loc -> list val -> Prop :=
-  | extcall_args_nil:
-      extcall_args rs m nil nil
-  | extcall_args_cons: forall l1 ll v1 vl,
-      extcall_arg rs m l1 v1 -> extcall_args rs m ll vl ->
-      extcall_args rs m (l1 :: ll) (v1 :: vl).
-
 Definition extcall_arguments
     (rs: regset) (m: mem) (sg: signature) (args: list val) : Prop :=
-  extcall_args rs m (loc_arguments sg) args.
+  list_forall2 (extcall_arg rs m) (loc_arguments sg) args.
 
 Definition loc_external_result (sg: signature) : preg :=
   preg_of (loc_result sg).
+
+(** Extract the values of the arguments of an annotation. *)
+
+Inductive annot_arg (rs: regset) (m: mem): annot_param -> val -> Prop :=
+  | annot_arg_reg: forall r,
+      annot_arg rs m (APreg r) (rs r)
+  | annot_arg_stack: forall chunk ofs stk base v,
+      rs (IR GPR1) = Vptr stk base ->
+      Mem.load chunk m stk (Int.unsigned base + ofs) = Some v ->
+      annot_arg rs m (APstack chunk ofs) v.
+
+Definition annot_arguments
+    (rs: regset) (m: mem) (params: list annot_param) (args: list val) : Prop :=
+  list_forall2 (annot_arg rs m) params args.
 
 (** Execution of the instruction at [rs#PC]. *)
 
@@ -841,6 +874,15 @@ Inductive step: state -> trace -> state -> Prop :=
                                 #FPR12 <- Vundef #FPR13 <- Vundef
                                 #FPR0 <- Vundef #CTR <- Vundef
                                 #res <- v)) m')
+  | exec_step_annot:
+      forall b ofs c ef args rs m vargs t v m',
+      rs PC = Vptr b ofs ->
+      Genv.find_funct_ptr ge b = Some (Internal c) ->
+      find_instr (Int.unsigned ofs) c = Some (Pannot ef args) ->
+      annot_arguments rs m args vargs ->
+      external_call ef ge vargs m t v m' ->
+      step (State rs m) t
+           (State (nextinstr rs) m')
   | exec_step_external:
       forall b ef args res rs m t rs' m',
       rs PC = Vptr b Int.zero ->
