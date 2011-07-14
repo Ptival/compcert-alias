@@ -345,8 +345,7 @@ Proof.
   eapply compose_forward_simulation. apply CleanupLabelsproof.transf_program_correct. 
   eapply compose_forward_simulation. apply Reloadproof.transf_program_correct. eauto.
   eapply compose_forward_simulation. apply Stackingproof.transf_program_correct. eassumption. eauto 8.
-  apply Asmgenproof.transf_program_correct. auto. 
-
+  apply Asmgenproof.transf_program_correct; eauto 10.
   split. auto. 
   apply forward_to_backward_simulation. auto. 
   apply RTL.semantics_receptive.
