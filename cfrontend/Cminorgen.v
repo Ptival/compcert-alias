@@ -92,18 +92,18 @@ Definition make_cast (chunk: memory_chunk) (e: expr): expr :=
   with that implicitly performed by the memory store.
   [store_arg] detects this case and strips away the redundant cast. *)
 
-Definition store_arg (chunk: memory_chunk) (e: expr) : expr :=
+Fixpoint store_arg (chunk: memory_chunk) (e: expr) : expr :=
   match e with
   | Eunop Ocast8signed e1 =>
-      match chunk with Mint8signed => e1 | _ => e end
+      match chunk with Mint8signed => store_arg chunk e1 | _ => e end
   | Eunop Ocast8unsigned e1 =>
-      match chunk with Mint8unsigned => e1 | _ => e end
+      match chunk with Mint8unsigned => store_arg chunk e1 | _ => e end
   | Eunop Ocast16signed e1 =>
-      match chunk with Mint16signed => e1 | _ => e end
+      match chunk with Mint16signed => store_arg chunk e1 | _ => e end
   | Eunop Ocast16unsigned e1 =>
-      match chunk with Mint16unsigned => e1 | _ => e end
+      match chunk with Mint16unsigned => store_arg chunk e1 | _ => e end
   | Eunop Osingleoffloat e1 =>
-      match chunk with Mfloat32 => e1 | _ => e end
+      match chunk with Mfloat32 => store_arg chunk e1 | _ => e end
   | _ => e
   end.
 

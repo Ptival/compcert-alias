@@ -199,33 +199,42 @@ Definition mul (v1 v2: val): val :=
   | _, _ => Vundef
   end.
 
-Definition divs (v1 v2: val): val :=
+Definition divs (v1 v2: val): option val :=
   match v1, v2 with
   | Vint n1, Vint n2 =>
-      if Int.eq n2 Int.zero then Vundef else Vint(Int.divs n1 n2)
-  | _, _ => Vundef
+      if Int.eq n2 Int.zero then None else Some(Vint(Int.divs n1 n2))
+  | _, _ => None
   end.
 
-Definition mods (v1 v2: val): val :=
+Definition mods (v1 v2: val): option val :=
   match v1, v2 with
   | Vint n1, Vint n2 =>
-      if Int.eq n2 Int.zero then Vundef else Vint(Int.mods n1 n2)
-  | _, _ => Vundef
+      if Int.eq n2 Int.zero then None else Some(Vint(Int.mods n1 n2))
+  | _, _ => None
   end.
 
-Definition divu (v1 v2: val): val :=
+Definition divu (v1 v2: val): option val :=
   match v1, v2 with
   | Vint n1, Vint n2 =>
-      if Int.eq n2 Int.zero then Vundef else Vint(Int.divu n1 n2)
-  | _, _ => Vundef
+      if Int.eq n2 Int.zero then None else Some(Vint(Int.divu n1 n2))
+  | _, _ => None
   end.
 
-Definition modu (v1 v2: val): val :=
+Definition modu (v1 v2: val): option val :=
   match v1, v2 with
   | Vint n1, Vint n2 =>
-      if Int.eq n2 Int.zero then Vundef else Vint(Int.modu n1 n2)
-  | _, _ => Vundef
+      if Int.eq n2 Int.zero then None else Some(Vint(Int.modu n1 n2))
+  | _, _ => None
   end.
+
+Definition divs_total (v1 v2: val): val :=
+  match divs v1 v2 with Some v => v | None => Vundef end.
+Definition mods_total (v1 v2: val): val :=
+  match mods v1 v2 with Some v => v | None => Vundef end.
+Definition divu_total (v1 v2: val): val :=
+  match divu v1 v2 with Some v => v | None => Vundef end.
+Definition modu_total (v1 v2: val): val :=
+  match modu v1 v2 with Some v => v | None => Vundef end.
 
 Definition add_carry (v1 v2 cin: val): val :=
   match v1, v2, cin with
@@ -345,14 +354,6 @@ Definition cmp_mismatch (c: comparison): val :=
 Definition cmp (c: comparison) (v1 v2: val): val :=
   match v1, v2 with
   | Vint n1, Vint n2 => of_bool (Int.cmp c n1 n2)
-  | Vint n1, Vptr b2 ofs2 =>
-      if Int.eq n1 Int.zero then cmp_mismatch c else Vundef
-  | Vptr b1 ofs1, Vptr b2 ofs2 =>
-      if zeq b1 b2
-      then of_bool (Int.cmp c ofs1 ofs2)
-      else cmp_mismatch c
-  | Vptr b1 ofs1, Vint n2 =>
-      if Int.eq n2 Int.zero then cmp_mismatch c else Vundef
   | _, _ => Vundef
   end.
 
@@ -612,59 +613,56 @@ Proof.
 Qed.  
 
 Theorem mods_divs:
-  forall x y, mods x y = sub x (mul (divs x y) y).
+  forall x y z, divs x y = Some z -> mods x y = Some(sub x (mul z y)).
 Proof.
-  destruct x; destruct y; simpl; auto.
-  case (Int.eq i0 Int.zero); simpl. auto. decEq. apply Int.mods_divs.
+  intros. destruct x; destruct y; simpl in H; try discriminate.
+  simpl. destruct (Int.eq i0 Int.zero); inv H. simpl.
+  decEq. decEq. apply Int.mods_divs.
 Qed.
 
 Theorem modu_divu:
-  forall x y, modu x y = sub x (mul (divu x y) y).
+  forall x y z, divu x y = Some z -> modu x y = Some(sub x (mul z y)).
 Proof.
-  destruct x; destruct y; simpl; auto.
-  generalize (Int.eq_spec i0 Int.zero);
-  case (Int.eq i0 Int.zero); simpl. auto. 
-  intro. decEq. apply Int.modu_divu. auto.
+  intros. destruct x; destruct y; simpl in H; try discriminate.
+  simpl. revert H. predSpec Int.eq Int.eq_spec i0 Int.zero; intros; inv H0.
+  simpl. decEq. decEq. apply Int.modu_divu. auto. 
 Qed.
 
 Theorem divs_pow2:
-  forall x n logn,
+  forall x n logn y,
   Int.is_power2 n = Some logn ->
-  divs x (Vint n) = shrx x (Vint logn).
+  divs x (Vint n) = Some y ->
+  shrx x (Vint logn) = y.
 Proof.
-  intros; destruct x; simpl; auto.
-  change 32 with (Z_of_nat Int.wordsize).
-  rewrite (Int.is_power2_range _ _ H). 
-  generalize (Int.eq_spec n Int.zero);
-  case (Int.eq n Int.zero); intro.
-  subst n. compute in H. discriminate.
-  decEq. apply Int.divs_pow2. auto.
+  intros; destruct x; simpl in H0; inv H0.
+  destruct (Int.eq n Int.zero); inv H2. 
+  simpl. 
+  rewrite (Int.is_power2_range _ _ H).
+  decEq. symmetry. apply Int.divs_pow2. auto.
 Qed.
 
 Theorem divu_pow2:
-  forall x n logn,
+  forall x n logn y,
   Int.is_power2 n = Some logn ->
-  divu x (Vint n) = shru x (Vint logn).
+  divu x (Vint n) = Some y ->
+  shru x (Vint logn) = y.
 Proof.
-  intros; destruct x; simpl; auto.
-  change 32 with (Z_of_nat Int.wordsize).
-  rewrite (Int.is_power2_range _ _ H). 
-  generalize (Int.eq_spec n Int.zero);
-  case (Int.eq n Int.zero); intro.
-  subst n. compute in H. discriminate.
-  decEq. apply Int.divu_pow2. auto.
+  intros; destruct x; simpl in H0; inv H0.
+  destruct (Int.eq n Int.zero); inv H2. 
+  simpl. 
+  rewrite (Int.is_power2_range _ _ H).
+  decEq. symmetry. apply Int.divu_pow2. auto.
 Qed.
 
 Theorem modu_pow2:
-  forall x n logn,
+  forall x n logn y,
   Int.is_power2 n = Some logn ->
-  modu x (Vint n) = and x (Vint (Int.sub n Int.one)).
+  modu x (Vint n) = Some y ->
+  and x (Vint (Int.sub n Int.one)) = y.
 Proof.
-  intros; destruct x; simpl; auto.
-  generalize (Int.eq_spec n Int.zero);
-  case (Int.eq n Int.zero); intro.
-  subst n. compute in H. discriminate.
-  decEq. eapply Int.modu_and; eauto.
+  intros; destruct x; simpl in H0; inv H0.
+  destruct (Int.eq n Int.zero); inv H2. 
+  simpl. decEq. symmetry. eapply Int.modu_and; eauto.
 Qed.
 
 Theorem and_commut: forall x y, and x y = and y x.
@@ -778,11 +776,6 @@ Theorem negate_cmp:
 Proof.
   destruct x; destruct y; simpl; auto.
   rewrite Int.negate_cmp. apply notbool_negb_1.
-  case (Int.eq i Int.zero). apply negate_cmp_mismatch. reflexivity.
-  case (Int.eq i0 Int.zero). apply negate_cmp_mismatch. reflexivity.
-  case (zeq b b0); intro.
-  rewrite Int.negate_cmp. apply notbool_negb_1.
-  apply negate_cmp_mismatch.
 Qed.
 
 Theorem negate_cmpu:
@@ -810,11 +803,6 @@ Theorem swap_cmp:
 Proof.
   destruct x; destruct y; simpl; auto.
   rewrite Int.swap_cmp. auto.
-  case (Int.eq i Int.zero). apply swap_cmp_mismatch. auto.
-  case (Int.eq i0 Int.zero). apply swap_cmp_mismatch. auto.
-  case (zeq b b0); intro.
-  subst b0. rewrite zeq_true. rewrite Int.swap_cmp. auto.
-  rewrite zeq_false. apply swap_cmp_mismatch. auto.
 Qed.
 
 Theorem swap_cmpu:
@@ -890,9 +878,6 @@ Lemma cmp_is_bool:
 Proof.
   destruct v1; destruct v2; simpl; try apply undef_is_bool.
   apply of_bool_is_bool.
-  case (Int.eq i Int.zero). apply cmp_mismatch_is_bool. apply undef_is_bool.
-  case (Int.eq i0 Int.zero). apply cmp_mismatch_is_bool. apply undef_is_bool.
-  case (zeq b b0); intro. apply of_bool_is_bool. apply cmp_mismatch_is_bool.
 Qed.
 
 Lemma cmpu_is_bool:
@@ -1084,4 +1069,20 @@ Proof.
 Qed.
 
 Hint Resolve inject_incr_refl val_inject_incr val_list_inject_incr.
+
+Lemma val_inject_lessdef:
+  forall v1 v2, Val.lessdef v1 v2 <-> val_inject (fun b => Some(b, 0)) v1 v2.
+Proof.
+  intros; split; intros.
+  inv H; auto. destruct v2; econstructor; eauto. rewrite Int.add_zero; auto. 
+  inv H; auto. inv H0. rewrite Int.add_zero; auto.
+Qed.
+
+Lemma val_list_inject_lessdef:
+  forall vl1 vl2, Val.lessdef_list vl1 vl2 <-> val_list_inject (fun b => Some(b, 0)) vl1 vl2.
+Proof.
+  intros; split.
+  induction 1; constructor; auto. apply val_inject_lessdef; auto.
+  induction 1; constructor; auto. apply val_inject_lessdef; auto.
+Qed.
 

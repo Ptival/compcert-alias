@@ -136,15 +136,21 @@ doc/coq2html: doc/coq2html.ml
 doc/coq2html.ml: doc/coq2html.mll
 	ocamllex doc/coq2html.mll
 
+tools/ndfun: tools/ndfun.ml
+	ocamlopt -o tools/ndfun str.cmxa tools/ndfun.ml
+
 latexdoc:
 	cd doc; $(COQDOC) --latex -o doc/doc.tex -g $(FILES)
 
-.SUFFIXES: .v .vo
-
-.v.vo:
+%.vo: %.v
 	@rm -f doc/glob/$(*F).glob
 	@echo "COQC $*.v"
 	@$(COQC) -dump-glob doc/$(*F).glob $*.v
+
+%.v: %.vp tools/ndfun
+	@rm -f $*.v
+	tools/ndfun $*.vp > $*.v || { rm -f $*.v; exit 2; }
+	@chmod -w $*.v
 
 driver/Configuration.ml: Makefile.config
 	(echo let stdlib_path = "\"$(LIBDIR)\""; \
