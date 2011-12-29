@@ -145,7 +145,8 @@ Nondetfunction rolm (e1: expr) (amount2: int) (mask2: int) :=
                  (Int.and (Int.rol mask1 amount2) mask2))
           (t1:::Enil)
   | Eop (Oandimm mask1) (t1:::Enil) =>
-      Eop (Orolm amount2 (Int.and (Int.rol mask1 amount2) mask2))
+      Eop (Orolm (Int.modu amount2 Int.iwordsize)
+                 (Int.and (Int.rol mask1 amount2) mask2))
           (t1:::Enil)
   | _ =>
       Eop (Orolm amount2 mask2) (e1:::Enil)
@@ -381,24 +382,24 @@ Definition compf (c: comparison) (e1: expr) (e2: expr) :=
 
 (** ** Removal of redundant casts before a store or a cast *)
 
-Fixpoint uncast_int8 (e: expr) : expr :=
+Function uncast_int8 (e: expr) : expr :=
   match e with
   | Eop Ocast8signed (t ::: Enil) => uncast_int8 t
   | Eop Ocast16signed (t ::: Enil) => uncast_int8 t
   | Eop (Oandimm n) (t ::: Enil) =>
-      if Int.eq n (Int.and n (Int.repr 255)) then uncast_int8 t else e
+      if Int.eq (Int.and n (Int.repr 255)) (Int.repr 255) then uncast_int8 t else e
   | _ => e
   end.
 
-Fixpoint uncast_int16 (e: expr) : expr :=
+Function uncast_int16 (e: expr) : expr :=
   match e with
   | Eop Ocast16signed (t ::: Enil) => uncast_int16 t
   | Eop (Oandimm n) (t ::: Enil) =>
-      if Int.eq n (Int.and n (Int.repr 65535)) then uncast_int16 t else e
+      if Int.eq (Int.and n (Int.repr 65535)) (Int.repr 65535) then uncast_int16 t else e
   | _ => e
   end.
 
-Fixpoint uncast_float32 (e: expr) : expr :=
+Function uncast_float32 (e: expr) : expr :=
   match e with
   | Eop Osingleoffloat (t ::: Enil) => uncast_float32 t
   | _ => e
@@ -409,6 +410,7 @@ Definition uncast (chunk: memory_chunk) (e: expr) :=
   | Mint8unsigned | Mint8signed => uncast_int8 e
   | Mint16unsigned | Mint16signed => uncast_int16 e
   | Mfloat32 => uncast_float32 e
+  | _ => e
   end.
 
 (** ** Integer conversions *)

@@ -134,20 +134,23 @@ Qed.
 
 Theorem eval_notint: unary_constructor_sound notint Val.notint.
 Proof.
-  unfold notint; intros until x; case (notint_match a); intros; InvEval.
-  EvalOp. 
-  EvalOp. simpl. rewrite H. auto. 
-  EvalOp. simpl. rewrite H. auto. 
-  EvalOp. simpl. rewrite H. auto. 
+  unfold notint; red; intros until x; case (notint_match a); intros; InvEval.
+  TrivialExists. 
+  subst. TrivialExists. 
+  subst. TrivialExists.
+  subst. TrivialExists.
+  econstructor; split; eauto. 
   eapply eval_Elet. eexact H. 
   eapply eval_Eop.
   eapply eval_Econs. apply eval_Eletvar. simpl. reflexivity.
   eapply eval_Econs. apply eval_Eletvar. simpl. reflexivity.
   apply eval_Enil.  
-  simpl. rewrite Int.or_idem. auto.
+  simpl. destruct x; simpl; auto. rewrite Int.or_idem. auto.
 Qed.
 
-Lemma eval_notbool_base:
+(*
+Lemma eval_notbool_base: unary_constructor_sound notbool_base Val.notbool.
+
   forall le a v b,
   eval_expr ge sp e m le a v ->
   Val.bool_of_val v b ->
@@ -159,36 +162,36 @@ Proof.
   rewrite Int.eq_true; auto.
   reflexivity.
 Qed.
-
+*)
+(*
 Hint Resolve Val.bool_of_true_val Val.bool_of_false_val
              Val.bool_of_true_val_inv Val.bool_of_false_val_inv: valboolof.
+*)
 
-Theorem eval_notbool:
-  forall le a v b,
-  eval_expr ge sp e m le a v ->
-  Val.bool_of_val v b ->
-  eval_expr ge sp e m le (notbool a) (Val.of_bool (negb b)).
+Theorem eval_notbool: unary_constructor_sound notbool Val.notbool.
 Proof.
-  induction a; simpl; intros; try (eapply eval_notbool_base; eauto).
-  destruct o; try (eapply eval_notbool_base; eauto).
+  assert (DFL: 
+    forall le a x,
+    eval_expr ge sp e m le a x ->
+     exists v, eval_expr ge sp e m le (Eop (Ocmp (Ccompuimm Ceq Int.zero)) (a ::: Enil)) v
+           /\ Val.lessdef (Val.notbool x) v).
+  intros. TrivialExists. simpl. destruct x; simpl; auto. destruct (Int.eq i Int.zero); auto.
 
-  destruct e0. InvEval. 
-  inv H0. rewrite Int.eq_false; auto. 
-  simpl; eauto with evalexpr.
-  rewrite Int.eq_true; simpl; eauto with evalexpr.
-  eapply eval_notbool_base; eauto.
-
-  inv H. eapply eval_Eop; eauto.
-  simpl. assert (eval_condition c vl m = Some b).
-  generalize H6. simpl. 
-  case (eval_condition c vl m); intros.
-  destruct b0; inv H1; inversion H0; auto; congruence.
-  inv H1. inv H0. 
-  rewrite (Op.eval_negate_condition _ _ _ H). 
-  destruct b; reflexivity.
-
-  inv H. eapply eval_Econdition; eauto. 
-  destruct v1; eauto.
+  red. induction a; simpl; intros; eauto. destruct o; eauto.
+(* intconst *)
+  destruct e0; eauto. InvEval. TrivialExists. simpl. destruct (Int.eq i Int.zero); auto.
+(* cmp *)
+  inv H. simpl in H5.
+  destruct (eval_condition c vl m) as []_eqn. 
+  TrivialExists. simpl. rewrite (eval_negate_condition _ _ _ Heqo). destruct b; inv H5; auto.
+  inv H5. simpl. 
+  destruct (eval_condition (negate_condition c) vl m) as []_eqn.
+  destruct b; [exists Vtrue | exists Vfalse]; split; auto; EvalOp; simpl. rewrite Heqo0; auto. rewrite Heqo0; auto.
+  exists Vundef; split; auto; EvalOp; simpl. rewrite Heqo0; auto.
+(* condition *)
+  inv H. destruct v1.
+  exploit IHa1; eauto. intros [v [A B]]. exists v; split; auto. eapply eval_Econdition; eauto. 
+  exploit IHa2; eauto. intros [v [A B]]. exists v; split; auto. eapply eval_Econdition; eauto. 
 Qed.
 
 Theorem eval_addimm:
@@ -253,7 +256,9 @@ Lemma eval_rolm:
 Proof.
   red; intros until x. unfold rolm; case (rolm_match a); intros; InvEval.
   TrivialExists. 
-  subst. rewrite Val.rolm_rolm. TrivialExists. 
+  subst. rewrite Val.rolm_rolm. TrivialExists.
+  subst. rewrite <- Val.rolm_zero. rewrite Val.rolm_rolm.
+  rewrite (Int.add_commut Int.zero). rewrite Int.add_zero. TrivialExists.
   TrivialExists.
 Qed.
 
@@ -318,8 +323,8 @@ Proof.
   apply eval_shlimm. auto. simpl. rewrite H0; auto with coqlib.
   destruct l.
   intros. rewrite H1. simpl.
-  exploit (eval_shlimm (x :: le) (Eletvar 0) i x). constructor; auto. intros [v1 [A1 B1]].
-  exploit (eval_shlimm (x :: le) (Eletvar 0) i0 x). constructor; auto. intros [v2 [A2 B2]].
+  exploit (eval_shlimm i (x :: le) (Eletvar 0) x). constructor; auto. intros [v1 [A1 B1]].
+  exploit (eval_shlimm i0 (x :: le) (Eletvar 0) x). constructor; auto. intros [v2 [A2 B2]].
   exists (Val.add v1 v2); split.
   econstructor. eauto. EvalOp.
   rewrite Int.add_zero.
@@ -345,7 +350,7 @@ Proof.
   TrivialExists. simpl. rewrite Int.mul_commut; auto.
   subst. rewrite Val.mul_add_distr_l. 
   exploit eval_mulimm_base; eauto. instantiate (1 := n). intros [v' [A1 B1]].
-  exploit (eval_addimm le (Int.mul n n2) (mulimm_base n t2) v'). auto. intros [v'' [A2 B2]].
+  exploit (eval_addimm (Int.mul n n2) le (mulimm_base n t2) v'). auto. intros [v'' [A2 B2]].
   exists v''; split; auto. eapply val_lessdef_trans. eapply val_add_lessdef; eauto. 
   rewrite Val.mul_commut; auto.
   apply eval_mulimm_base; auto.
@@ -363,10 +368,13 @@ Qed.
 Theorem eval_andimm:
   forall n, unary_constructor_sound (andimm n) (fun x => Val.and x (Vint n)).
 Proof.
-  intros; red; intros.  unfold andimm.
-  replace (Val.and x (Vint n)) with (Val.rolm x Int.zero n).
-  apply eval_rolm; auto.
-  destruct x; simpl; auto. decEq; apply Int.rolm_zero.
+  intros; red; intros until x. unfold andimm. case (andimm_match a); intros.
+  InvEval. TrivialExists. simpl. rewrite Int.and_commut; auto.
+  InvEval. subst. rewrite Val.and_assoc. simpl. rewrite Int.and_commut. TrivialExists. 
+  InvEval. subst. TrivialExists. simpl. 
+  destruct v1; auto. simpl. unfold Int.rolm. rewrite Int.and_assoc. 
+  decEq. decEq. decEq. apply Int.and_commut.
+  TrivialExists.
 Qed.
 
 Theorem eval_and: binary_constructor_sound and Val.and.
@@ -404,29 +412,27 @@ Qed.
 
 Lemma eval_or: binary_constructor_sound or Val.or.
 Proof.
-  red; intros until y; unfold or; case (or_match a b); intros; InvEval.
+  red; intros until y; unfold or; case (or_match a b); intros.
+(* rolm - rolm *)
   destruct (Int.eq amount1 amount2 && same_expr_pure t1 t2) as []_eqn.
   destruct (andb_prop _ _ Heqb0).
   generalize (Int.eq_spec amount1 amount2). rewrite H1. intro. subst amount2.
-  exploit eval_same_expr; eauto. intros [EQ1 EQ2]. subst. 
-  rewrite Val.or_rolm. TrivialExists. 
-  destruct (Int.eq amount1 Int.zero && Int.eq mask1 (Int.not mask2)) as []_eqn.
-  destruct (andb_prop _ _ Heqb1).
-  generalize (Int.eq_spec amount1 Int.zero). rewrite H1. intro.
-  generalize (Int.eq_spec mask1 (Int.not mask2)). rewrite H4. intro.
-  subst. rewrite Val.rolm_zero. TrivialExists. 
-  destruct (Int.eq amount2 Int.zero && Int.eq mask2 (Int.not mask1)) as []_eqn.
-  destruct (andb_prop _ _ Heqb2). 
-  generalize (Int.eq_spec amount2 Int.zero). rewrite H1. intro.
-  generalize (Int.eq_spec mask2 (Int.not mask1)). rewrite H4. intro.
-  subst. rewrite Val.rolm_zero. rewrite Val.or_commut. TrivialExists. 
+  InvEval. exploit eval_same_expr; eauto. intros [EQ1 EQ2]. subst. 
+  rewrite Val.or_rolm. TrivialExists.
   TrivialExists.
-  econstructor. EvalOp. simpl. rewrite H0; eauto.
-  econstructor. EvalOp. simpl. rewrite H; eauto.
-  constructor. auto. 
-  rewrite Val.or_commut. apply eval_orimm; auto.
-  apply eval_orimm; auto.
+(* andimm - rolm *)
+  predSpec Int.eq Int.eq_spec mask1 (Int.not mask2). 
+  InvEval. subst. TrivialExists. 
   TrivialExists.
+(* rolm - andimm *)
+  predSpec Int.eq Int.eq_spec mask2 (Int.not mask1). 
+  InvEval. subst. rewrite Val.or_commut. TrivialExists.
+  TrivialExists.
+(* intconst *)
+  InvEval. rewrite Val.or_commut. apply eval_orimm; auto. 
+  InvEval. apply eval_orimm; auto.
+(* default *)
+  TrivialExists. 
 Qed.
 
 Theorem eval_xorimm:
@@ -604,6 +610,16 @@ Proof.
   TrivialExists. 
 Qed.
 
+Theorem eval_negf: unary_constructor_sound negf Val.negf.
+Proof.
+  red; intros. TrivialExists. 
+Qed.
+
+Theorem eval_absf: unary_constructor_sound absf Val.absf.
+Proof.
+  red; intros. TrivialExists. 
+Qed.
+
 Theorem eval_addf: binary_constructor_sound addf Val.addf.
 Proof.
   red; intros until y; unfold addf.
@@ -624,6 +640,420 @@ Proof.
   TrivialExists.
   intros. TrivialExists.
 Qed.
+
+Theorem eval_mulf: binary_constructor_sound mulf Val.mulf.
+Proof.
+  red; intros; TrivialExists.
+Qed.
+
+Theorem eval_divf: binary_constructor_sound divf Val.divf.
+Proof.
+  red; intros; TrivialExists.
+Qed.
+
+Inductive val_lessdef_upto: memory_chunk -> val -> val -> Prop :=
+  | val_lessdef_upto_undef: forall chunk v,
+      val_lessdef_upto chunk Vundef v
+  | val_lessdef_upto_int8: forall n1 n2,
+      Int.zero_ext 8 n1 = Int.zero_ext 8 n2 ->
+      val_lessdef_upto Mint8unsigned (Vint n1) (Vint n2)
+  | val_lessdef_upto_int16: forall n1 n2,
+      Int.zero_ext 16 n1 = Int.zero_ext 16 n2 ->
+      val_lessdef_upto Mint16unsigned (Vint n1) (Vint n2)
+  | val_lessdef_upto_float32: forall f1 f2,
+      Float.singleoffloat f1 = Float.singleoffloat f2 ->
+      val_lessdef_upto Mfloat32 (Vfloat f1) (Vfloat f2)
+  | val_lessdef_upto_refl: forall chunk v,
+      val_lessdef_upto chunk v v.
+
+Remark val_lessdef_upto_trans:
+  forall chunk v1 v2 v3, val_lessdef_upto chunk v1 v2 -> val_lessdef_upto chunk v2 v3 -> val_lessdef_upto chunk v1 v3.
+Proof.
+  intros. inv H.
+  constructor.
+  inv H0. constructor. congruence. constructor. auto.
+  inv H0. constructor. congruence. constructor. auto.
+  inv H0. constructor. congruence. constructor. auto.
+  auto.
+Qed.
+
+Lemma eval_uncast_int8:
+  forall le a x,
+  eval_expr ge sp e m le a x ->
+  exists v, eval_expr ge sp e m le (uncast_int8 a) v /\ val_lessdef_upto Mint8unsigned x v.
+Proof.
+  intros until a. functional induction (uncast_int8 a); intros.
+  (* cast8signed *)
+  InvEval. exploit IHe0; eauto. intros [v [A B]]. exists v; split; auto.
+  eapply val_lessdef_upto_trans; eauto. 
+  subst x. destruct v1; simpl; constructor. apply Int.zero_ext_sign_ext.
+  (* cast16signed *)
+  InvEval. exploit IHe0; eauto. intros [v [A B]]. exists v; split; auto.
+  eapply val_lessdef_upto_trans; eauto.
+  subst x. destruct v1; simpl; constructor. admit.
+  (* andimm *)
+  InvEval. exploit IHe0; eauto. intros [v [A B]]. exists v; split; auto.
+  eapply val_lessdef_upto_trans; eauto. 
+  subst. generalize (Int.eq_spec (Int.and n (Int.repr 255)) (Int.repr 255)); rewrite e2; intro EQ.
+  destruct v1; simpl; constructor. 
+  repeat rewrite Int.zero_ext_and. rewrite Int.and_assoc. decEq. assumption.
+  compute; auto. compute; auto.
+  exists x; split; auto. constructor.
+  (* default *)
+  exists x; split; auto. constructor.
+Qed.
+
+Lemma encode_val_lessdef_upto:
+  forall chunk v1 v2,
+  val_lessdef_upto chunk v1 v2 ->
+  list_forall2 (memval_inject inject_id) (encode_val chunk v1) (encode_val chunk v2).
+Proof.
+  induction 1.
+  (* undef *)
+  apply encode_val_inject. constructor.
+  (* two 8-bits ints *)
+  simpl. replace (encode_int Mint8unsigned n2) with (encode_int Mint8unsigned n1). 
+  apply inj_bytes_inject.
+  rewrite <- (encode_int8_zero_ext n1). 
+  rewrite <- (encode_int8_zero_ext n2).
+  congruence.
+  (* two 16-bits ints *)
+  simpl. replace (encode_int Mint16unsigned n2) with (encode_int Mint16unsigned n1). 
+  apply inj_bytes_inject.
+  rewrite <- (encode_int16_zero_ext n1). 
+  rewrite <- (encode_int16_zero_ext n2).
+  congruence.
+  (* two single floats *)
+  simpl. replace (encode_float Mfloat32 f2) with (encode_float Mfloat32 f1). 
+  apply inj_bytes_inject.
+  unfold encode_float. 
+  rewrite <- (Float.bits_of_singleoffloat f1).
+  rewrite <- (Float.bits_of_singleoffloat f2).
+  congruence.
+  (* same values *)
+  apply encode_val_inject. rewrite val_inject_id. auto.
+Qed.
+
+Lemma eval_uncast:
+  forall le chunk b ofs a x m1,
+  eval_expr ge sp e m le a x ->
+  Mem.store chunk m b ofs x = Some m1 ->
+  exists v, exists m2,
+     eval_expr ge sp e m le (uncast chunk a) v
+  /\ Mem.store chunk m b ofs v = Some m2
+  /\ Mem.extends m1 m2.
+Proof.
+  
+val_lessdef_upto Mint8unsigned x v.
+
+
+
+
+Inductive val_lessdef_int (n: Z): val -> val -> Prop :=
+  | val_lessdef_int_undef: forall v, val_lessdef_int n Vundef v
+  | val_lessdef_int_int: forall n1 n2, Int.zero_ext n n1 = Int.zero_ext n n2 -> val_lessdef_int n (Vint n1) (Vint n2)
+  | val_lessdef_int_refl: forall v, val_lessdef_int n v v.
+(*
+Definition val_lessdef_int_N (n: Z) (v1 v2: val): Prop :=
+  match v1, v2 with
+  | Vundef, _ => True
+  | Vint n1, Vint n2 => Int.zero_ext n n1 = Int.zero_ext n n2
+  | _, _ => v1 = v2
+  end.
+*)
+Remark val_lessdef_int_trans:
+  forall n v1 v2 v3, val_lessdef_int n v1 v2 -> val_lessdef_int n v2 v3 -> val_lessdef_int n v1 v3.
+Proof.
+  intros. inv H.
+  constructor.
+  inv H0. constructor. congruence. constructor. auto.
+  auto.
+Qed.
+
+Lemma eval_uncast_int8:
+  forall le a x,
+  eval_expr ge sp e m le a x ->
+  exists v, eval_expr ge sp e m le (uncast_int8 a) v /\ val_lessdef_int 8 x v.
+Proof.
+  intros until a. functional induction (uncast_int8 a); intros.
+  (* cast8signed *)
+  InvEval. exploit IHe0; eauto. intros [v [A B]]. exists v; split; auto.
+  eapply val_lessdef_int_trans; eauto. 
+  subst x. destruct v1; simpl; constructor. apply Int.zero_ext_sign_ext.
+  (* cast16signed *)
+  InvEval. exploit IHe0; eauto. intros [v [A B]]. exists v; split; auto.
+  eapply val_lessdef_int_trans; eauto.
+  subst x. destruct v1; simpl; constructor. admit.
+  (* andimm *)
+  InvEval. exploit IHe0; eauto. intros [v [A B]]. exists v; split; auto.
+  eapply val_lessdef_int_trans; eauto. 
+  subst. generalize (Int.eq_spec (Int.and n (Int.repr 255)) (Int.repr 255)); rewrite e2; intro EQ.
+  destruct v1; simpl; constructor. 
+  repeat rewrite Int.zero_ext_and. rewrite Int.and_assoc. decEq. assumption.
+  compute; auto. compute; auto.
+  exists x; split; auto. constructor.
+  (* default *)
+  exists x; split; auto. constructor.
+Qed.
+
+Remark memval_lessdef_trans:
+  forall v1 v2 v3, memval_lessdef v1 v2 -> memval_lessdef v2 v3 -> memval_lessdef v1 v3.
+Proof.
+  intros. inv H. auto. unfold inject_id in H1. inv H1. rewrite Int.add_zero in H0. auto. constructor.
+Qed.
+
+Definition memvals_lessdef (vl1 vl2: list memval) : Prop :=
+  list_forall2 memval_lessdef vl1 vl2.
+
+Remark memvals_lessdef_refl:
+  forall vl, memvals_lessdef vl vl.
+Proof.
+  induction vl; constructor; auto. apply memval_lessdef_refl.
+Qed.
+
+Remark memvals_lessdef_trans:
+  forall vl1 vl2, memvals_lessdef vl1 vl2 -> forall vl3, memvals_lessdef vl2 vl3 -> memvals_lessdef vl1 vl3.
+Proof.
+  induction 1; intros. inv H. constructor. 
+  inv H1. constructor. eapply memval_lessdef_trans; eauto. eapply IHlist_forall2; eauto.
+Qed.
+
+Remark memvals_lessdef_encode_val:
+  forall chunk v1 v2,
+  Val.lessdef v1 v2 ->
+  memvals_lessdef (encode_val chunk v1) (encode_val chunk v2).
+Proof.
+  intros. apply encode_val_inject. rewrite val_inject_id. auto.
+Qed.
+
+Lemma foo:
+  forall v1 v2,
+  val_lessdef_int 8 v1 v2 -> memvals_lessdef (encode_val Mint8unsigned v1) (encode_val Mint8unsigned v2).
+Proof.
+  induction 1.
+  (* undef *)
+  apply encode_val_inject. constructor.
+  (* two ints *)
+  simpl. replace (encode_int Mint8unsigned n2) with (encode_int Mint8unsigned n1). 
+  apply inj_bytes_inject.
+  rewrite <- (encode_int8_zero_ext n1). 
+  rewrite <- (encode_int8_zero_ext n2).
+  congruence.
+  (* same values *)
+  apply encode_val_inject. rewrite val_inject_id. auto.
+Qed.
+
+  replace (encode_val Mint8unsigned Vundef) with (list_repeat (List.length (encode_val Mint8unsigned v)) Undef).
+  apply repeat_U
+  simpl. 
+
+
+
+
+Lemma eval_uncast_int8:
+  forall le a x,
+  eval_expr ge sp e m le a x ->
+  exists v, eval_expr ge sp e m le (uncast_int8 a) v /\ 
+            memvals_lessdef (encode_val Mint8unsigned x) (encode_val Mint8unsigned v).
+Proof.
+  intros until a. functional induction (uncast_int8 a); intros.
+  (* cast8signed *)
+  InvEval. exploit IHe0; eauto. intros [v [A B]]. exists v; split; auto.
+  eapply memvals_lessdef_trans; eauto. subst x. 
+  destruct v1; simpl Val.sign_ext; try (apply memvals_lessdef_encode_val; auto; fail).
+  simpl. repeat rewrite <- encode_int8_signed_unsigned. 
+  rewrite encode_int8_sign_ext. apply memvals_lessdef_refl.
+  (* cast16signed *)
+  InvEval. exploit IHe0; eauto. intros [v [A B]]. exists v; split; auto.
+  eapply memvals_lessdef_trans; eauto. subst x. 
+  destruct v1; simpl Val.sign_ext; try (apply memvals_lessdef_encode_val; auto; fail).
+  simpl. repeat rewrite <- encode_int8_signed_unsigned. 
+  rewrite encode_int8_sign_ext. apply memvals_lessdef_refl.
+
+encode_change (encode_int Mint8unsrewrite encode_int8_sign_ext. 
+
+ replace (encode_val Mint8unsigned x) with (encode_val Mint8unsigned v1). eauto.
+  subst. destruct v1; simpl Val.sign_ext. ; auto. rewrite Int.zero_ext_sign_ext; auto. 
+  (* cast16signed *)
+  InvEval. replace (Val.zero_ext 8 x) with (Val.zero_ext 8 v1). eauto. 
+  subst. destruct v1; simpl; auto. decEq. 
+  admit.
+  (* andimm *)
+  InvEval. replace (Val.zero_ext 8 x) with (Val.zero_ext 8 v1). eauto.
+  subst. generalize (Int.eq_spec (Int.and n (Int.repr 255)) (Int.repr 255)); rewrite e2; intro EQ.
+  destruct v1; simpl; auto. decEq. 
+  repeat rewrite Int.zero_ext_and. rewrite Int.and_assoc. decEq. symmetry. assumption.
+  compute; auto. compute; auto.
+  exists x; auto. 
+  (* default *)
+  exists x; auto.
+Qed.
+
+
+Lemma eval_uncast_int8:
+  forall le a x,
+  eval_expr ge sp e m le a x ->
+  exists v, eval_expr ge sp e m le (uncast_int8 a) v /\ Val.lessdef (Val.zero_ext 8 x) (Val.zero_ext 8 v).
+Proof.
+  intros until a. functional induction (uncast_int8 a); intros.
+  (* cast8signed *)
+  InvEval. replace (Val.zero_ext 8 x) with (Val.zero_ext 8 v1). eauto. 
+  subst. destruct v1; simpl; auto. rewrite Int.zero_ext_sign_ext; auto. 
+  (* cast16signed *)
+  InvEval. replace (Val.zero_ext 8 x) with (Val.zero_ext 8 v1). eauto. 
+  subst. destruct v1; simpl; auto. decEq. 
+  admit.
+  (* andimm *)
+  InvEval. replace (Val.zero_ext 8 x) with (Val.zero_ext 8 v1). eauto.
+  subst. generalize (Int.eq_spec (Int.and n (Int.repr 255)) (Int.repr 255)); rewrite e2; intro EQ.
+  destruct v1; simpl; auto. decEq. 
+  repeat rewrite Int.zero_ext_and. rewrite Int.and_assoc. decEq. symmetry. assumption.
+  compute; auto. compute; auto.
+  exists x; auto. 
+  (* default *)
+  exists x; auto.
+Qed.
+
+Lemma eval_uncast_int16:
+  forall le a x,
+  eval_expr ge sp e m le a x ->
+  exists v, eval_expr ge sp e m le (uncast_int16 a) v /\ Val.lessdef (Val.zero_ext 16 x) (Val.zero_ext 16 v).
+Proof.
+  intros until a. functional induction (uncast_int16 a); intros.
+  (* cast16signed *)
+  InvEval. replace (Val.zero_ext 16 x) with (Val.zero_ext 16 v1). eauto. 
+  subst. destruct v1; simpl; auto. rewrite Int.zero_ext_sign_ext; auto. 
+  (* andimm *)
+  InvEval. replace (Val.zero_ext 16 x) with (Val.zero_ext 16 v1). eauto.
+  subst. generalize (Int.eq_spec (Int.and n (Int.repr 65535)) (Int.repr 65535)); rewrite e2; intro EQ.
+  destruct v1; simpl; auto. decEq. 
+  repeat rewrite Int.zero_ext_and. rewrite Int.and_assoc. decEq. symmetry. assumption.
+  compute; auto. compute; auto.
+  exists x; auto. 
+  (* default *)
+  exists x; auto.
+Qed.
+
+Lemma eval_uncast_float32:
+  forall le a x,
+  eval_expr ge sp e m le a x ->
+  exists v, eval_expr ge sp e m le (uncast_float32 a) v /\ Val.lessdef (Val.singleoffloat x) (Val.singleoffloat v).
+Proof.
+  intros until a. functional induction (uncast_float32 a); intros.
+  (* cast16signed *)
+  InvEval. replace (Val.singleoffloat x) with (Val.singleoffloat v1). eauto. 
+  subst. destruct v1; simpl; auto. rewrite Float.singleoffloat_idem. auto.
+  (* default *)
+  exists x; auto.
+Qed.
+
+(* Move elsewhere *)
+
+Remark repeat_Undef_inject_encode_int:
+  forall f n chunk i,
+  size_chunk_nat chunk = n ->
+  list_forall2 (memval_inject f) (list_repeat n Undef) (inj_bytes (encode_int chunk i)).
+Proof.
+  intros. replace n with (List.length (inj_bytes (encode_int chunk i))).
+  apply repeat_Undef_inject_any. rewrite length_inj_bytes. rewrite encode_int_length. auto.
+Qed.
+ 
+Remark repeat_Undef_inject_encode_float:
+  forall f n chunk i,
+  size_chunk_nat chunk = n ->
+  list_forall2 (memval_inject f) (list_repeat n Undef) (inj_bytes (encode_float chunk i)).
+Proof.
+  intros. replace n with (List.length (inj_bytes (encode_float chunk i))).
+  apply repeat_Undef_inject_any. rewrite length_inj_bytes. rewrite encode_float_length. auto.
+Qed.
+
+Remark val_inject_int:
+  forall f x y, val_inject f (Vint x) (Vint y) -> x = y.
+Proof.
+  intros. inv H; auto. 
+Qed.
+
+Remark val_inject_float:
+  forall f x y, val_inject f (Vfloat x) (Vfloat y) -> x = y.
+Proof.
+  intros. inv H; auto. 
+Qed.
+
+Ltac SolveIt :=
+  match goal with
+  | [ |- list_forall2 (memval_inject ?f) (Undef :: ?l) (Undef :: _) ] =>
+      exact (repeat_Undef_inject_self f (List.length (Undef :: l)))
+  | [ |- list_forall2 (memval_inject ?f) (Undef :: ?l) (inj_bytes (encode_int _ _)) ] =>
+      apply (repeat_Undef_inject_encode_int f (List.length (Undef :: l))); reflexivity
+  | [ |- list_forall2 (memval_inject ?f) (Undef :: ?l) (inj_bytes (encode_float _ _)) ] =>
+      apply (repeat_Undef_inject_encode_float f (List.length (Undef :: l))); reflexivity
+  | [ H: val_inject _ _ Vundef |- _ ] => inversion H
+  | [ H: val_inject _ (Vint _) (Vint _) |- _ ] => generalize (val_inject_int _ _ _ H); intro
+  | [ H: val_inject _ (Vfloat _) _ |- _ ] => generalize (val_inject_float _ _ _ H); intro
+  | _ => idtac
+  end.
+
+Lemma encode_val_inject_gen:
+  forall f chunk v1 v2,
+  val_inject f (Val.load_result chunk v1) (Val.load_result chunk v2) ->
+  list_forall2 (memval_inject f) (encode_val chunk v1) (encode_val chunk v2).
+Proof.
+  intros. unfold Val.load_result in H. destruct chunk; destruct v1; destruct v2; simpl; SolveIt.
+Focus 2.
+
+  inv H.
+Opaque Int.sign_ext. 
+  inv H. admit.
+
+
+; simpl in H; inv H.
+
+apply (repeat_Undef_inject_enco
+
+
+  repeat constructor.
+  
+
+
+  eapply repeat_Undef_inject_any. 
+  repeat constructor. 
+
+Lemma encode_val_load_result:
+  forall chunk v, encode_val chunk (Val.load_result chunk v) = encode_val chunk v.
+Proof.
+  intros. destruct chunk; destruct v; simpl; auto.
+Focus 2.
+  unfold encode_float. simpl. unfold rev_if_be. 
+
+Theorem eval_store_uncast:
+  forall chunk b ofs m' le a x,
+  eval_expr ge sp e m le a x ->
+  Mem.store chunk m b ofs x = Some m' ->
+  exists v, exists m'',
+     eval_expr ge sp e m le (uncast chunk a) v
+  /\ Mem.store chunk m b ofs v = Some m''
+  /\ Mem.extends m' m''.
+Proof.
+  intros. destruct chunk; simpl uncast.
+(* int8signed *)
+  exploit eval_uncast_int8; eauto. intros [v [A B]].
+  
+  
+
+
+
+
+  
+  rewrite Int.and_assoc. 
+  transitivity (Int.zero_ext 8 (Int.zero_ext 16 (Int.sign_ext 16 i))).
+  rewrite Int.zero_ext_widen. 
+
+ rewrite Int.zero_ext_sign_ext; auto. 
+
+exploit IHe0; eauto. intros [v [A B]]. 
+  destruct e0. InvEval. destruct e1; InvEval. 
+  exploit 
+[idtac | InvEval ]. InvEval.  
 
 Theorem eval_cast8signed: unary_constructor_sound cast8signed (Val.sign_ext 8).
 

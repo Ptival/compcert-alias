@@ -106,10 +106,8 @@ Definition notint (e: expr) :=
 
 (** ** Boolean negation *)
 
-Definition notbool_base (e: expr) :=
-  Eop (Ocmp (Ccompuimm Ceq Int.zero)) (e ::: Enil).
-
 Fixpoint notbool (e: expr) {struct e} : expr :=
+  let default := Eop (Ocmp (Ccompuimm Ceq Int.zero)) (e ::: Enil) in
   match e with
   | Eop (Ointconst n) Enil =>
       Eop (Ointconst (if Int.eq n Int.zero then Int.one else Int.zero)) Enil
@@ -118,7 +116,7 @@ Fixpoint notbool (e: expr) {struct e} : expr :=
   | Econdition e1 e2 e3 =>
       Econdition e1 (notbool e2) (notbool e3)
   | _ =>
-      notbool_base e
+      default
   end.
 
 (** ** Integer addition and pointer addition *)
@@ -300,6 +298,10 @@ Nondetfunction rolm (e1: expr) (amount2: int) (mask2: int) :=
       Eop (Orolm (Int.modu (Int.add amount1 amount2) Int.iwordsize)
                  (Int.and (Int.rol mask1 amount2) mask2))
           (t1:::Enil)
+  | Eop (Oandimm mask1) (t1:::Enil) =>
+      Eop (Orolm (Int.modu amount2 Int.iwordsize)
+                 (Int.and (Int.rol mask1 amount2) mask2))
+          (t1:::Enil)
   | _ =>
       Eop (Orolm amount2 mask2) (e1:::Enil)
   end.
@@ -309,12 +311,14 @@ Nondetfunction rolm (e1: expr) (amount2: int) (mask2: int) :=
 Inductive rolm_cases: forall (e1: expr) , Type :=
   | rolm_case1: forall n1, rolm_cases (Eop (Ointconst n1) Enil)
   | rolm_case2: forall amount1 mask1 t1, rolm_cases (Eop (Orolm amount1 mask1) (t1:::Enil))
+  | rolm_case3: forall mask1 t1, rolm_cases (Eop (Oandimm mask1) (t1:::Enil))
   | rolm_default: forall (e1: expr) , rolm_cases e1.
 
 Definition rolm_match (e1: expr)  :=
   match e1 as zz1 return rolm_cases zz1 with
   | Eop (Ointconst n1) Enil => rolm_case1 n1
   | Eop (Orolm amount1 mask1) (t1:::Enil) => rolm_case2 amount1 mask1 t1
+  | Eop (Oandimm mask1) (t1:::Enil) => rolm_case3 mask1 t1
   | e1 => rolm_default e1
   end.
 
@@ -324,6 +328,8 @@ Definition rolm (e1: expr) (amount2: int) (mask2: int) :=
       Eop (Ointconst(Int.and (Int.rol n1 amount2) mask2)) Enil
   | rolm_case2 amount1 mask1 t1 => (* Eop (Orolm amount1 mask1) (t1:::Enil) *) 
       Eop (Orolm (Int.modu (Int.add amount1 amount2) Int.iwordsize) (Int.and (Int.rol mask1 amount2) mask2)) (t1:::Enil)
+  | rolm_case3 mask1 t1 => (* Eop (Oandimm mask1) (t1:::Enil) *) 
+      Eop (Orolm (Int.modu amount2 Int.iwordsize) (Int.and (Int.rol mask1 amount2) mask2)) (t1:::Enil)
   | rolm_default e1 =>
       Eop (Orolm amount2 mask2) (e1:::Enil)
   end.
@@ -437,7 +443,48 @@ Definition mul (e1: expr) (e2: expr) :=
 
 (** ** Bitwise and, or, xor *)
 
-Definition andimm (n1: int) (e2: expr) := rolm e2 Int.zero n1.
+(** Original definition:
+<<
+Nondetfunction andimm (n1: int) (e2: expr) := 
+  match e2 with
+  | Eop (Ointconst n2) Enil =>
+      Eop (Ointconst (Int.and n1 n2)) Enil
+  | Eop (Oandimm n2) (t2:::Enil) =>
+      Eop (Oandimm (Int.and n1 n2)) (t2:::Enil)
+  | Eop (Orolm amount2 mask2) (t2:::Enil) =>
+      Eop (Orolm amount2 (Int.and n1 mask2)) (t2:::Enil)
+  | _ =>
+      Eop (Oandimm n1) (e2:::Enil)
+  end.
+>>
+*)
+
+Inductive andimm_cases: forall (e2: expr), Type :=
+  | andimm_case1: forall n2, andimm_cases (Eop (Ointconst n2) Enil)
+  | andimm_case2: forall n2 t2, andimm_cases (Eop (Oandimm n2) (t2:::Enil))
+  | andimm_case3: forall amount2 mask2 t2, andimm_cases (Eop (Orolm amount2 mask2) (t2:::Enil))
+  | andimm_default: forall (e2: expr), andimm_cases e2.
+
+Definition andimm_match (e2: expr) :=
+  match e2 as zz1 return andimm_cases zz1 with
+  | Eop (Ointconst n2) Enil => andimm_case1 n2
+  | Eop (Oandimm n2) (t2:::Enil) => andimm_case2 n2 t2
+  | Eop (Orolm amount2 mask2) (t2:::Enil) => andimm_case3 amount2 mask2 t2
+  | e2 => andimm_default e2
+  end.
+
+Definition andimm (n1: int) (e2: expr) :=
+  match andimm_match e2 with
+  | andimm_case1 n2 => (* Eop (Ointconst n2) Enil *) 
+      Eop (Ointconst (Int.and n1 n2)) Enil
+  | andimm_case2 n2 t2 => (* Eop (Oandimm n2) (t2:::Enil) *) 
+      Eop (Oandimm (Int.and n1 n2)) (t2:::Enil)
+  | andimm_case3 amount2 mask2 t2 => (* Eop (Orolm amount2 mask2) (t2:::Enil) *) 
+      Eop (Orolm amount2 (Int.and n1 mask2)) (t2:::Enil)
+  | andimm_default e2 =>
+      Eop (Oandimm n1) (e2:::Enil)
+  end.
+
 
 (** Original definition:
 <<
@@ -518,17 +565,17 @@ Definition orimm (n1: int) (e2: expr) :=
 Nondetfunction or (e1: expr) (e2: expr) :=
   match e1, e2 with
   | Eop (Orolm amount1  mask1) (t1:::Enil), Eop (Orolm amount2 mask2) (t2:::Enil) =>
-      if Int.eq amount1 amount2
-      && same_expr_pure t1 t2 then
-        Eop (Orolm amount1 (Int.or mask1 mask2)) (t1:::Enil)
-      else if Int.eq amount1 Int.zero
-           && Int.eq mask1 (Int.not mask2) then
-        Eop (Oroli amount2 mask2) (t1:::t2:::Enil)
-      else if Int.eq amount2 Int.zero
-           && Int.eq mask2 (Int.not mask1) then
-        Eop (Oroli amount1 mask1) (t2:::t1:::Enil)
-      else
-        Eop Oor (e1:::e2:::Enil)
+      if Int.eq amount1 amount2 && same_expr_pure t1 t2
+      then Eop (Orolm amount1 (Int.or mask1 mask2)) (t1:::Enil)
+      else Eop Oor (e1:::e2:::Enil)
+  | Eop (Oandimm mask1) (t1:::Enil), Eop (Orolm amount2 mask2) (t2:::Enil) =>
+      if Int.eq mask1 (Int.not mask2)
+      then Eop (Oroli amount2 mask2) (t1:::t2:::Enil)
+      else Eop Oor (e1:::e2:::Enil)
+  | Eop (Orolm amount1 mask1) (t1:::Enil), Eop (Oandimm mask2) (t2:::Enil) =>
+      if Int.eq mask2 (Int.not mask1)
+      then Eop (Oroli amount1 mask1) (t2:::t1:::Enil)
+      else Eop Oor (e1:::e2:::Enil)
   | Eop (Ointconst n1) Enil, t2 => orimm n1 t2
   | t1, Eop (Ointconst n2) Enil => orimm n2 t1
   | _, _ => Eop Oor (e1:::e2:::Enil)
@@ -538,25 +585,33 @@ Nondetfunction or (e1: expr) (e2: expr) :=
 
 Inductive or_cases: forall (e1: expr) (e2: expr), Type :=
   | or_case1: forall amount1 mask1 t1 amount2 mask2 t2, or_cases (Eop (Orolm amount1 mask1) (t1:::Enil)) (Eop (Orolm amount2 mask2) (t2:::Enil))
-  | or_case2: forall n1 t2, or_cases (Eop (Ointconst n1) Enil) (t2)
-  | or_case3: forall t1 n2, or_cases (t1) (Eop (Ointconst n2) Enil)
+  | or_case2: forall mask1 t1 amount2 mask2 t2, or_cases (Eop (Oandimm mask1) (t1:::Enil)) (Eop (Orolm amount2 mask2) (t2:::Enil))
+  | or_case3: forall amount1 mask1 t1 mask2 t2, or_cases (Eop (Orolm amount1 mask1) (t1:::Enil)) (Eop (Oandimm mask2) (t2:::Enil))
+  | or_case4: forall n1 t2, or_cases (Eop (Ointconst n1) Enil) (t2)
+  | or_case5: forall t1 n2, or_cases (t1) (Eop (Ointconst n2) Enil)
   | or_default: forall (e1: expr) (e2: expr), or_cases e1 e2.
 
 Definition or_match (e1: expr) (e2: expr) :=
   match e1 as zz1, e2 as zz2 return or_cases zz1 zz2 with
   | Eop (Orolm amount1 mask1) (t1:::Enil), Eop (Orolm amount2 mask2) (t2:::Enil) => or_case1 amount1 mask1 t1 amount2 mask2 t2
-  | Eop (Ointconst n1) Enil, t2 => or_case2 n1 t2
-  | t1, Eop (Ointconst n2) Enil => or_case3 t1 n2
+  | Eop (Oandimm mask1) (t1:::Enil), Eop (Orolm amount2 mask2) (t2:::Enil) => or_case2 mask1 t1 amount2 mask2 t2
+  | Eop (Orolm amount1 mask1) (t1:::Enil), Eop (Oandimm mask2) (t2:::Enil) => or_case3 amount1 mask1 t1 mask2 t2
+  | Eop (Ointconst n1) Enil, t2 => or_case4 n1 t2
+  | t1, Eop (Ointconst n2) Enil => or_case5 t1 n2
   | e1, e2 => or_default e1 e2
   end.
 
 Definition or (e1: expr) (e2: expr) :=
   match or_match e1 e2 with
   | or_case1 amount1 mask1 t1 amount2 mask2 t2 => (* Eop (Orolm amount1 mask1) (t1:::Enil), Eop (Orolm amount2 mask2) (t2:::Enil) *) 
-      if Int.eq amount1 amount2 && same_expr_pure t1 t2 then Eop (Orolm amount1 (Int.or mask1 mask2)) (t1:::Enil) else if Int.eq amount1 Int.zero && Int.eq mask1 (Int.not mask2) then Eop (Oroli amount2 mask2) (t1:::t2:::Enil) else if Int.eq amount2 Int.zero && Int.eq mask2 (Int.not mask1) then Eop (Oroli amount1 mask1) (t2:::t1:::Enil) else Eop Oor (e1:::e2:::Enil)
-  | or_case2 n1 t2 => (* Eop (Ointconst n1) Enil, t2 *) 
+      if Int.eq amount1 amount2 && same_expr_pure t1 t2 then Eop (Orolm amount1 (Int.or mask1 mask2)) (t1:::Enil) else Eop Oor (e1:::e2:::Enil)
+  | or_case2 mask1 t1 amount2 mask2 t2 => (* Eop (Oandimm mask1) (t1:::Enil), Eop (Orolm amount2 mask2) (t2:::Enil) *) 
+      if Int.eq mask1 (Int.not mask2) then Eop (Oroli amount2 mask2) (t1:::t2:::Enil) else Eop Oor (e1:::e2:::Enil)
+  | or_case3 amount1 mask1 t1 mask2 t2 => (* Eop (Orolm amount1 mask1) (t1:::Enil), Eop (Oandimm mask2) (t2:::Enil) *) 
+      if Int.eq mask2 (Int.not mask1) then Eop (Oroli amount1 mask1) (t2:::t1:::Enil) else Eop Oor (e1:::e2:::Enil)
+  | or_case4 n1 t2 => (* Eop (Ointconst n1) Enil, t2 *) 
       orimm n1 t2
-  | or_case3 t1 n2 => (* t1, Eop (Ointconst n2) Enil *) 
+  | or_case5 t1 n2 => (* t1, Eop (Ointconst n2) Enil *) 
       orimm n2 t1
   | or_default e1 e2 =>
       Eop Oor (e1:::e2:::Enil)
@@ -959,12 +1014,48 @@ Definition compu (c: comparison) (e1: expr) (e2: expr) :=
 Definition compf (c: comparison) (e1: expr) (e2: expr) :=
   Eop (Ocmp (Ccompf c)) (e1 ::: e2 ::: Enil).
 
+(** ** Removal of redundant casts before a store or a cast *)
+
+Function uncast_int8 (e: expr) : expr :=
+  match e with
+  | Eop Ocast8signed (t ::: Enil) => uncast_int8 t
+  | Eop Ocast16signed (t ::: Enil) => uncast_int8 t
+  | Eop (Oandimm n) (t ::: Enil) =>
+      if Int.eq (Int.and n (Int.repr 255)) (Int.repr 255) then uncast_int8 t else e
+  | _ => e
+  end.
+
+Function uncast_int16 (e: expr) : expr :=
+  match e with
+  | Eop Ocast16signed (t ::: Enil) => uncast_int16 t
+  | Eop (Oandimm n) (t ::: Enil) =>
+      if Int.eq (Int.and n (Int.repr 65535)) (Int.repr 65535) then uncast_int16 t else e
+  | _ => e
+  end.
+
+Function uncast_float32 (e: expr) : expr :=
+  match e with
+  | Eop Osingleoffloat (t ::: Enil) => uncast_float32 t
+  | _ => e
+  end.
+
+Definition uncast (chunk: memory_chunk) (e: expr) :=
+  match chunk with
+  | Mint8unsigned | Mint8signed => uncast_int8 e
+  | Mint16unsigned | Mint16signed => uncast_int16 e
+  | Mfloat32 => uncast_float32 e
+  | _ => e
+  end.
+
 (** ** Integer conversions *)
 
-Definition cast8unsigned (e: expr) := andimm (Int.repr 255) e.
-Definition cast8signed (e: expr) := Eop Ocast8signed (e ::: Enil).
-Definition cast16unsigned (e: expr) := andimm (Int.repr 65535) e.
-Definition cast16signed (e: expr) := Eop Ocast16signed (e ::: Enil).
+Definition cast8unsigned (e: expr) := andimm (Int.repr 255) (uncast_int8 e).
+
+Definition cast8signed (e: expr) := Eop Ocast8signed (uncast_int8 e ::: Enil).
+
+Definition cast16unsigned (e: expr) := andimm (Int.repr 65535) (uncast_int16 e).
+
+Definition cast16signed (e: expr) := Eop Ocast16signed (uncast_int16 e ::: Enil).
 
 (** ** Floating-point conversions *)
 
@@ -986,7 +1077,7 @@ Definition floatofint (e: expr) :=
                            ::: addimm Float.ox8000_0000 e ::: Enil))
        (Eop (Ofloatconst (Float.from_words Float.ox4330_0000 Float.ox8000_0000)) Enil).
 
-Definition singleoffloat (e: expr) := Eop Osingleoffloat (e ::: Enil).
+Definition singleoffloat (e: expr) := Eop Osingleoffloat (uncast_float32 e ::: Enil).
 
 (** ** Recognition of addressing modes for load and store operations *)
 
@@ -1038,3 +1129,4 @@ Definition addressing (chunk: memory_chunk) (e: expr) :=
       (Aindexed Int.zero, e:::Enil)
   end.
 
+  
