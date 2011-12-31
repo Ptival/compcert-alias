@@ -1789,6 +1789,34 @@ Proof.
   apply two_p_m1_range. omega. 
 Qed.
 
+Theorem and_shr_shru:
+  forall x y z,
+  and (shr x z) (shru y z) = shru (and x y) z.
+Proof.
+  intros. unfold and, shr, shru, bitwise_binop. 
+  repeat rewrite unsigned_repr; auto with ints.
+  decEq; apply Z_of_bits_exten; intros.
+  repeat rewrite Zplus_0_r. 
+  rewrite bits_of_Z_of_bits_gen; auto.
+  rewrite bits_of_Z_of_bits_gen; auto.
+  generalize (unsigned_range z); intros.
+  destruct (zlt (i + unsigned z) (Z_of_nat wordsize)).
+  rewrite bits_of_Z_of_bits_gen.
+  repeat rewrite Zplus_0_r. auto. omega.
+  set (b := bits_of_Z wordsize (unsigned x) (Z_of_nat wordsize - 1)).
+  repeat rewrite bits_of_Z_above; auto. apply andb_false_r. 
+Qed.  
+
+Theorem shr_and_shru_and:
+  forall x y z,
+  shru (shl z y) y = z ->
+  and (shr x y) z = and (shru x y) z.
+Proof.
+  intros. 
+  rewrite <- H. 
+  rewrite and_shru. rewrite and_shr_shru. auto.
+Qed.
+
 (** ** Properties of rotations *)
 
 Theorem shl_rolm:
@@ -2738,6 +2766,18 @@ Proof.
   destruct (zlt i n'). rewrite bits_of_Z_of_bits. apply zlt_false.
   auto. omega.
   rewrite bits_of_Z_of_bits. apply zlt_false. omega. omega.
+Qed.
+
+Theorem zero_sign_ext_widen:
+  forall x n n',
+  0 < n < Z_of_nat wordsize -> n <= n' < Z_of_nat wordsize ->
+  zero_ext n (sign_ext n' x) = zero_ext n x.
+Proof.
+  intros. unfold sign_ext, zero_ext.
+  repeat rewrite unsigned_repr; auto with ints.
+  decEq; apply Z_of_bits_exten; intros; rewrite Zplus_0_r.
+  destruct (zlt i n); auto.
+  rewrite bits_of_Z_of_bits; auto. apply zlt_true. omega. 
 Qed.
 
 (** ** Properties of [one_bits] (decomposition in sum of powers of two) *)

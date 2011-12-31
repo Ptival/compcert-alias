@@ -178,6 +178,7 @@ Function approx_operation (op: operation) (vl: list approx) : approx :=
   | Oand, v1 :: v2 :: nil => approx_bitwise_op v1 v2
   | Oor, v1 :: v2 :: nil => approx_bitwise_op v1 v2
   | Oxor, v1 :: v2 :: nil => approx_bitwise_op v1 v2
+  | Oandimm 
   (* Problem: what about and/or/xor immediate? and other
      machine-specific operators? *)
   | Ocmp c, _ => Int7

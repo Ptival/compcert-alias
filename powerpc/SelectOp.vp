@@ -214,6 +214,12 @@ Nondetfunction andimm (n1: int) (e2: expr) :=
       Eop (Oandimm (Int.and n1 n2)) (t2:::Enil)
   | Eop (Orolm amount2 mask2) (t2:::Enil) =>
       Eop (Orolm amount2 (Int.and n1 mask2)) (t2:::Enil)
+  | Eop (Oshrimm amount) (t2:::Enil) =>
+      if Int.eq (Int.shru (Int.shl n1 amount) amount) n1
+      && Int.ltu amount Int.iwordsize
+      then rolm t2 (Int.sub Int.iwordsize amount) 
+                   (Int.and (Int.shru Int.mone amount) n1)
+      else Eop (Oandimm n1) (e2:::Enil)
   | _ =>
       Eop (Oandimm n1) (e2:::Enil)
   end.
@@ -245,11 +251,11 @@ Nondetfunction or (e1: expr) (e2: expr) :=
       then Eop (Orolm amount1 (Int.or mask1 mask2)) (t1:::Enil)
       else Eop Oor (e1:::e2:::Enil)
   | Eop (Oandimm mask1) (t1:::Enil), Eop (Orolm amount2 mask2) (t2:::Enil) =>
-      if Int.eq mask1 (Int.not mask2)
+      if Int.eq mask1 (Int.not mask2) && is_rlw_mask mask2
       then Eop (Oroli amount2 mask2) (t1:::t2:::Enil)
       else Eop Oor (e1:::e2:::Enil)
   | Eop (Orolm amount1 mask1) (t1:::Enil), Eop (Oandimm mask2) (t2:::Enil) =>
-      if Int.eq mask2 (Int.not mask1)
+      if Int.eq mask2 (Int.not mask1) && is_rlw_mask mask1
       then Eop (Oroli amount1 mask1) (t2:::t1:::Enil)
       else Eop Oor (e1:::e2:::Enil)
   | Eop (Ointconst n1) Enil, t2 => orimm n1 t2
@@ -387,7 +393,9 @@ Function uncast_int8 (e: expr) : expr :=
   | Eop Ocast8signed (t ::: Enil) => uncast_int8 t
   | Eop Ocast16signed (t ::: Enil) => uncast_int8 t
   | Eop (Oandimm n) (t ::: Enil) =>
-      if Int.eq (Int.and n (Int.repr 255)) (Int.repr 255) then uncast_int8 t else e
+      if Int.eq (Int.and n (Int.repr 255)) (Int.repr 255)
+      then uncast_int8 t
+      else e
   | _ => e
   end.
 
@@ -395,21 +403,15 @@ Function uncast_int16 (e: expr) : expr :=
   match e with
   | Eop Ocast16signed (t ::: Enil) => uncast_int16 t
   | Eop (Oandimm n) (t ::: Enil) =>
-      if Int.eq (Int.and n (Int.repr 65535)) (Int.repr 65535) then uncast_int16 t else e
+      if Int.eq (Int.and n (Int.repr 65535)) (Int.repr 65535)
+      then uncast_int16 t
+      else e
   | _ => e
   end.
 
 Function uncast_float32 (e: expr) : expr :=
   match e with
   | Eop Osingleoffloat (t ::: Enil) => uncast_float32 t
-  | _ => e
-  end.
-
-Definition uncast (chunk: memory_chunk) (e: expr) :=
-  match chunk with
-  | Mint8unsigned | Mint8signed => uncast_int8 e
-  | Mint16unsigned | Mint16signed => uncast_int16 e
-  | Mfloat32 => uncast_float32 e
   | _ => e
   end.
 

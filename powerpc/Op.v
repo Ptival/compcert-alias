@@ -143,45 +143,17 @@ Definition symbol_address (F V: Type) (genv: Genv.t F V) (id: ident) (ofs: int) 
   | None => Vundef
   end.
 
-Definition eval_compare_mismatch (c: comparison) : option bool :=
-  match c with Ceq => Some false | Cne => Some true | _ => None end.
-
-Definition eval_compare_null (c: comparison) (n: int) : option bool :=
-  if Int.eq n Int.zero then eval_compare_mismatch c else None.
-
 Definition eval_condition (cond: condition) (vl: list val) (m: mem): option bool :=
   match cond, vl with
-  | Ccomp c, Vint n1 :: Vint n2 :: nil =>
-      Some (Int.cmp c n1 n2)
-  | Ccompu c, Vint n1 :: Vint n2 :: nil =>
-      Some (Int.cmpu c n1 n2)
-  | Ccompu c, Vptr b1 n1 :: Vptr b2 n2 :: nil =>
-      if Mem.valid_pointer m b1 (Int.unsigned n1)
-      && Mem.valid_pointer m b2 (Int.unsigned n2) then
-        if eq_block b1 b2
-        then Some (Int.cmpu c n1 n2)
-        else eval_compare_mismatch c
-      else None
-  | Ccompu c, Vptr b1 n1 :: Vint n2 :: nil =>
-      eval_compare_null c n2
-  | Ccompu c, Vint n1 :: Vptr b2 n2 :: nil =>
-      eval_compare_null c n1
-  | Ccompimm c n, Vint n1 :: nil =>
-      Some (Int.cmp c n1 n)
-  | Ccompuimm c n, Vint n1 :: nil =>
-      Some (Int.cmpu c n1 n)
-  | Ccompuimm c n, Vptr b1 n1 :: nil =>
-      eval_compare_null c n
-  | Ccompf c, Vfloat f1 :: Vfloat f2 :: nil =>
-      Some (Float.cmp c f1 f2)
-  | Cnotcompf c, Vfloat f1 :: Vfloat f2 :: nil =>
-      Some (negb (Float.cmp c f1 f2))
-  | Cmaskzero n, Vint n1 :: nil =>
-      Some (Int.eq (Int.and n1 n) Int.zero)
-  | Cmasknotzero n, Vint n1 :: nil =>
-      Some (negb (Int.eq (Int.and n1 n) Int.zero))
-  | _, _ =>
-      None
+  | Ccomp c, v1 :: v2 :: nil => Val.cmp_bool c v1 v2
+  | Ccompu c, v1 :: v2 :: nil => Val.cmpu_bool (Mem.valid_pointer m) c v1 v2
+  | Ccompimm c n, v1 :: nil => Val.cmp_bool c v1 (Vint n)
+  | Ccompuimm c n, v1 :: nil => Val.cmpu_bool (Mem.valid_pointer m) c v1 (Vint n)
+  | Ccompf c, v1 :: v2 :: nil => Val.cmpf_bool c v1 v2
+  | Cnotcompf c, v1 :: v2 :: nil => option_map negb (Val.cmpf_bool c v1 v2)
+  | Cmaskzero n, Vint n1 :: nil => Some (Int.eq (Int.and n1 n) Int.zero)
+  | Cmasknotzero n, Vint n1 :: nil => Some (negb (Int.eq (Int.and n1 n) Int.zero))
+  | _, _ => None
   end.
 
 Definition eval_operation
@@ -229,14 +201,9 @@ Definition eval_operation
   | Omuladdf, v1::v2::v3::nil => Some(Val.addf (Val.mulf v1 v2) v3)
   | Omulsubf, v1::v2::v3::nil => Some(Val.subf (Val.mulf v1 v2) v3)
   | Osingleoffloat, v1::nil => Some(Val.singleoffloat v1)
-  | Ointoffloat, v1::nil => Some(Val.intoffloat v1)
+  | Ointoffloat, v1::nil => Val.intoffloat v1
   | Ofloatofwords, v1::v2::nil => Some(Val.floatofwords v1 v2)
-  | Ocmp c, _ =>
-      match eval_condition c vl m with
-      | None => Some Vundef
-      | Some false => Some Vfalse
-      | Some true => Some Vtrue
-      end
+  | Ocmp c, _ => Some(Val.of_optbool (eval_condition c vl m))
   | _, _ => None
   end.
 
@@ -391,11 +358,9 @@ Proof with (try exact I).
   destruct v0; destruct v1; destruct v2...
   destruct v0; destruct v1; destruct v2...
   destruct v0...
-  destruct v0... simpl. destruct (Float.intoffloat f)...
+  destruct v0; simpl in H0; inv H0. destruct (Float.intoffloat f); inv H2...
   destruct v0; destruct v1...
-  destruct (eval_condition c vl m).
-    destruct b; inv H0... 
-    inv H0...
+  destruct (eval_condition c vl m); simpl... destruct b... 
 Qed.
 
 Lemma type_of_chunk_correct:
@@ -451,46 +416,21 @@ Definition negate_condition (cond: condition): condition :=
   | Cmasknotzero n => Cmaskzero n
   end.
 
-Remark eval_negate_compare_mismatch:
-  forall c b,
-  eval_compare_mismatch c = Some b ->
-  eval_compare_mismatch (negate_comparison c) = Some (negb b).
-Proof.
-  intros until b. unfold eval_compare_mismatch.
-  destruct c; intro EQ; inv EQ; auto. 
-Qed.
-
-Remark eval_negate_compare_null:
-  forall c i b,
-  eval_compare_null c i = Some b ->
-  eval_compare_null (negate_comparison c) i = Some (negb b).
-Proof.
-  unfold eval_compare_null; intros.
-  destruct (Int.eq i Int.zero). apply eval_negate_compare_mismatch; auto. congruence.
-Qed.
-
 Lemma eval_negate_condition:
   forall cond vl m b,
   eval_condition cond vl m = Some b ->
   eval_condition (negate_condition cond) vl m = Some (negb b).
 Proof.
   intros. 
-  destruct cond; simpl in H; FuncInv; try subst b; simpl.
-  rewrite Int.negate_cmp. auto.
-  rewrite Int.negate_cmpu. auto.
-  apply eval_negate_compare_null; auto.
-  apply eval_negate_compare_null; auto.
-  destruct (Mem.valid_pointer m b0 (Int.unsigned i) &&
-            Mem.valid_pointer m b1 (Int.unsigned i0)); try congruence.
-  destruct (eq_block b0 b1). rewrite Int.negate_cmpu. congruence.
-  apply eval_negate_compare_mismatch; auto. 
-  rewrite Int.negate_cmp. auto.
-  rewrite Int.negate_cmpu. auto.
-  apply eval_negate_compare_null; auto.
-  auto.
-  rewrite negb_elim. auto.
-  auto.
-  rewrite negb_elim. auto.
+  destruct cond; simpl in H; FuncInv; simpl.
+  rewrite Val.negate_cmp_bool; rewrite H; auto.
+  rewrite Val.negate_cmpu_bool; rewrite H; auto.
+  rewrite Val.negate_cmp_bool; rewrite H; auto.
+  rewrite Val.negate_cmpu_bool; rewrite H; auto.
+  rewrite H; auto.
+  destruct (Val.cmpf_bool c v v0); simpl in H; inv H. rewrite negb_elim; auto. 
+  rewrite H0; auto.
+  rewrite <- H0. rewrite negb_elim; auto.
 Qed.
 
 (** Shifting stack-relative references.  This is used in [Stacking]. *)
@@ -599,7 +539,7 @@ Lemma op_depends_on_memory_correct:
   eval_operation ge sp op args m1 = eval_operation ge sp op args m2.
 Proof.
   intros until m2. destruct op; simpl; try congruence.
-  destruct c; simpl; congruence.
+  destruct c; simpl; auto; discriminate. 
 Qed.
 
 (** * Invariance and compatibility properties. *)
@@ -702,22 +642,36 @@ Lemma eval_condition_inj:
   eval_condition cond vl2 m2 = Some b.
 Proof.
 Opaque Int.add.
-  intros. destruct cond; simpl in H0; FuncInv; InvInject; simpl; auto.
-  destruct (Mem.valid_pointer m1 b0 (Int.unsigned i)) as []_eqn; try discriminate.
-  destruct (Mem.valid_pointer m1 b1 (Int.unsigned i0)) as []_eqn; try discriminate.
-  rewrite (valid_pointer_inj _ H2 Heqb2).
-  rewrite (valid_pointer_inj _ H4 Heqb0).
-  destruct (eq_block b0 b1); simpl in H0.
-  inv H0. rewrite H2 in H4; inv H4. rewrite dec_eq_true; simpl.
+  assert (CMPU:
+    forall c v1 v2 v1' v2' b,
+    val_inject f v1 v1' ->
+    val_inject f v2 v2' ->
+    Val.cmpu_bool (Mem.valid_pointer m1) c v1 v2 = Some b ->
+    Val.cmpu_bool (Mem.valid_pointer m2) c v1' v2' = Some b).
+  intros. inv H; simpl in H1; try discriminate; inv H0; simpl in H1; try discriminate; simpl; auto.
+  destruct (Mem.valid_pointer m1 b1 (Int.unsigned ofs1)) as []_eqn; try discriminate.
+  destruct (Mem.valid_pointer m1 b0 (Int.unsigned ofs0)) as []_eqn; try discriminate.
+  rewrite (valid_pointer_inj _ H2 Heqb4).
+  rewrite (valid_pointer_inj _ H Heqb0). simpl.
+  destruct (zeq b1 b0); simpl in H1.
+  inv H1. rewrite H in H2; inv H2. rewrite zeq_true. 
   decEq. apply Int.translate_cmpu.
   eapply valid_pointer_no_overflow; eauto.
   eapply valid_pointer_no_overflow; eauto.
   exploit valid_different_pointers_inj; eauto. intros P.
-  destruct (eq_block b3 b4); auto.
+  destruct (zeq b2 b3); auto.
   destruct P. congruence. 
-  destruct c; simpl in H0; inv H0.
+  destruct c; simpl in H1; inv H1.
   simpl; decEq. rewrite Int.eq_false; auto. congruence.
   simpl; decEq. rewrite Int.eq_false; auto. congruence.
+
+  intros. destruct cond; simpl in H0; FuncInv; InvInject; simpl; auto.
+  inv H3; inv H2; simpl in H0; inv H0; auto.
+  eauto.
+  inv H3; simpl in H0; inv H0; auto.
+  eauto. 
+  inv H3; inv H2; simpl in H0; inv H0; auto.
+  inv H3; inv H2; simpl in H0; inv H0; auto.
 Qed.
 
 Ltac TrivialExists :=
@@ -776,13 +730,13 @@ Proof.
   inv H4; simpl; auto; inv H2; simpl; auto; inv H3; simpl; auto.
   inv H4; simpl; auto; inv H2; simpl; auto; inv H3; simpl; auto.
   inv H4; simpl; auto.
-  inv H4; simpl; auto. destruct (Float.intoffloat f0); auto.
+  inv H4; simpl in H1; inv H1. simpl. destruct (Float.intoffloat f0); simpl in H2; inv H2.
+  exists (Vint i); auto.
   inv H4; inv H2; simpl; auto.
-  destruct (eval_condition c vl1 m1) as []_eqn.
-  exploit eval_condition_inj; eauto. intros EQ; rewrite EQ. 
-  destruct b; inv H1; TrivialExists; constructor.
-  inv H1. destruct (eval_condition c vl2 m2). 
-  destruct b; TrivialExists. TrivialExists.
+  subst v1. destruct (eval_condition c vl1 m1) as []_eqn.
+  exploit eval_condition_inj; eauto. intros EQ; rewrite EQ.
+  destruct b; simpl; constructor.
+  simpl; constructor.
 Qed.
 
 Lemma eval_addressing_inj:
@@ -815,9 +769,7 @@ Remark valid_pointer_extends:
   Mem.valid_pointer m1 b1 (Int.unsigned ofs) = true ->
   Mem.valid_pointer m2 b2 (Int.unsigned (Int.add ofs (Int.repr delta))) = true.
 Proof.
-  intros until delta.
-  repeat rewrite Mem.valid_pointer_nonempty_perm.
-  intros. inv H0. rewrite Int.add_zero. eapply Mem.perm_extends; eauto. 
+  intros. inv H0. rewrite Int.add_zero. eapply Mem.valid_pointer_extends; eauto. 
 Qed.
 
 Remark valid_pointer_no_overflow_extends:
@@ -963,3 +915,79 @@ Proof.
 Qed.
 
 End EVAL_INJECT.
+
+(** * Masks for rotate and mask instructions *)
+
+(** Recognition of integers that are acceptable as immediate operands
+  to the [rlwim] PowerPC instruction.  These integers are of the form
+  [000011110000] or [111100001111], that is, a run of one bits
+  surrounded by zero bits, or conversely.  We recognize these integers by
+  running the following automaton on the bits.  The accepting states are
+  2, 3, 4, 5, and 6.
+<<
+               0          1          0
+              / \        / \        / \
+              \ /        \ /        \ /
+        -0--> [1] --1--> [2] --0--> [3]
+       /     
+     [0]
+       \
+        -1--> [4] --0--> [5] --1--> [6]
+              / \        / \        / \
+              \ /        \ /        \ /
+               1          0          1
+>>
+*)
+
+Inductive rlw_state: Type :=
+  | RLW_S0 : rlw_state
+  | RLW_S1 : rlw_state
+  | RLW_S2 : rlw_state
+  | RLW_S3 : rlw_state
+  | RLW_S4 : rlw_state
+  | RLW_S5 : rlw_state
+  | RLW_S6 : rlw_state
+  | RLW_Sbad : rlw_state.
+
+Definition rlw_transition (s: rlw_state) (b: bool) : rlw_state :=
+  match s, b with
+  | RLW_S0, false => RLW_S1
+  | RLW_S0, true  => RLW_S4
+  | RLW_S1, false => RLW_S1
+  | RLW_S1, true  => RLW_S2
+  | RLW_S2, false => RLW_S3
+  | RLW_S2, true  => RLW_S2
+  | RLW_S3, false => RLW_S3
+  | RLW_S3, true  => RLW_Sbad
+  | RLW_S4, false => RLW_S5
+  | RLW_S4, true  => RLW_S4
+  | RLW_S5, false => RLW_S5
+  | RLW_S5, true  => RLW_S6
+  | RLW_S6, false => RLW_Sbad
+  | RLW_S6, true  => RLW_S6
+  | RLW_Sbad, _ => RLW_Sbad
+  end.
+
+Definition rlw_accepting (s: rlw_state) : bool :=
+  match s with
+  | RLW_S0 => false
+  | RLW_S1 => false
+  | RLW_S2 => true
+  | RLW_S3 => true
+  | RLW_S4 => true
+  | RLW_S5 => true
+  | RLW_S6 => true
+  | RLW_Sbad => false
+  end.
+
+Fixpoint is_rlw_mask_rec (n: nat) (s: rlw_state) (x: Z) {struct n} : bool :=
+  match n with
+  | O =>
+      rlw_accepting s
+  | S m =>
+      let (b, y) := Int.Z_bin_decomp x in
+      is_rlw_mask_rec m (rlw_transition s b) y
+  end.
+
+Definition is_rlw_mask (x: int) : bool :=
+  is_rlw_mask_rec Int.wordsize RLW_S0 (Int.unsigned x).
