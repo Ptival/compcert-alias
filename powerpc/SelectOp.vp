@@ -386,44 +386,15 @@ Nondetfunction compu (c: comparison) (e1: expr) (e2: expr) :=
 Definition compf (c: comparison) (e1: expr) (e2: expr) :=
   Eop (Ocmp (Ccompf c)) (e1 ::: e2 ::: Enil).
 
-(** ** Removal of redundant casts before a store or a cast *)
-
-Function uncast_int8 (e: expr) : expr :=
-  match e with
-  | Eop Ocast8signed (t ::: Enil) => uncast_int8 t
-  | Eop Ocast16signed (t ::: Enil) => uncast_int8 t
-  | Eop (Oandimm n) (t ::: Enil) =>
-      if Int.eq (Int.and n (Int.repr 255)) (Int.repr 255)
-      then uncast_int8 t
-      else e
-  | _ => e
-  end.
-
-Function uncast_int16 (e: expr) : expr :=
-  match e with
-  | Eop Ocast16signed (t ::: Enil) => uncast_int16 t
-  | Eop (Oandimm n) (t ::: Enil) =>
-      if Int.eq (Int.and n (Int.repr 65535)) (Int.repr 65535)
-      then uncast_int16 t
-      else e
-  | _ => e
-  end.
-
-Function uncast_float32 (e: expr) : expr :=
-  match e with
-  | Eop Osingleoffloat (t ::: Enil) => uncast_float32 t
-  | _ => e
-  end.
-
 (** ** Integer conversions *)
 
-Definition cast8unsigned (e: expr) := andimm (Int.repr 255) (uncast_int8 e).
+Definition cast8unsigned (e: expr) := andimm (Int.repr 255) e.
 
-Definition cast8signed (e: expr) := Eop Ocast8signed (uncast_int8 e ::: Enil).
+Definition cast8signed (e: expr) := Eop Ocast8signed (e ::: Enil).
 
-Definition cast16unsigned (e: expr) := andimm (Int.repr 65535) (uncast_int16 e).
+Definition cast16unsigned (e: expr) := andimm (Int.repr 65535) e.
 
-Definition cast16signed (e: expr) := Eop Ocast16signed (uncast_int16 e ::: Enil).
+Definition cast16signed (e: expr) := Eop Ocast16signed (e ::: Enil).
 
 (** ** Floating-point conversions *)
 
@@ -445,7 +416,7 @@ Definition floatofint (e: expr) :=
                            ::: addimm Float.ox8000_0000 e ::: Enil))
        (Eop (Ofloatconst (Float.from_words Float.ox4330_0000 Float.ox8000_0000)) Enil).
 
-Definition singleoffloat (e: expr) := Eop Osingleoffloat (uncast_float32 e ::: Enil).
+Definition singleoffloat (e: expr) := Eop Osingleoffloat (e ::: Enil).
 
 (** ** Recognition of addressing modes for load and store operations *)
 

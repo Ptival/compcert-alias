@@ -2768,7 +2768,19 @@ Proof.
   rewrite bits_of_Z_of_bits. apply zlt_false. omega. omega.
 Qed.
 
-Theorem zero_sign_ext_widen:
+Theorem zero_ext_narrow:
+  forall x n n',
+  0 < n < Z_of_nat wordsize -> n <= n' < Z_of_nat wordsize ->
+  zero_ext n (zero_ext n' x) = zero_ext n x.
+Proof.
+  intros. unfold zero_ext.
+  repeat rewrite unsigned_repr; auto with ints.
+  decEq; apply Z_of_bits_exten; intros; rewrite Zplus_0_r.
+  destruct (zlt i n); auto.
+  rewrite bits_of_Z_of_bits; auto. apply zlt_true. omega. 
+Qed.
+
+Theorem zero_sign_ext_narrow:
   forall x n n',
   0 < n < Z_of_nat wordsize -> n <= n' < Z_of_nat wordsize ->
   zero_ext n (sign_ext n' x) = zero_ext n x.

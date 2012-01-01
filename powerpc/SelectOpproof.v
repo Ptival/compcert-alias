@@ -633,150 +633,32 @@ Proof.
   intros; red; intros. unfold compf. TrivialExists.
 Qed.
 
-Theorem eval_uncast_int8:
-  forall le a x,
-  eval_expr ge sp e m le a x ->
-  exists v, eval_expr ge sp e m le (uncast_int8 a) v
-         /\ (Val.lessdef x v \/
-             exists p, exists q, x = Vint p /\ v = Vint q /\ Int.zero_ext 8 p = Int.zero_ext 8 q).
-Proof.
-  intros until a. functional induction (uncast_int8 a); intros.
-  (* cast8signed *)
-  InvEval. exploit IHe0; eauto. intros [v [A B]]. exists v; split; auto.
-  destruct B as [B | [p [q [C [D E]]]]].
-  inv B. destruct v; simpl; auto. right; do 2 econstructor. split. eauto. split. eauto. 
-  apply Int.zero_ext_sign_ext. 
-  simpl; auto.
-  subst. simpl. right; do 2 econstructor. split. eauto. split. eauto.
-  rewrite Int.zero_ext_sign_ext. auto.
-  (* cast16signed *)
-  InvEval. exploit IHe0; eauto. intros [v [A B]]. exists v; split; auto.
-  destruct B as [B | [p [q [C [D E]]]]].
-  inv B. destruct v; simpl; auto. right; do 2 econstructor. split. eauto. split. eauto. 
-  apply Int.zero_sign_ext_widen. compute; auto. split. omega. compute; auto.
-  simpl; auto.
-  subst. simpl. right; do 2 econstructor. split. eauto. split. eauto.
-  rewrite Int.zero_sign_ext_widen. auto. compute; auto. split. omega. compute; auto.
-  (* andimm *)
-  generalize (Int.eq_spec (Int.and n (Int.repr 255)) (Int.repr 255)); rewrite e2; intro EQ.
-  InvEval. exploit IHe0; eauto. intros [v [A B]]. exists v; split; auto.
-  destruct B as [B | [p [q [C [D E]]]]].
-  inv B. destruct v; simpl; auto. right; do 2 econstructor. split. eauto. split. eauto.
-  repeat rewrite Int.zero_ext_and. rewrite Int.and_assoc. decEq. assumption. compute; auto. compute; auto.
-  simpl; auto.
-  subst. simpl. right; do 2 econstructor. split. eauto. split. eauto.
-  rewrite <- E. 
-  repeat rewrite Int.zero_ext_and. rewrite Int.and_assoc. decEq. assumption. compute; auto. compute; auto.
-  exists x; split; auto.
-  (* default *)
-  exists x; split; auto.
-Qed.
-
-Theorem eval_uncast_int16:
-  forall le a x,
-  eval_expr ge sp e m le a x ->
-  exists v, eval_expr ge sp e m le (uncast_int16 a) v
-         /\ (Val.lessdef x v \/
-             exists p, exists q, x = Vint p /\ v = Vint q /\ Int.zero_ext 16 p = Int.zero_ext 16 q).
-Proof.
-  intros until a. functional induction (uncast_int16 a); intros.
-  (* cast16signed *)
-  InvEval. exploit IHe0; eauto. intros [v [A B]]. exists v; split; auto.
-  destruct B as [B | [p [q [C [D E]]]]].
-  inv B. destruct v; simpl; auto. right; do 2 econstructor. split. eauto. split. eauto. 
-  apply Int.zero_ext_sign_ext. 
-  simpl; auto.
-  subst. simpl. right; do 2 econstructor. split. eauto. split. eauto.
-  rewrite Int.zero_ext_sign_ext. auto.
-  (* andimm *)
-  generalize (Int.eq_spec (Int.and n (Int.repr 65535)) (Int.repr 65535)); rewrite e2; intro EQ.
-  InvEval. exploit IHe0; eauto. intros [v [A B]]. exists v; split; auto.
-  destruct B as [B | [p [q [C [D E]]]]].
-  inv B. destruct v; simpl; auto. right; do 2 econstructor. split. eauto. split. eauto.
-  repeat rewrite Int.zero_ext_and. rewrite Int.and_assoc. decEq. assumption. compute; auto. compute; auto.
-  simpl; auto.
-  subst. simpl. right; do 2 econstructor. split. eauto. split. eauto.
-  rewrite <- E. 
-  repeat rewrite Int.zero_ext_and. rewrite Int.and_assoc. decEq. assumption. compute; auto. compute; auto.
-  exists x; split; auto.
-  (* default *)
-  exists x; split; auto.
-Qed.
-
-Theorem eval_uncast_float32:
-  forall le a x,
-  eval_expr ge sp e m le a x ->
-  exists v, eval_expr ge sp e m le (uncast_float32 a) v
-         /\ (Val.lessdef x v \/
-             exists p, exists q, x = Vfloat p /\ v = Vfloat q /\ Float.singleoffloat p = Float.singleoffloat q).
-Proof.
-  intros until a. functional induction (uncast_float32 a); intros.
-  (* singleoffloat *)
-  InvEval. exploit IHe0; eauto. intros [v [A B]]. exists v; split; auto.
-  destruct B as [B | [p [q [C [D E]]]]].
-  inv B. destruct v; simpl; auto. right; do 2 econstructor. split. eauto. split. eauto. 
-  apply Float.singleoffloat_idem. 
-  simpl; auto.
-  subst. simpl. right; do 2 econstructor. split. eauto. split. eauto.
-  rewrite Float.singleoffloat_idem. auto.
-  (* default *)
-  exists x; split; auto.
-Qed.
 
 Theorem eval_cast8signed: unary_constructor_sound cast8signed (Val.sign_ext 8).
 Proof.
-  red; intros. unfold cast8signed. 
-  exploit eval_uncast_int8; eauto. intros [v [A B]].
-  exists (Val.sign_ext 8 v); split. EvalOp. 
-  destruct B as [B | [p [q [C [D E]]]]].
-  apply Val.sign_ext_lessdef; auto. 
-  subst. simpl. replace (Int.sign_ext 8 q) with (Int.sign_ext 8 p); auto.
-  apply Int.sign_ext_equal_if_zero_equal; auto. compute; auto.
+  red; intros. unfold cast8signed. TrivialExists.
 Qed.
 
 Theorem eval_cast8unsigned: unary_constructor_sound cast8unsigned (Val.zero_ext 8).
 Proof.
-  red; intros. unfold cast8unsigned. 
-  exploit eval_uncast_int8; eauto. intros [v [A B]].
-  exploit (eval_andimm (Int.repr 255)); eauto. intros [w [U V]].
-  exists w; split; auto. eapply Val.lessdef_trans. 2: eexact V. 
-  rewrite <- Val.cast8unsigned_and.
-  destruct B as [B | [p [q [C [D E]]]]].
-  apply Val.zero_ext_lessdef; auto. 
-  subst. simpl. rewrite E. auto.
+  red; intros. unfold cast8unsigned.
+  rewrite Val.zero_ext_and. apply eval_andimm; auto. compute; auto.
 Qed.
 
 Theorem eval_cast16signed: unary_constructor_sound cast16signed (Val.sign_ext 16).
 Proof.
-  red; intros. unfold cast16signed. 
-  exploit eval_uncast_int16; eauto. intros [v [A B]].
-  exists (Val.sign_ext 16 v); split. EvalOp. 
-  destruct B as [B | [p [q [C [D E]]]]].
-  apply Val.sign_ext_lessdef; auto. 
-  subst. simpl. replace (Int.sign_ext 16 q) with (Int.sign_ext 16 p); auto.
-  apply Int.sign_ext_equal_if_zero_equal; auto. compute; auto.
+  red; intros. unfold cast16signed. TrivialExists.
 Qed.
 
 Theorem eval_cast16unsigned: unary_constructor_sound cast16unsigned (Val.zero_ext 16).
 Proof.
-  red; intros. unfold cast16unsigned. 
-  exploit eval_uncast_int16; eauto. intros [v [A B]].
-  exploit (eval_andimm (Int.repr 65535)); eauto. intros [w [U V]].
-  exists w; split; auto. eapply Val.lessdef_trans. 2: eexact V. 
-  rewrite <- Val.cast16unsigned_and.
-  destruct B as [B | [p [q [C [D E]]]]].
-  apply Val.zero_ext_lessdef; auto. 
-  subst. simpl. rewrite E. auto.
+  red; intros. unfold cast16unsigned.
+  rewrite Val.zero_ext_and. apply eval_andimm; auto. compute; auto.
 Qed.
 
 Theorem eval_singleoffloat: unary_constructor_sound singleoffloat Val.singleoffloat.
 Proof.
-  red; intros. unfold singleoffloat. 
-  exploit eval_uncast_float32; eauto. intros [v [A B]].
-  exists (Val.singleoffloat v); split. EvalOp. 
-  destruct B as [B | [p [q [C [D E]]]]].
-  apply Val.singleoffloat_lessdef; auto. 
-  subst. simpl. rewrite E. auto.
+  red; intros. unfold singleoffloat. TrivialExists.
 Qed.
 
 Theorem eval_intoffloat:

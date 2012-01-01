@@ -504,7 +504,7 @@ Proof.
   destruct b; reflexivity.
 Qed.
 
-Theorem_notbool_negb_3:
+Theorem notbool_negb_3:
   forall ob, of_optbool (option_map negb ob) = notbool (of_optbool ob).
 Proof.
   destruct ob; auto. destruct b; auto.
@@ -955,6 +955,14 @@ Proof.
   elim H0; intro; subst v; reflexivity.
 Qed.
 *)
+
+Lemma zero_ext_and:
+  forall n v, 
+  0 < n < Z_of_nat Int.wordsize ->
+  Val.zero_ext n v = Val.and v (Vint (Int.repr (two_p n - 1))).
+Proof.
+  intros. destruct v; simpl; auto. decEq. apply Int.zero_ext_and; auto.
+Qed.
 
 Lemma rolm_lt_zero:
   forall v, rolm v Int.one Int.one = cmp Clt v (Vint Int.zero).
