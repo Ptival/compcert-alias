@@ -52,7 +52,6 @@ BACKEND=\
   Tailcall.v Tailcallproof.v \
   RTLtyping.v \
   Kildall.v \
-  CastOptim.v CastOptimproof.v \
   ConstpropOp.v Constprop.v ConstpropOpproof.v Constpropproof.v \
   CSE.v CSEproof.v \
   Machregs.v Locations.v Conventions1.v Conventions.v LTL.v LTLtyping.v \
@@ -69,6 +68,8 @@ BACKEND=\
   Bounds.v Stacklayout.v Stacking.v Stackingproof.v Stackingtyping.v \
   Machsem.v \
   Asm.v Asmgen.v Asmgenretaddr.v Asmgenproof1.v Asmgenproof.v
+
+#  CastOptim.v CastOptimproof.v \
 
 # C front-end modules (in cfrontend/)
 
