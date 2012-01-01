@@ -20,12 +20,13 @@ Require Import Maps.
 Require Import Ordered.
 Require Import AST.
 Require Import Integers.
+Require Import Floats.
 Require Import Memdata.
 Require Import Csharpminor.
 Require Import Cminor.
 
-Open Local Scope string_scope.
-Open Local Scope error_monad_scope.
+Local Open Scope string_scope.
+Local Open Scope error_monad_scope.
 
 (** The main task in translating Csharpminor to Cminor is to explicitly
   stack-allocate local variables whose address is taken: these local
@@ -48,6 +49,8 @@ Open Local Scope error_monad_scope.
   of Cminor.
 *)
 
+(** * Handling of variables *)
+
 Definition for_var (id: ident) : ident := xO id.
 Definition for_temp (id: ident) : ident := xI id.
 
@@ -69,46 +72,51 @@ Inductive var_info: Type :=
 
 Definition compilenv := PMap.t var_info.
 
-(*****
-(** [make_cast chunk e] returns a Cminor expression that normalizes
-  the value of Cminor expression [e] as prescribed by the memory chunk
-  [chunk].  For instance, 8-bit sign extension is performed if
-  [chunk] is [Mint8signed]. *)
-
-Definition make_cast (chunk: memory_chunk) (e: expr): expr :=
-  match chunk with
-  | Mint8signed => Eunop Ocast8signed e
-  | Mint8unsigned => Eunop Ocast8unsigned e
-  | Mint16signed => Eunop Ocast16signed e
-  | Mint16unsigned => Eunop Ocast16unsigned e
-  | Mint32 => e
-  | Mfloat32 => Eunop Osingleoffloat e
-  | Mfloat64 => e
-  end.
-**********)
+(** * Helper functions for code generation *)
 
 (** When the translation of an expression is stored in memory,
-  a cast at the toplevel of the expression can be redundant
+  one or several casts at the toplevel of the expression can be redundant
   with that implicitly performed by the memory store.
-  [store_arg] detects this case and strips away the redundant cast. *)
+  [uncast] detects this case and strips away the redundant casts. *)
 
-Fixpoint store_arg (chunk: memory_chunk) (e: expr) : expr :=
+Function uncast_int8 (e: expr) : expr :=
   match e with
-  | Eunop Ocast8signed e1 =>
-      match chunk with Mint8signed => store_arg chunk e1 | _ => e end
-  | Eunop Ocast8unsigned e1 =>
-      match chunk with Mint8unsigned => store_arg chunk e1 | _ => e end
-  | Eunop Ocast16signed e1 =>
-      match chunk with Mint16signed => store_arg chunk e1 | _ => e end
-  | Eunop Ocast16unsigned e1 =>
-      match chunk with Mint16unsigned => store_arg chunk e1 | _ => e end
-  | Eunop Osingleoffloat e1 =>
-      match chunk with Mfloat32 => store_arg chunk e1 | _ => e end
+  | Eunop (Ocast8unsigned|Ocast8signed|Ocast16unsigned|Ocast16signed) e1 =>
+      uncast_int8 e1
+  | Ebinop Oand e1 (Econst (Ointconst n)) =>
+      if Int.eq (Int.and n (Int.repr 255)) (Int.repr 255)
+      then uncast_int8 e1
+      else e
+  | _ => e
+  end.
+
+Function uncast_int16 (e: expr) : expr :=
+  match e with
+  | Eunop (Ocast16unsigned|Ocast16signed) e1 =>
+      uncast_int16 e1
+  | Ebinop Oand e1 (Econst (Ointconst n)) =>
+      if Int.eq (Int.and n (Int.repr 65535)) (Int.repr 65535)
+      then uncast_int16 e1
+      else e
+  | _ => e
+  end.
+
+Function uncast_float32 (e: expr) : expr :=
+  match e with
+  | Eunop Osingleoffloat e1 => uncast_float32 e1
+  | _ => e
+  end.
+
+Function uncast (chunk: memory_chunk) (e: expr) : expr :=
+  match chunk with
+  | Mint8signed | Mint8unsigned => uncast_int8 e
+  | Mint16signed | Mint16unsigned => uncast_int16 e
+  | Mfloat32 => uncast_float32 e
   | _ => e
   end.
 
 Definition make_store (chunk: memory_chunk) (e1 e2: expr): stmt :=
-  Sstore chunk e1 (store_arg chunk e2).
+  Sstore chunk e1 (uncast chunk e2).
 
 Definition make_stackaddr (ofs: Z): expr :=
   Econst (Oaddrstack (Int.repr ofs)).
@@ -116,7 +124,7 @@ Definition make_stackaddr (ofs: Z): expr :=
 Definition make_globaladdr (id: ident): expr :=
   Econst (Oaddrsymbol id Int.zero).
 
-(** Generation of a Cminor expression for reading a Csharpminor variable. *)
+(** * Translation of expressions and statements. *)
 
 Definition var_get (cenv: compilenv) (id: ident): res expr :=
   match PMap.get id cenv with
@@ -336,6 +344,8 @@ with transl_lblstmt (ret: option typ) (cenv: compilenv)
       transl_lblstmt ret cenv (List.tail xenv) ls' (Sseq (Sblock body) ts)
   end.
 
+(** * Stack layout *)
+
 (** Computation of the set of variables whose address is taken in
   a piece of Csharpminor code. *)
 
@@ -454,6 +464,8 @@ Definition assign_global_variable
 Definition build_global_compilenv (p: Csharpminor.program) : compilenv :=
   List.fold_left assign_global_variable 
                  p.(prog_vars) (PMap.init Var_global_array).
+
+(** * Translation of functions *)
 
 (** Function parameters whose address is taken must be stored in their
   stack slots at function entry.  (Cminor passes these parameters in
