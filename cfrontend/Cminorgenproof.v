@@ -1253,36 +1253,62 @@ Proof.
   destruct v1; simpl; auto. rewrite Float.singleoffloat_idem; auto.
 Qed.
 
-Lemma approx_bitwise_correct:
+Lemma approx_bitwise_and_sound:
+  forall a1 v1 a2 v2,
+  val_match_approx a1 v1 -> val_match_approx a2 v2 ->
+  val_match_approx (Approx.bitwise_and a1 a2) (Val.and v1 v2).
+Proof.
+  assert (X: forall v1 v2 N, 0 < N < Z_of_nat Int.wordsize ->
+            v2 = Val.zero_ext N v2 ->
+            Val.and v1 v2 = Val.zero_ext N (Val.and v1 v2)).
+    intros. rewrite Val.zero_ext_and in *; auto. 
+    rewrite Val.and_assoc. congruence. 
+  assert (Y: forall v1 v2 N, 0 < N < Z_of_nat Int.wordsize ->
+            v1 = Val.zero_ext N v1 ->
+            Val.and v1 v2 = Val.zero_ext N (Val.and v1 v2)).
+    intros. rewrite (Val.and_commut v1 v2). apply X; auto.
+  assert (P: forall a v, val_match_approx a v -> Approx.bge Int8u a = true ->
+               v = Val.zero_ext 8 v).
+    intros. apply (val_match_approx_increasing Int8u a v); auto.
+  assert (Q: forall a v, val_match_approx a v -> Approx.bge Int16u a = true ->
+               v = Val.zero_ext 16 v).
+    intros. apply (val_match_approx_increasing Int16u a v); auto.
+  intros; unfold Approx.bitwise_and. 
+  destruct (Approx.bge Int8u a1) as []_eqn. simpl. apply Y; eauto. compute; auto.
+  destruct (Approx.bge Int8u a2) as []_eqn. simpl. apply X; eauto. compute; auto.
+  destruct (Approx.bge Int16u a1) as []_eqn. simpl. apply Y; eauto. compute; auto.
+  destruct (Approx.bge Int16u a2) as []_eqn. simpl. apply X; eauto. compute; auto.
+  simpl; auto. 
+Qed.
+
+Lemma approx_bitwise_or_sound:
   forall (sem_op: val -> val -> val) a1 v1 a2 v2,
   (forall a b c, sem_op (Val.and a (Vint c)) (Val.and b (Vint c)) =
                  Val.and (sem_op a b) (Vint c)) ->
   val_match_approx a1 v1 -> val_match_approx a2 v2 ->
-  val_match_approx (Approx.bitwise_op a1 a2) (sem_op v1 v2).
+  val_match_approx (Approx.bitwise_or a1 a2) (sem_op v1 v2).
 Proof.
   intros.
-  assert (forall N, 0 < N < Z_of_nat Int.wordsize ->
-    sem_op (Val.zero_ext N v1) (Val.zero_ext N v2) =
-    Val.zero_ext N (sem_op (Val.zero_ext N v1) (Val.zero_ext N v2))).
-  intros. repeat rewrite Val.zero_ext_and; auto. rewrite H.
-  rewrite Val.and_assoc. simpl. rewrite Int.and_idem. auto.
+  assert (X: forall v v' N, 0 < N < Z_of_nat Int.wordsize ->
+            v = Val.zero_ext N v ->
+            v' = Val.zero_ext N v' ->
+            sem_op v v' = Val.zero_ext N (sem_op v v')).
+    intros. rewrite Val.zero_ext_and in *; auto.
+    rewrite H3; rewrite H4. rewrite H. rewrite Val.and_assoc.
+    simpl. rewrite Int.and_idem. auto.
 
-  unfold Approx.bitwise_op. 
+  unfold Approx.bitwise_or. 
   destruct (Approx.bge Int8u a1 && Approx.bge Int8u a2) as []_eqn.
   destruct (andb_prop _ _ Heqb).
-  assert (V1: val_match_approx Int8u v1).
-    apply val_match_approx_increasing with a1; auto. 
-  assert (V2: val_match_approx Int8u v2).
-    apply val_match_approx_increasing with a2; auto. 
-  simpl in *. rewrite V1. rewrite V2. apply H2. compute; auto.
+  simpl. apply X. compute; auto. 
+  apply (val_match_approx_increasing Int8u a1 v1); auto.
+  apply (val_match_approx_increasing Int8u a2 v2); auto.
 
   destruct (Approx.bge Int16u a1 && Approx.bge Int16u a2) as []_eqn.
   destruct (andb_prop _ _ Heqb0).
-  assert (V1: val_match_approx Int16u v1).
-    apply val_match_approx_increasing with a1; auto. 
-  assert (V2: val_match_approx Int16u v2).
-    apply val_match_approx_increasing with a2; auto. 
-  simpl in *. rewrite V1. rewrite V2. apply H2. compute; auto.
+  simpl. apply X. compute; auto. 
+  apply (val_match_approx_increasing Int16u a1 v1); auto.
+  apply (val_match_approx_increasing Int16u a2 v2); auto.
 
   exact I.
 Qed.
@@ -1297,15 +1323,12 @@ Proof.
     destruct ob; simpl. destruct b; auto. auto.
   
   destruct op; intros; simpl Approx.binop; simpl in H; try (exact I); inv H.
-  apply approx_bitwise_correct; auto.
-    intros. destruct a; destruct b; simpl; auto.
-    repeat rewrite Int.and_assoc. decEq. decEq.  
-    rewrite (Int.and_commut i0 c). rewrite <- Int.and_assoc. rewrite Int.and_idem. auto.
-  apply approx_bitwise_correct; auto.
+  apply approx_bitwise_and_sound; auto.
+  apply approx_bitwise_or_sound; auto.
     intros. destruct a; destruct b; simpl; auto.
     rewrite (Int.and_commut i c); rewrite (Int.and_commut i0 c). 
     rewrite <- Int.and_or_distrib. rewrite Int.and_commut. auto.
-  apply approx_bitwise_correct; auto.
+  apply approx_bitwise_or_sound; auto.
     intros. destruct a; destruct b; simpl; auto.
     rewrite (Int.and_commut i c); rewrite (Int.and_commut i0 c). 
     rewrite <- Int.and_xor_distrib. rewrite Int.and_commut. auto.

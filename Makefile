@@ -150,7 +150,8 @@ latexdoc:
 
 %.v: %.vp tools/ndfun
 	@rm -f $*.v
-	tools/ndfun $*.vp > $*.v || { rm -f $*.v; exit 2; }
+	@echo "Preprocessing $*.vp"
+	@tools/ndfun $*.vp > $*.v || { rm -f $*.v; exit 2; }
 	@chmod -w $*.v
 
 driver/Configuration.ml: Makefile.config

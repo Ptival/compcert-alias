@@ -230,14 +230,20 @@ Definition unop_is_redundant (op: unary_operation) (a: approx) :=
   | _ => false
   end.
 
-Definition bitwise_op (a1 a2: approx) :=
+Definition bitwise_and (a1 a2: approx) :=
+  if bge Int8u a1 || bge Int8u a2 then Int8u
+  else if bge Int16u a1 || bge Int16u a2 then Int16u
+  else Any.
+
+Definition bitwise_or (a1 a2: approx) :=
   if bge Int8u a1 && bge Int8u a2 then Int8u
   else if bge Int16u a1 && bge Int16u a2 then Int16u
   else Any.
 
 Definition binop (op: binary_operation) (a1 a2: approx) :=
   match op with
-  | Oand | Oor | Oxor => bitwise_op a1 a2
+  | Oand => bitwise_and a1 a2
+  | Oor | Oxor => bitwise_or a1 a2
   | Ocmp _ => Int7
   | Ocmpu _ => Int7
   | Ocmpf _ => Int7
