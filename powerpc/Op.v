@@ -131,17 +131,16 @@ Qed.
 
 (** * Evaluation functions *)
 
-(** Evaluation of conditions, operators and addressing modes applied
-  to lists of values.  Return [None] when the computation is undefined:
-  wrong number of arguments, arguments of the wrong types, undefined 
-  operations such as division by zero.  [eval_condition] returns a boolean,
-  [eval_operation] and [eval_addressing] return a value. *)
-
 Definition symbol_address (F V: Type) (genv: Genv.t F V) (id: ident) (ofs: int) : val :=
   match Genv.find_symbol genv id with
   | Some b => Vptr b ofs
   | None => Vundef
   end.
+
+(** Evaluation of conditions, operators and addressing modes applied
+  to lists of values.  Return [None] when the computation can trigger an
+  error, e.g. integer division by zero.  [eval_condition] returns a boolean,
+  [eval_operation] and [eval_addressing] return a value. *)
 
 Definition eval_condition (cond: condition) (vl: list val) (m: mem): option bool :=
   match cond, vl with

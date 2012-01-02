@@ -395,7 +395,7 @@ Proof.
   discriminate.
 Qed.
 
-Lemma eval_or: binary_constructor_sound or Val.or.
+Theorem eval_or: binary_constructor_sound or Val.or.
 Proof.
   red; intros until y; unfold or; case (or_match a b); intros.
 (* rolm - rolm *)
