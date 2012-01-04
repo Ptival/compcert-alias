@@ -287,13 +287,13 @@ Definition shr_carry (v1 v2: val): val :=
   | _, _ => Vundef
   end.
 
-Definition shrx (v1 v2: val): val :=
+Definition shrx (v1 v2: val): option val :=
   match v1, v2 with
   | Vint n1, Vint n2 =>
-     if Int.ltu n2 Int.iwordsize
-     then Vint(Int.shrx n1 n2)
-     else Vundef
-  | _, _ => Vundef
+     if Int.ltu n2 (Int.repr 31)
+     then Some(Vint(Int.shrx n1 n2))
+     else None
+  | _, _ => None
   end.
 
 Definition shru (v1 v2: val): val :=
@@ -667,15 +667,13 @@ Qed.
 
 Theorem divs_pow2:
   forall x n logn y,
-  Int.is_power2 n = Some logn ->
+  Int.is_power2 n = Some logn -> Int.ltu logn (Int.repr 31) = true ->
   divs x (Vint n) = Some y ->
-  shrx x (Vint logn) = y.
+  shrx x (Vint logn) = Some y.
 Proof.
-  intros; destruct x; simpl in H0; inv H0.
-  destruct (Int.eq n Int.zero); inv H2. 
-  simpl. 
-  rewrite (Int.is_power2_range _ _ H).
-  decEq. symmetry. apply Int.divs_pow2. auto.
+  intros; destruct x; simpl in H1; inv H1.
+  destruct (Int.eq n Int.zero); inv H3. 
+  simpl. rewrite H0. decEq. decEq. symmetry. apply Int.divs_pow2. auto.
 Qed.
 
 Theorem divu_pow2:
@@ -761,12 +759,32 @@ Proof.
 Qed.
 
 Theorem shrx_carry:
-  forall x y,
-  add (shr x y) (shr_carry x y) = shrx x y.
+  forall x y z,
+  shrx x y = Some z ->
+  add (shr x y) (shr_carry x y) = z.
 Proof.
-  destruct x; destruct y; simpl; auto.
-  case (Int.ltu i0 Int.iwordsize); auto.
-  simpl. decEq. apply Int.shrx_carry.
+  intros. destruct x; destruct y; simpl in H; inv H. 
+  destruct (Int.ltu i0 (Int.repr 31)) as []_eqn; inv H1.
+  exploit Int.ltu_inv; eauto. change (Int.unsigned (Int.repr 31)) with 31. intros.
+  assert (Int.ltu i0 Int.iwordsize = true). 
+    unfold Int.ltu. apply zlt_true. change (Int.unsigned Int.iwordsize) with 32. omega. 
+  simpl. rewrite H0. simpl. decEq. apply Int.shrx_carry.
+Qed.
+
+Theorem shrx_shr:
+  forall x y z,
+  shrx x y = Some z ->
+  exists p, exists q,
+    x = Vint p /\ y = Vint q /\
+    z = shr (if Int.lt p Int.zero then add x (Vint (Int.sub (Int.shl Int.one q) Int.one)) else x) (Vint q).
+Proof.
+  intros. destruct x; destruct y; simpl in H; inv H. 
+  destruct (Int.ltu i0 (Int.repr 31)) as []_eqn; inv H1.
+  exploit Int.ltu_inv; eauto. change (Int.unsigned (Int.repr 31)) with 31. intros.
+  assert (Int.ltu i0 Int.iwordsize = true). 
+    unfold Int.ltu. apply zlt_true. change (Int.unsigned Int.iwordsize) with 32. omega. 
+  exists i; exists i0; intuition. 
+  rewrite Int.shrx_shr; auto. destruct (Int.lt i Int.zero); simpl; rewrite H0; auto.
 Qed.
 
 Theorem or_rolm:

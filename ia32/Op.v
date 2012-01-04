@@ -114,6 +114,7 @@ Inductive operation : Type :=
 (** Derived operators. *)
 
 Definition Oaddrsymbol (id: ident) (ofs: int) : operation := Olea (Aglobal id ofs).
+Definition Oaddrstack (ofs: int) : operation := Olea (Ainstack ofs).
 Definition Oaddimm (n: int) : operation := Olea (Aindexed n).
 
 (** Comparison functions (used in module [CSE]). *)
@@ -214,7 +215,7 @@ Definition eval_operation
   | Oshlimm n, v1::nil => Some (Val.shl v1 (Vint n))
   | Oshr, v1::v2::nil => Some (Val.shr v1 v2)
   | Oshrimm n, v1::nil => Some (Val.shr v1 (Vint n))
-  | Oshrximm n, v1::nil => Some (Val.shrx v1 (Vint n))
+  | Oshrximm n, v1::nil => Val.shrx v1 (Vint n)
   | Oshru, v1::v2::nil => Some (Val.shru v1 v2)
   | Oshruimm n, v1::nil => Some (Val.shru v1 (Vint n))
   | Ororimm n, v1::nil => Some (Val.ror v1 (Vint n))
@@ -374,7 +375,7 @@ Proof with (try exact I).
   destruct v0; simpl... destruct (Int.ltu i Int.iwordsize)...
   destruct v0; destruct v1; simpl... destruct (Int.ltu i0 Int.iwordsize)...
   destruct v0; simpl... destruct (Int.ltu i Int.iwordsize)...
-  destruct v0; simpl... destruct (Int.ltu i Int.iwordsize)...
+  destruct v0; simpl in H0; try discriminate. destruct (Int.ltu i (Int.repr 31)); inv H0...
   destruct v0; destruct v1; simpl... destruct (Int.ltu i0 Int.iwordsize)...
   destruct v0; simpl... destruct (Int.ltu i Int.iwordsize)...
   destruct v0; simpl... destruct (Int.ltu i Int.iwordsize)...
@@ -801,7 +802,8 @@ Proof.
   inv H4; simpl; auto. destruct (Int.ltu i Int.iwordsize); auto.
   inv H4; inv H2; simpl; auto. destruct (Int.ltu i0 Int.iwordsize); auto.
   inv H4; simpl; auto. destruct (Int.ltu i Int.iwordsize); auto.
-  inv H4; simpl; auto. destruct (Int.ltu i Int.iwordsize); auto.
+  inv H4; simpl in H1; try discriminate. simpl. 
+  destruct (Int.ltu i (Int.repr 31)); inv H1. TrivialExists.
   inv H4; inv H2; simpl; auto. destruct (Int.ltu i0 Int.iwordsize); auto.
   inv H4; simpl; auto. destruct (Int.ltu i Int.iwordsize); auto.
   inv H4; simpl; auto. destruct (Int.ltu i Int.iwordsize); auto.

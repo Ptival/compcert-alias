@@ -45,7 +45,7 @@ Inductive approx : Type :=
 
   The static approximations are defined by large pattern-matchings over
   the approximations of the results.  We write these matchings in the
-  indirect style described in file [Cmconstr] to avoid excessive
+  indirect style described in file [SelectOp] to avoid excessive
   duplication of cases in proofs. *)
 
 Nondetfunction eval_static_condition (cond: condition) (vl: list approx) :=
