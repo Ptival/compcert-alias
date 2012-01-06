@@ -366,9 +366,11 @@ Proof.
   assert (ADDR': exists a', eval_addressing ge sp addr' rs'##args' = Some a' /\ Val.lessdef a a').
     eapply eval_addressing_lessdef; eauto. eapply regs_lessdef_regs; eauto.
   destruct ADDR' as [a' [A B]].
-  exploit Mem.loadv_extends; eauto. intros [v' [C D]].
+  assert (C: eval_addressing tge sp addr' rs'##args' = Some a').
+    rewrite <- A. apply eval_addressing_preserved. exact symbols_preserved.
+  exploit Mem.loadv_extends; eauto. intros [v' [D E]].
   exists (State s' (transf_function f) sp pc' (rs'#dst <- v') m'); split.
-  eapply exec_Iload; eauto. rewrite <- A. apply eval_addressing_preserved. exact symbols_preserved.
+  eapply exec_Iload; eauto.
   econstructor; eauto. 
   eapply analyze_correct_1; eauto. simpl; auto. 
   unfold transfer; rewrite H. 
@@ -384,9 +386,11 @@ Proof.
   assert (ADDR': exists a', eval_addressing ge sp addr' rs'##args' = Some a' /\ Val.lessdef a a').
     eapply eval_addressing_lessdef; eauto. eapply regs_lessdef_regs; eauto.
   destruct ADDR' as [a' [A B]].
-  exploit Mem.storev_extends; eauto. intros [m2' [C D]].
+  assert (C: eval_addressing tge sp addr' rs'##args' = Some a').
+    rewrite <- A. apply eval_addressing_preserved. exact symbols_preserved.
+  exploit Mem.storev_extends; eauto. intros [m2' [D E]].
   exists (State s' (transf_function f) sp pc' rs' m2'); split.
-  eapply exec_Istore; eauto. rewrite <- A. apply eval_addressing_preserved. exact symbols_preserved.
+  eapply exec_Istore; eauto.
   econstructor; eauto. 
   eapply analyze_correct_1; eauto. simpl; auto. 
   unfold transfer; rewrite H. auto. 

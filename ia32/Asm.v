@@ -527,11 +527,17 @@ Definition exec_instr (c: code) (i: instruction) (rs: regset) (m: mem) : outcome
   | Pimul_ri rd n =>
       Next (nextinstr_nf (rs#rd <- (Val.mul rs#rd (Vint n)))) m
   | Pdiv r1 =>
-      Next (nextinstr_nf (rs#EAX <- (Val.maketotal (Val.divu rs#EAX (rs#EDX <- Vundef)#r1))
-                            #EDX <- (Val.maketotal (Val.modu rs#EAX (rs#EDX <- Vundef)#r1)))) m
+      let vn := rs#EAX in let vd := (rs#EDX <- Vundef)#r1 in
+      match Val.divu vn vd, Val.modu vn vd with
+      | Some vq, Some vr => Next (nextinstr_nf (rs#EAX <- vq #EDX <- vr)) m
+      | _, _ => Stuck
+      end
   | Pidiv r1 =>
-      Next (nextinstr_nf (rs#EAX <- (Val.maketotal (Val.divs rs#EAX (rs#EDX <- Vundef)#r1))
-                            #EDX <- (Val.maketotal (Val.mods rs#EAX (rs#EDX <- Vundef)#r1)))) m
+      let vn := rs#EAX in let vd := (rs#EDX <- Vundef)#r1 in
+      match Val.divs vn vd, Val.mods vn vd with
+      | Some vq, Some vr => Next (nextinstr_nf (rs#EAX <- vq #EDX <- vr)) m
+      | _, _ => Stuck
+      end
   | Pand_rr rd r1 =>
       Next (nextinstr_nf (rs#rd <- (Val.and rs#rd rs#r1))) m
   | Pand_ri rd n =>
