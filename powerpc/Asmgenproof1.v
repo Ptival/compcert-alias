@@ -1343,7 +1343,7 @@ Opaque Val.add.
   (* Oshrximm *)
   econstructor; split.
   eapply exec_straight_two; simpl; reflexivity. 
-  split. repeat SIMP. apply Val.shrx_carry. 
+  split. repeat SIMP. apply Val.shrx_carry. auto. 
   intros; repeat SIMP. 
   (* Orolm *)
   destruct (rolm_correct (ireg_of res) (ireg_of m0) i i0 k rs m) as [rs' [A [B C]]]; auto with ppcgen.

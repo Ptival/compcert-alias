@@ -142,7 +142,7 @@ Proof.
   destruct (Int.ltu n2 Int.iwordsize); simpl; auto.
   destruct (Int.ltu n2 Int.iwordsize); simpl; auto.
   destruct (Int.ltu n Int.iwordsize); simpl; auto.
-  destruct (Int.ltu n Int.iwordsize); simpl; auto.
+  destruct (Int.ltu n (Int.repr 31)); inv H0. simpl; auto.
   destruct (Int.ltu n2 Int.iwordsize); simpl; auto.
 
   unfold eval_static_intoffloat. destruct (Float.intoffloat n1); simpl in H0; inv H0.
@@ -228,7 +228,9 @@ Proof.
   intros; unfold make_shrimm.
   predSpec Int.eq Int.eq_spec n Int.zero; intros. subst.
   exists (rs#r1); split; auto. destruct (rs#r1); simpl; auto. rewrite Int.shr_zero. auto.
+  destruct (Int.ltu n Int.iwordsize) as []_eqn.
   econstructor; split; eauto. simpl. auto.
+  econstructor; split; eauto. simpl. congruence.
 Qed.
 
 Lemma make_shruimm_correct:
@@ -272,10 +274,9 @@ Lemma make_divimm_correct:
 Proof.
   intros; unfold make_divimm.
   destruct (Int.is_power2 n) as []_eqn. 
-  exists (Val.shrx rs#r1 (Vint i)); split; auto. 
-  rewrite H0 in H. destruct (rs#r1); simpl in *; try discriminate.
-  destruct (Int.eq n Int.zero) as []_eqn; inv H.
-  rewrite (Int.is_power2_range _ _ Heqo). rewrite (Int.divs_pow2 i0 _ _ Heqo). auto.
+  destruct (Int.ltu i (Int.repr 31)) as []_eqn.
+  exists v; split; auto. simpl. eapply Val.divs_pow2; eauto. congruence. 
+  exists v; auto.
   exists v; auto.
 Qed.
 

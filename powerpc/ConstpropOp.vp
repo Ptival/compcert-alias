@@ -107,7 +107,7 @@ Nondetfunction eval_static_operation (op: operation) (vl: list approx) :=
   | Oshl, I n1 :: I n2 :: nil => if Int.ltu n2 Int.iwordsize then I(Int.shl n1 n2) else Unknown
   | Oshr, I n1 :: I n2 :: nil => if Int.ltu n2 Int.iwordsize then I(Int.shr n1 n2) else Unknown
   | Oshrimm n, I n1 :: nil => if Int.ltu n Int.iwordsize then I(Int.shr n1 n) else Unknown
-  | Oshrximm n, I n1 :: nil => if Int.ltu n Int.iwordsize then I(Int.shrx n1 n) else Unknown
+  | Oshrximm n, I n1 :: nil => if Int.ltu n (Int.repr 31) then I(Int.shrx n1 n) else Unknown
   | Oshru, I n1 :: I n2 :: nil => if Int.ltu n2 Int.iwordsize then I(Int.shru n1 n2) else Unknown
   | Orolm amount mask, I n1 :: nil => I(Int.rolm n1 amount mask)
   | Oroli amount mask, I n1 :: I n2 :: nil => I(Int.or (Int.and n1 (Int.not mask)) (Int.rolm n2 amount mask))
@@ -192,7 +192,9 @@ Definition make_mulimm (n: int) (r1 r2: reg) :=
 
 Definition make_divimm (n: int) (r1 r2: reg) :=
   match Int.is_power2 n with
-  | Some l => (Oshrximm l, r1 :: nil)
+  | Some l => if Int.ltu l (Int.repr 31)
+              then (Oshrximm l, r1 :: nil)
+              else (Odiv, r1 :: r2 :: nil)
   | None   => (Odiv, r1 :: r2 :: nil)
   end.
 

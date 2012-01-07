@@ -186,7 +186,7 @@ Definition eval_operation
   | Oshl, v1::v2::nil => Some (Val.shl v1 v2)
   | Oshr, v1::v2::nil => Some (Val.shr v1 v2)
   | Oshrimm n, v1::nil => Some (Val.shr v1 (Vint n))
-  | Oshrximm n, v1::nil => Some (Val.shrx v1 (Vint n))
+  | Oshrximm n, v1::nil => Val.shrx v1 (Vint n)
   | Oshru, v1::v2::nil => Some (Val.shru v1 v2)
   | Orolm amount mask, v1::nil => Some (Val.rolm v1 amount mask)
   | Oroli amount mask, v1::v2::nil =>
@@ -344,7 +344,7 @@ Proof with (try exact I).
   destruct v0; destruct v1; simpl... destruct (Int.ltu i0 Int.iwordsize)...
   destruct v0; destruct v1; simpl... destruct (Int.ltu i0 Int.iwordsize)...
   destruct v0; simpl... destruct (Int.ltu i Int.iwordsize)...
-  destruct v0; simpl... destruct (Int.ltu i Int.iwordsize)...
+  destruct v0; simpl in *; inv H0. destruct (Int.ltu i (Int.repr 31)); inv H2...
   destruct v0; destruct v1; simpl... destruct (Int.ltu i0 Int.iwordsize)...
   destruct v0...
   destruct v0; destruct v1...
@@ -716,7 +716,7 @@ Proof.
   inv H4; inv H2; simpl; auto. destruct (Int.ltu i0 Int.iwordsize); auto.
   inv H4; inv H2; simpl; auto. destruct (Int.ltu i0 Int.iwordsize); auto.
   inv H4; simpl; auto. destruct (Int.ltu i Int.iwordsize); auto.
-  inv H4; simpl; auto. destruct (Int.ltu i Int.iwordsize); auto.
+  inv H4; simpl in *; inv H1. destruct (Int.ltu i (Int.repr 31)); inv H2. econstructor; eauto.
   inv H4; inv H2; simpl; auto. destruct (Int.ltu i0 Int.iwordsize); auto.
   inv H4; simpl; auto.
   inv H4; inv H2; simpl; auto.
