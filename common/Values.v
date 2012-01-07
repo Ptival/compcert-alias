@@ -768,7 +768,7 @@ Proof.
   exploit Int.ltu_inv; eauto. change (Int.unsigned (Int.repr 31)) with 31. intros.
   assert (Int.ltu i0 Int.iwordsize = true). 
     unfold Int.ltu. apply zlt_true. change (Int.unsigned Int.iwordsize) with 32. omega. 
-  simpl. rewrite H0. simpl. decEq. apply Int.shrx_carry.
+  simpl. rewrite H0. simpl. decEq. rewrite Int.shrx_carry; auto.
 Qed.
 
 Theorem shrx_shr:
@@ -912,68 +912,6 @@ Proof.
   destruct (Float.cmp Cgt f f0); destruct (Float.cmp Ceq f f0); auto.
 Qed.
 
-(*****
-Definition is_bool (v: val) :=
-  v = Vundef \/ v = Vtrue \/ v = Vfalse.
-
-Lemma of_bool_is_bool:
-  forall b, is_bool (of_bool b).
-Proof.
-  destruct b; unfold is_bool; simpl; tauto.
-Qed.
-
-Lemma undef_is_bool: is_bool Vundef.
-Proof.
-  unfold is_bool; tauto.
-Qed.
-
-Lemma cmp_mismatch_is_bool:
-  forall c, is_bool (cmp_mismatch c).
-Proof.
-  destruct c; simpl; unfold is_bool; tauto.
-Qed.
-
-Lemma cmp_is_bool:
-  forall c v1 v2, is_bool (cmp c v1 v2).
-Proof.
-  destruct v1; destruct v2; simpl; try apply undef_is_bool.
-  apply of_bool_is_bool.
-Qed.
-
-Lemma cmpu_is_bool:
-  forall c v1 v2, is_bool (cmpu c v1 v2).
-Proof.
-  destruct v1; destruct v2; simpl; try apply undef_is_bool.
-  apply of_bool_is_bool.
-  case (Int.eq i Int.zero). apply cmp_mismatch_is_bool. apply undef_is_bool.
-  case (Int.eq i0 Int.zero). apply cmp_mismatch_is_bool. apply undef_is_bool.
-  case (zeq b b0); intro. apply of_bool_is_bool. apply cmp_mismatch_is_bool.
-Qed.
-
-Lemma cmpf_is_bool:
-  forall c v1 v2, is_bool (cmpf c v1 v2).
-Proof.
-  destruct v1; destruct v2; simpl;
-  apply undef_is_bool || apply of_bool_is_bool.
-Qed.
-
-Lemma notbool_is_bool:
-  forall v, is_bool (notbool v).
-Proof.
-  destruct v; simpl.
-  apply undef_is_bool. apply of_bool_is_bool. 
-  apply undef_is_bool. unfold is_bool; tauto.
-Qed.
-
-Lemma notbool_xor:
-  forall v, is_bool v -> v = xor (notbool v) Vone.
-Proof.
-  intros. elim H; intro.  
-  subst v. reflexivity.
-  elim H0; intro; subst v; reflexivity.
-Qed.
-*)
-
 Lemma zero_ext_and:
   forall n v, 
   0 < n < Z_of_nat Int.wordsize ->
@@ -1058,24 +996,6 @@ Lemma singleoffloat_lessdef:
 Proof.
   intros; inv H; simpl; auto.
 Qed.
-
-(**
-Lemma negint_lessdef:
-  forall v1 v1', lessdef v1 v1' -> lessdef (negint v1) (negint v1').
-Proof. intros; inv H; auto. Qed.
-
-Lemma notbool_lessdef:
-  forall v1 v1', lessdef v1 v1' -> lessdef (notbool v1) (notbool v1').
-Proof. intros; inv H; auto. Qed.
-
-Lemma notint_lessdef:
-  forall v1 v1', lessdef v1 v1' -> lessdef (notint v1) (notint v1').
-Proof. intros; inv H; auto. Qed.
-
-Lemma negf_lessdef:
-  forall v1 v1', lessdef v1 v1' -> lessdef (negf v1) (negf v1').
-Proof. intros; inv H; auto. Qed.
-**)
 
 Lemma add_lessdef:
   forall v1 v1' v2 v2',

@@ -243,15 +243,6 @@ Definition shr (x y: int): int :=
   let sx := fun i => fx (if zlt i (Z_of_nat wordsize) then i else Z_of_nat wordsize - 1) in
   repr (Z_of_bits wordsize sx (unsigned y)).
 
-(** Viewed as signed divisions by powers of two, [shrx] rounds towards
-  zero, while [shr] rounds towards minus infinity. *)
-
-Definition shrx (x y: int): int :=
-  divs x (shl one y).
-
-Definition shr_carry (x y: int) :=
-  sub (shrx x y) (shr x y).
-
 Definition rol (x y: int) : int :=
   let fx := bits_of_Z wordsize (unsigned x) in
   let rx := fun i => fx (Zmod i (Z_of_nat wordsize)) in
@@ -263,6 +254,17 @@ Definition ror (x y: int) : int :=
   repr (Z_of_bits wordsize rx (unsigned y)).
 
 Definition rolm (x a m: int): int := and (rol x a) m.
+
+(** Viewed as signed divisions by powers of two, [shrx] rounds towards
+  zero, while [shr] rounds towards minus infinity. *)
+
+Definition shrx (x y: int): int :=
+  divs x (shl one y).
+
+(** [shr_carry x y] is 1 if [x] is negative and at least one 1 bit is shifted away. *)
+
+Definition shr_carry (x y: int) :=
+  if lt x zero && negb (eq (and x (sub (shl one y) one)) zero) then one else zero.
 
 (** Zero and sign extensions *)
 
@@ -2432,15 +2434,6 @@ Qed.
 
 (** ** Properties of [shrx] (signed division by a power of 2) *)
 
-Theorem shrx_carry:
-  forall x y,
-  add (shr x y) (shr_carry x y) = shrx x y.
-Proof.
-  intros. unfold shr_carry. 
-  rewrite sub_add_opp. rewrite add_permut. 
-  rewrite add_neg_zero. apply add_zero.
-Qed.
-
 Lemma Zdiv_round_Zdiv:
   forall x y,
   y > 0 ->
@@ -2464,8 +2457,7 @@ Qed.
 Theorem shrx_shr:
   forall x y,
   ltu y (repr (Z_of_nat wordsize - 1)) = true ->
-  shrx x y =
-  shr (if lt x zero then add x (sub (shl one y) one) else x) y.
+  shrx x y = shr (if lt x zero then add x (sub (shl one y) one) else x) y.
 Proof.
   intros. rewrite shr_div_two_p. unfold shrx. unfold divs.  
   exploit ltu_inv; eauto. rewrite unsigned_repr. 
@@ -2500,6 +2492,69 @@ Proof.
   assert (two_p uy - 1 <= max_signed). unfold max_signed. omega.
   omega.
   generalize wordsize_pos wordsize_max_unsigned; omega.
+Qed.
+
+Lemma Zdiv_shift:
+  forall x y, y > 0 ->
+  (x + (y - 1)) / y = x / y + if zeq (Zmod x y) 0 then 0 else 1.
+Proof.
+  intros. generalize (Z_div_mod_eq x y H). generalize (Z_mod_lt x y H).  
+  set (q := x / y). set (r := x mod y). intros.
+  destruct (zeq r 0). 
+  apply Zdiv_unique with (y - 1). rewrite H1. rewrite e. ring. omega.
+  apply Zdiv_unique with (r - 1). rewrite H1. ring. omega.
+Qed.
+
+Theorem shrx_carry:
+  forall x y,
+  ltu y (repr (Z_of_nat wordsize - 1)) = true ->
+  shrx x y = add (shr x y) (shr_carry x y).
+Proof.
+  intros. rewrite shrx_shr; auto. unfold shr_carry.
+  unfold lt. set (sx := signed x). rewrite signed_zero. 
+  destruct (zlt sx 0); simpl. 
+  2: rewrite add_zero; auto.
+  set (uy := unsigned y).
+  assert (0 <= uy < Z_of_nat wordsize - 1).
+    exploit ltu_inv; eauto. rewrite unsigned_repr. auto.
+    generalize wordsize_pos wordsize_max_unsigned; omega.
+  assert (shl one y = repr (two_p uy)).
+    rewrite shl_mul_two_p. rewrite mul_commut. apply mul_one.
+  assert (and x (sub (shl one y) one) = modu x (repr (two_p uy))).
+    symmetry. rewrite H1. apply modu_and with (logn := y).
+    rewrite is_power2_two_p. unfold uy. rewrite repr_unsigned. auto.
+    omega.
+  rewrite H2. rewrite H1. 
+  repeat rewrite shr_div_two_p. fold sx. fold uy.
+  assert (two_p uy > 0). apply two_p_gt_ZERO. omega.
+  assert (two_p uy < modulus).
+    rewrite modulus_power. apply two_p_monotone_strict. omega.
+  assert (two_p uy < half_modulus). 
+    rewrite half_modulus_power. 
+    apply two_p_monotone_strict. auto.
+  assert (two_p uy < modulus).
+    rewrite modulus_power. apply two_p_monotone_strict. omega.
+  assert (sub (repr (two_p uy)) one = repr (two_p uy - 1)).
+    unfold sub. apply eqm_samerepr. apply eqm_sub. apply eqm_sym; apply eqm_unsigned_repr. 
+    rewrite unsigned_one. apply eqm_refl.
+  rewrite H7. rewrite add_signed. fold sx.
+  rewrite (signed_repr (two_p uy - 1)). rewrite signed_repr. 
+  unfold modu. rewrite unsigned_repr. 
+  unfold eq. rewrite unsigned_zero. rewrite unsigned_repr. 
+  assert (unsigned x mod two_p uy = sx mod two_p uy).
+    apply eqmod_mod_eq; auto. apply eqmod_divides with modulus. 
+    fold eqm. unfold sx. apply eqm_sym. apply eqm_signed_unsigned.
+    unfold modulus. rewrite two_power_nat_two_p. 
+    exists (two_p (Z_of_nat wordsize - uy)). rewrite <- two_p_is_exp. 
+    decEq. omega. omega. omega.
+  rewrite H8. rewrite Zdiv_shift; auto.
+  unfold add. apply eqm_samerepr. apply eqm_add. 
+  apply eqm_unsigned_repr. 
+  destruct (zeq (sx mod two_p uy) 0); simpl; apply eqmod_mod; apply modulus_pos.
+  generalize (Z_mod_lt (unsigned x) (two_p uy) H3). unfold max_unsigned. omega.
+  unfold max_unsigned; omega.
+  generalize (signed_range x). fold sx. intros. split. omega. unfold max_signed. omega. 
+  generalize min_signed_neg. unfold max_signed. omega. 
 Qed.
 
 (** ** Properties of integer zero extension and sign extension. *)
