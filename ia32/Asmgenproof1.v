@@ -625,26 +625,37 @@ Qed.
 (** Smart constructor for division *)
 
 Lemma mk_div_correct:
-  forall mkinstr dsem msem r1 r2 k c rs1 m,
+  forall mkinstr dsem msem r1 r2 k c (rs1: regset) m vq vr,
   mk_div mkinstr r1 r2 k = OK c ->
   (forall r c rs m,
    exec_instr ge c (mkinstr r) rs m =
-   Next (nextinstr_nf (rs#EAX <- (dsem rs#EAX (rs#EDX <- Vundef)#r) 
-                         #EDX <- (msem rs#EAX (rs#EDX <- Vundef)#r))) m) ->
+      let vn := rs#EAX in let vd := (rs#EDX <- Vundef)#r in
+      match dsem vn vd, msem vn vd with
+      | Some vq, Some vr => Next (nextinstr_nf (rs#EAX <- vq #EDX <- vr)) m
+      | _, _ => Stuck
+      end) ->
+  dsem rs1#r1 rs1#r2 = Some vq ->
+  msem rs1#r1 rs1#r2 = Some vr ->
   exists rs2,
      exec_straight c rs1 m k rs2 m
-  /\ rs2#r1 = dsem rs1#r1 rs1#r2
+  /\ rs2#r1 = vq
   /\ forall r, nontemp_preg r = true -> r <> r1 -> rs2#r = rs1#r.
 Proof.
   unfold mk_div; intros. 
   destruct (ireg_eq r1 EAX). destruct (ireg_eq r2 EDX); monadInv H.
 (* r1=EAX r2=EDX *)
-  econstructor. split. eapply exec_straight_two. simpl; eauto. apply H0. auto. auto.
+  econstructor. split. eapply exec_straight_two. simpl; eauto. 
+  rewrite H0.
+  change (nextinstr rs1 # ECX <- (rs1 EDX) EAX) with (rs1#EAX). 
+  change ((nextinstr rs1 # ECX <- (rs1 EDX)) # EDX <- Vundef ECX) with (rs1#EDX).
+  rewrite H1. rewrite H2. eauto. auto. auto. 
   split. SRes. 
-  intros. repeat SOther. 
+  intros. repeat SOther.
 (* r1=EAX r2<>EDX *)
-  econstructor. split. eapply exec_straight_one. apply H0. auto.
-  split. repeat SRes. decEq. apply Pregmap.gso. congruence. 
+  econstructor. split. eapply exec_straight_one. rewrite H0. 
+  replace (rs1 # EDX <- Vundef r2) with (rs1 r2). rewrite H1; rewrite H2. eauto. 
+  symmetry. SOther. auto.
+  split. SRes.
   intros. repeat SOther. 
 (* r1 <> EAX *)
   monadInv H.
@@ -654,9 +665,12 @@ Proof.
   econstructor; split.
   apply exec_straight_step with rs2 m; auto.
   eapply exec_straight_trans. eexact A. 
-  eapply exec_straight_three. simpl; eauto. simpl; eauto. simpl; eauto. 
+  eapply exec_straight_three.
+  rewrite H0. replace (rs3 EAX) with (rs1 r1). replace (rs3 # EDX <- Vundef ECX) with (rs1 r2).
+  rewrite H1; rewrite H2. eauto.  
+  simpl; eauto. simpl; eauto.
   auto. auto. auto. 
-  split. repeat SRes. decEq. rewrite B; unfold rs2; SRes. SOther.
+  split. repeat SRes.
   intros. destruct (preg_eq r EAX). subst.
   repeat SRes. rewrite D; auto with ppcgen. 
   repeat SOther. rewrite D; auto with ppcgen. unfold rs2; repeat SOther.
@@ -665,27 +679,42 @@ Qed.
 (** Smart constructor for modulus *)
 
 Lemma mk_mod_correct:
-  forall mkinstr dsem msem r1 r2 k c rs1 m,
+ forall mkinstr dsem msem r1 r2 k c (rs1: regset) m vq vr,
   mk_mod mkinstr r1 r2 k = OK c ->
   (forall r c rs m,
    exec_instr ge c (mkinstr r) rs m =
-   Next (nextinstr_nf (rs#EAX <- (dsem rs#EAX (rs#EDX <- Vundef)#r) 
-                         #EDX <- (msem rs#EAX (rs#EDX <- Vundef)#r))) m) ->
+      let vn := rs#EAX in let vd := (rs#EDX <- Vundef)#r in
+      match dsem vn vd, msem vn vd with
+      | Some vq, Some vr => Next (nextinstr_nf (rs#EAX <- vq #EDX <- vr)) m
+      | _, _ => Stuck
+      end) ->
+  dsem rs1#r1 rs1#r2 = Some vq ->
+  msem rs1#r1 rs1#r2 = Some vr ->
   exists rs2,
      exec_straight c rs1 m k rs2 m
-  /\ rs2#r1 = msem rs1#r1 rs1#r2
+  /\ rs2#r1 = vr
   /\ forall r, nontemp_preg r = true -> r <> r1 -> rs2#r = rs1#r.
 Proof.
   unfold mk_mod; intros. 
   destruct (ireg_eq r1 EAX). destruct (ireg_eq r2 EDX); monadInv H.
 (* r1=EAX r2=EDX *)
   econstructor. split. eapply exec_straight_three.
-  simpl; eauto. apply H0. simpl; eauto. auto. auto. auto.
+  simpl; eauto.
+  rewrite H0.
+  change (nextinstr rs1 # ECX <- (rs1 EDX) EAX) with (rs1#EAX). 
+  change ((nextinstr rs1 # ECX <- (rs1 EDX)) # EDX <- Vundef ECX) with (rs1#EDX).
+  rewrite H1. rewrite H2. eauto.
+  simpl; eauto.
+  auto. auto. auto. 
   split. SRes. 
-  intros. repeat SOther. 
+  intros. repeat SOther.
 (* r1=EAX r2<>EDX *)
-  econstructor. split. eapply exec_straight_two. apply H0. simpl; eauto. auto. auto.
-  split. repeat SRes. decEq. apply Pregmap.gso. congruence. 
+  econstructor. split. eapply exec_straight_two. rewrite H0. 
+  replace (rs1 # EDX <- Vundef r2) with (rs1 r2). rewrite H1; rewrite H2. eauto. 
+  symmetry. SOther. 
+  simpl; eauto. 
+  auto. auto. 
+  split. SRes.
   intros. repeat SOther. 
 (* r1 <> EAX *)
   monadInv H.
@@ -695,12 +724,39 @@ Proof.
   econstructor; split.
   apply exec_straight_step with rs2 m; auto.
   eapply exec_straight_trans. eexact A. 
-  eapply exec_straight_three. simpl; eauto. simpl; eauto. simpl; eauto. 
+  eapply exec_straight_three.
+  rewrite H0. replace (rs3 EAX) with (rs1 r1). replace (rs3 # EDX <- Vundef ECX) with (rs1 r2).
+  rewrite H1; rewrite H2. eauto.  
+  simpl; eauto. simpl; eauto.
   auto. auto. auto. 
-  split. repeat SRes. decEq. rewrite B; unfold rs2; SRes. SOther.
+  split. repeat SRes.
   intros. destruct (preg_eq r EAX). subst.
   repeat SRes. rewrite D; auto with ppcgen. 
   repeat SOther. rewrite D; auto with ppcgen. unfold rs2; repeat SOther.
+Qed.
+
+Remark divs_mods_exist:
+  forall v1 v2,
+  match Val.divs v1 v2, Val.mods v1 v2 with
+  | Some _, Some _ => True
+  | None, None => True
+  | _, _ => False
+  end.
+Proof.
+  intros. unfold Val.divs, Val.mods. destruct v1; auto. destruct v2; auto.
+  destruct (Int.eq i0 Int.zero); auto. 
+Qed.
+
+Remark divu_modu_exist:
+  forall v1 v2,
+  match Val.divu v1 v2, Val.modu v1 v2 with
+  | Some _, Some _ => True
+  | None, None => True
+  | _, _ => False
+  end.
+Proof.
+  intros. unfold Val.divu, Val.modu. destruct v1; auto. destruct v2; auto.
+  destruct (Int.eq i0 Int.zero); auto. 
 Qed.
 
 (** Smart constructor for [shrx] *)
@@ -1557,32 +1613,24 @@ Proof.
   apply SAME. eapply mk_intconv_correct; eauto.
 (* div *)
   apply SAME.
-  set (dsem := fun v1 v2 => Val.maketotal (Val.divs v1 v2)).
-  set (msem := fun v1 v2 => Val.maketotal (Val.mods v1 v2)).
-  replace v with (dsem (rs x0) (rs x1)).
-  eapply mk_div_correct with (dsem := dsem) (msem := msem); eauto.
-  unfold dsem; rewrite H0; auto.
+  specialize (divs_mods_exist (rs x0) (rs x1)). rewrite H0. 
+  destruct (Val.mods (rs x0) (rs x1)) as [vr|]_eqn; intros; try contradiction.
+  eapply mk_div_correct with (dsem := Val.divs) (msem := Val.mods); eauto.
 (* divu *)
   apply SAME.
-  set (dsem := fun v1 v2 => Val.maketotal (Val.divu v1 v2)).
-  set (msem := fun v1 v2 => Val.maketotal (Val.modu v1 v2)).
-  replace v with (dsem (rs x0) (rs x1)).
-  eapply mk_div_correct with (dsem := dsem) (msem := msem); eauto.
-  unfold dsem; rewrite H0; auto.
+  specialize (divu_modu_exist (rs x0) (rs x1)). rewrite H0. 
+  destruct (Val.modu (rs x0) (rs x1)) as [vr|]_eqn; intros; try contradiction.
+  eapply mk_div_correct with (dsem := Val.divu) (msem := Val.modu); eauto.
 (* mod *)
   apply SAME.
-  set (dsem := fun v1 v2 => Val.maketotal (Val.divs v1 v2)).
-  set (msem := fun v1 v2 => Val.maketotal (Val.mods v1 v2)).
-  replace v with (msem (rs x0) (rs x1)).
-  eapply mk_mod_correct with (dsem := dsem) (msem := msem); eauto.
-  unfold msem; rewrite H0; auto.
+  specialize (divs_mods_exist (rs x0) (rs x1)). rewrite H0. 
+  destruct (Val.divs (rs x0) (rs x1)) as [vq|]_eqn; intros; try contradiction.
+  eapply mk_mod_correct with (dsem := Val.divs) (msem := Val.mods); eauto.
 (* modu *)
   apply SAME.
-  set (dsem := fun v1 v2 => Val.maketotal (Val.divu v1 v2)).
-  set (msem := fun v1 v2 => Val.maketotal (Val.modu v1 v2)).
-  replace v with (msem (rs x0) (rs x1)).
-  eapply mk_mod_correct with (dsem := dsem) (msem := msem); eauto.
-  unfold msem; rewrite H0; auto.
+  specialize (divu_modu_exist (rs x0) (rs x1)). rewrite H0. 
+  destruct (Val.divu (rs x0) (rs x1)) as [vq|]_eqn; intros; try contradiction.
+  eapply mk_mod_correct with (dsem := Val.divu) (msem := Val.modu); eauto.
 (* shl *)
   apply SAME. eapply mk_shift_correct; eauto. 
 (* shr *)
