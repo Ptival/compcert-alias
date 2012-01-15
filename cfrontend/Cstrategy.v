@@ -108,7 +108,7 @@ with eval_simple_rvalue: expr -> val -> Prop :=
   | esr_rvalof: forall b ofs l ty v,
       eval_simple_lvalue l b ofs ->
       ty = typeof l ->
-      load_value_of_type ty m b ofs = Some v ->
+      deref_loc ty m b ofs E0 v ->
       eval_simple_rvalue (Evalof l ty) v
   | esr_addrof: forall b ofs l ty,
       eval_simple_lvalue l b ofs ->
@@ -222,6 +222,14 @@ Inductive estep: state -> trace -> state -> Prop :=
       estep (ExprState f r k e m)
          E0 (ExprState f (Eval v ty) k e m)
 
+  | step_rvalof_volatile: forall f C l ty k e m b ofs t v,
+      leftcontext RV RV C ->
+      eval_simple_lvalue e m l b ofs ->
+      deref_loc ty m b ofs t v -> t <> E0 ->
+      ty = typeof l ->
+      estep (ExprState f (C (Evalof l ty)) k e m)
+          t (ExprState f (C (Eval v ty)) k e m)
+
   | step_condition: forall f C r1 r2 r3 ty k e m v b,
       leftcontext RV RV C ->
       eval_simple_rvalue e m r1 v ->
@@ -229,38 +237,73 @@ Inductive estep: state -> trace -> state -> Prop :=
       estep (ExprState f (C (Econdition r1 r2 r3 ty)) k e m)
          E0 (ExprState f (C (Eparen (if b then r2 else r3) ty)) k e m)
 
-  | step_assign: forall f C l r ty k e m b ofs v v' m',
+  | step_assign: forall f C l r ty k e m b ofs v v' t m',
       leftcontext RV RV C ->
       eval_simple_lvalue e m l b ofs ->
       eval_simple_rvalue e m r v ->
       sem_cast v (typeof r) (typeof l) = Some v' ->
-      store_value_of_type (typeof l) m b ofs v' = Some m' ->
+      assign_loc (typeof l) m b ofs v' t m' ->
       ty = typeof l ->
       estep (ExprState f (C (Eassign l r ty)) k e m)
-         E0 (ExprState f (C (Eval v' ty)) k e m')
+          t (ExprState f (C (Eval v' ty)) k e m')
 
-  | step_assignop: forall f C op l r tyres ty k e m b ofs v1 v2 v3 v4 m',
+  | step_assignop: forall f C op l r tyres ty k e m b ofs v1 v2 v3 v4 t1 t2 m' t,
       leftcontext RV RV C ->
       eval_simple_lvalue e m l b ofs ->
-      load_value_of_type (typeof l) m b ofs = Some v1 ->
+      deref_loc (typeof l) m b ofs t1 v1 ->
       eval_simple_rvalue e m r v2 ->
       sem_binary_operation op v1 (typeof l) v2 (typeof r) m = Some v3 ->
       sem_cast v3 tyres (typeof l) = Some v4 ->
-      store_value_of_type (typeof l) m b ofs v4 = Some m' ->
+      assign_loc (typeof l) m b ofs v4 t2 m' ->
       ty = typeof l ->
+      t = t1 ** t2 ->
       estep (ExprState f (C (Eassignop op l r tyres ty)) k e m)
-         E0 (ExprState f (C (Eval v4 ty)) k e m')
+          t (ExprState f (C (Eval v4 ty)) k e m')
 
-  | step_postincr: forall f C id l ty k e m b ofs v1 v2 v3 m',
+  | step_assignop_stuck: forall f C op l r tyres ty k e m b ofs v1 v2 v3 t,
       leftcontext RV RV C ->
       eval_simple_lvalue e m l b ofs ->
-      load_value_of_type ty m b ofs = Some v1 ->
+      deref_loc (typeof l) m b ofs t v1 ->
+      eval_simple_rvalue e m r v2 ->
+      sem_binary_operation op v1 (typeof l) v2 (typeof r) m = Some v3 ->
+(*
+      match sem_cast v3 tyres (typeof l) with
+      | None => True
+      | Some v4 => forall t2 m', ~(assign_loc (typeof l) m b ofs v4 t2 m')
+      end ->
+*)
+      ~(imm_safe ge e RV (Eassign (Eloc b ofs ty) (Eval v3 tyres) ty) m) -> 
+      ty = typeof l ->
+      estep (ExprState f (C (Eassignop op l r tyres ty)) k e m)
+          t Stuckstate
+
+  | step_postincr: forall f C id l ty k e m b ofs v1 v2 v3 t1 t2 m' t,
+      leftcontext RV RV C ->
+      eval_simple_lvalue e m l b ofs ->
+      deref_loc ty m b ofs t1 v1 ->
       sem_incrdecr id v1 ty = Some v2 ->
       sem_cast v2 (typeconv ty) ty = Some v3 ->
-      store_value_of_type ty m b ofs v3 = Some m' ->
+      assign_loc ty m b ofs v3 t2 m' ->
+      ty = typeof l ->
+      t = t1 ** t2 ->
+      estep (ExprState f (C (Epostincr id l ty)) k e m)
+          t (ExprState f (C (Eval v1 ty)) k e m')
+
+  | step_postincr_stuck: forall f C id l ty k e m b ofs v1 v2 t,
+      leftcontext RV RV C ->
+      eval_simple_lvalue e m l b ofs ->
+      deref_loc ty m b ofs t v1 ->
+      sem_incrdecr id v1 ty = Some v2 ->
+(*
+      match sem_cast v2 (typeconv ty) ty with
+      | None => True
+      | Some v3 => forall t2 m', ~(assign_loc (typeof l) m b ofs v3 t2 m')
+      end ->
+*)
+      ~(imm_safe ge e RV (Eassign (Eloc b ofs ty) (Eval v2 (typeconv ty)) ty) m) ->
       ty = typeof l ->
       estep (ExprState f (C (Epostincr id l ty)) k e m)
-         E0 (ExprState f (C (Eval v1 ty)) k e m')
+          t Stuckstate
 
   | step_comma: forall f C r1 r2 ty k e m v,
       leftcontext RV RV C ->
@@ -326,52 +369,37 @@ Proof.
 Qed.
 
 Lemma star_safe:
-  forall s1 s2 s3,
-  safe s1 -> star Csem.step ge s1 E0 s2 -> (safe s2 -> star Csem.step ge s2 E0 s3) ->
-  star Csem.step ge s1 E0 s3.
+  forall s1 s2 t s3,
+  safe s1 -> star Csem.step ge s1 E0 s2 -> (safe s2 -> star Csem.step ge s2 t s3) ->
+  star Csem.step ge s1 t s3.
 Proof.
   intros. eapply star_trans; eauto. apply H1. eapply safe_steps; eauto. auto.
 Qed.
 
 Lemma plus_safe:
-  forall s1 s2 s3,
-  safe s1 -> star Csem.step ge s1 E0 s2 -> (safe s2 -> plus Csem.step ge s2 E0 s3) ->
-  plus Csem.step ge s1 E0 s3.
+  forall s1 s2 t s3,
+  safe s1 -> star Csem.step ge s1 E0 s2 -> (safe s2 -> plus Csem.step ge s2 t s3) ->
+  plus Csem.step ge s1 t s3.
 Proof.
   intros. eapply star_plus_trans; eauto. apply H1. eapply safe_steps; eauto. auto.
 Qed.
 
-Remark not_stuck_val:
-  forall e v ty m,
-  not_stuck ge e (Eval v ty) m.
+Require Import Classical. 
+
+Lemma safe_imm_safe:
+  forall f C a k e m K,
+  safe (ExprState f (C a) k e m) ->
+  context K RV C ->
+  imm_safe ge e K a m.
 Proof.
-  intros; red; intros. inv H; try congruence. subst e'. constructor.
+  intros. destruct (classic (imm_safe ge e K a m)); auto.
+  destruct (H Stuckstate). 
+  apply star_one. left. econstructor; eauto.
+  destruct H2 as [r F]. inv F. 
+  destruct H2 as [t [s' S]]. inv S. inv H2. inv H2. 
 Qed.
 
-Lemma safe_not_stuck:
-  forall f a k e m,
-  safe (ExprState f a k e m) ->
-  not_stuck ge e a m.
-Proof.
-  intros. exploit H. apply star_refl. intros [[r FIN] | [t [s' STEP]]].
-  inv FIN.
-  inv STEP. 
-    inv H0; auto; apply not_stuck_val.
-    inv H0; apply not_stuck_val.
-Qed.
-
-Hint Resolve safe_not_stuck.
-
-Lemma safe_not_imm_stuck:
-  forall k C f a K e m,
-  safe (ExprState f (C a) K e m) ->
-  context k RV C ->
-  not_imm_stuck ge e k a m.
-Proof.
-  intros. exploit safe_not_stuck; eauto.
-Qed.
-
-(** Simple, non-stuck expressions are well-formed with respect to
+(** Simple, safe expressions are well-formed with respect to
     l-values and r-values. *)
 
 Definition expr_kind (a: expr) : kind :=
@@ -390,7 +418,7 @@ Proof.
 Qed.
 
 Lemma rred_kind:
-  forall a m a' m', rred a m a' m' -> expr_kind a = RV.
+  forall a m t a' m', rred a m t a' m' -> expr_kind a = RV.
 Proof.
   induction 1; auto.
 Qed.
@@ -407,8 +435,8 @@ Proof.
   induction 1; intros; simpl; auto.
 Qed.
 
-Lemma not_imm_stuck_kind:
-  forall e k a m, not_imm_stuck ge e k a m -> expr_kind a = k.
+Lemma imm_safe_kind:
+  forall e k a m, imm_safe ge e k a m -> expr_kind a = k.
 Proof.
   induction 1.
   auto.
@@ -424,10 +452,10 @@ Lemma safe_expr_kind:
   safe (ExprState f (C a) k e m) ->
   expr_kind a = from.
 Proof.
-  intros. eapply not_imm_stuck_kind. eapply safe_not_imm_stuck; eauto.
+  intros. eapply imm_safe_kind. eapply safe_imm_safe; eauto.
 Qed.
 
-(** Painful inversion lemmas on particular states that are not stuck. *)
+(** Painful inversion lemmas on particular states that are safe. *)
 
 Section INVERSION_LEMMAS.
 
@@ -457,7 +485,7 @@ Definition invert_expr_prop (a: expr) (m: mem) : Prop :=
       end
   | Eval v ty => False
   | Evalof (Eloc b ofs ty') ty =>
-      ty' = ty /\ exists v, load_value_of_type ty m b ofs = Some v
+      ty' = ty /\ exists t, exists v, deref_loc ty m b ofs t v
   | Eunop op (Eval v1 ty1) ty =>
       exists v, sem_unary_operation op v1 ty1 = Some v
   | Ebinop op (Eval v1 ty1) (Eval v2 ty2) ty =>
@@ -467,22 +495,18 @@ Definition invert_expr_prop (a: expr) (m: mem) : Prop :=
   | Econdition (Eval v1 ty1) r1 r2 ty =>
       exists b, bool_val v1 ty1 = Some b
   | Eassign (Eloc b ofs ty1) (Eval v2 ty2) ty =>
-      exists v, exists m',
-      ty = ty1 /\ sem_cast v2 ty2 ty1 = Some v /\ store_value_of_type ty1 m b ofs v = Some m'
+      exists v, exists m', exists t,
+      ty = ty1 /\ sem_cast v2 ty2 ty1 = Some v /\ assign_loc ty1 m b ofs v t m'
   | Eassignop op (Eloc b ofs ty1) (Eval v2 ty2) tyres ty =>
-      exists v1, exists v, exists v', exists m',
-      ty = ty1 
-      /\ load_value_of_type ty1 m b ofs = Some v1
-      /\ sem_binary_operation op v1 ty1 v2 ty2 m = Some v
-      /\ sem_cast v tyres ty1 = Some v'
-      /\ store_value_of_type ty1 m b ofs v' = Some m'
-  | Epostincr id (Eloc b ofs ty1) ty =>
-      exists v1, exists v2, exists v3, exists m',
+      exists t, exists v1, exists v,
       ty = ty1
-      /\ load_value_of_type ty m b ofs = Some v1
+      /\ deref_loc ty1 m b ofs t v1
+      /\ sem_binary_operation op v1 ty1 v2 ty2 m = Some v
+  | Epostincr id (Eloc b ofs ty1) ty =>
+      exists t, exists v1, exists v2,
+      ty = ty1
+      /\ deref_loc ty m b ofs t v1
       /\ sem_incrdecr id v1 ty = Some v2
-      /\ sem_cast v2 (typeconv ty) ty = Some v3
-      /\ store_value_of_type ty m b ofs v3 = Some m'
   | Ecomma (Eval v ty1) r2 ty =>
       typeof r2 = ty
   | Eparen (Eval v1 ty1) ty =>
@@ -508,17 +532,17 @@ Proof.
 Qed.
 
 Lemma rred_invert:
-  forall r m r' m', rred r m r' m' -> invert_expr_prop r m.
+  forall r m t r' m', rred r m t r' m' -> invert_expr_prop r m.
 Proof.
   induction 1; red; auto.
-  split; auto; exists v; auto.
+  split; auto; exists t; exists v; auto.
   exists v; auto.
   exists v; auto.
   exists v; auto.
   exists b; auto.
-  exists v; exists m'; auto.
-  exists v1; exists v; exists v'; exists m'; auto.
-  exists v1; exists v2; exists v3; exists m'; auto.
+  exists v; exists m'; exists t; auto.
+  exists t; exists v1; exists v; auto.
+  exists t; exists v1; exists v2; auto.
   exists v; auto.
 Qed.
 
@@ -569,9 +593,9 @@ Proof.
   red; intros. destruct e1; auto. elim (H0 a m); auto. 
 Qed.
 
-Lemma not_imm_stuck_inv:
+Lemma imm_safe_inv:
   forall k a m,
-  not_imm_stuck ge e k a m ->
+  imm_safe ge e k a m ->
   match a with
   | Eloc _ _ _ => True
   | Eval _ _ => True
@@ -603,7 +627,7 @@ Lemma safe_inv:
   | _ => invert_expr_prop a m
   end.
 Proof.
-  intros. eapply not_imm_stuck_inv; eauto. eapply safe_not_imm_stuck; eauto.
+  intros. eapply imm_safe_inv; eauto. eapply safe_imm_safe; eauto.
 Qed.
 
 End INVERSION_LEMMAS.
@@ -619,16 +643,16 @@ Variable m: mem.
 
 Lemma eval_simple_steps:
    (forall a v, eval_simple_rvalue e m a v ->
-    forall C, context RV RV C -> safe (ExprState f (C a) k e m) ->
+    forall C, context RV RV C ->
     star Csem.step ge (ExprState f (C a) k e m)
                   E0 (ExprState f (C (Eval v (typeof a))) k e m))
 /\ (forall a b ofs, eval_simple_lvalue e m a b ofs ->
-    forall C, context LV RV C -> safe (ExprState f (C a) k e m) ->
+    forall C, context LV RV C ->
     star Csem.step ge (ExprState f (C a) k e m)
                   E0 (ExprState f (C (Eloc b ofs (typeof a))) k e m)).
 Proof.
 
-Ltac Steps REC C' := eapply star_safe; eauto; [apply (REC C'); eauto | intros].
+Ltac Steps REC C' := eapply star_trans; [apply (REC C'); eauto | idtac | simpl; reflexivity].
 Ltac FinishR := apply star_one; left; apply step_rred; eauto; simpl; try (econstructor; eauto; fail).
 Ltac FinishL := apply star_one; left; apply step_lred; eauto; simpl; try (econstructor; eauto; fail).
 
@@ -665,14 +689,14 @@ Qed.
 
 Lemma eval_simple_rvalue_steps:
   forall a v, eval_simple_rvalue e m a v ->
-  forall C, context RV RV C -> safe (ExprState f (C a) k e m) ->
+  forall C, context RV RV C ->
   star Csem.step ge (ExprState f (C a) k e m)
                 E0 (ExprState f (C (Eval v (typeof a))) k e m).
 Proof (proj1 eval_simple_steps).
 
 Lemma eval_simple_lvalue_steps:
   forall a b ofs, eval_simple_lvalue e m a b ofs ->
-  forall C, context LV RV C -> safe (ExprState f (C a) k e m) ->
+  forall C, context LV RV C ->
   star Csem.step ge (ExprState f (C a) k e m)
                 E0 (ExprState f (C (Eloc b ofs (typeof a))) k e m).
 Proof (proj2 eval_simple_steps).
@@ -733,7 +757,8 @@ Ltac StepR REC C' a :=
   exists b; exists ofs; econstructor; eauto.
 (* valof *)
   StepL IHa (fun x => C(Evalof x ty)) a.
-  exploit safe_inv. eexact SAFE0. eauto. simpl. intros [TY [v LOAD]]. 
+  exploit safe_inv. eexact SAFE0. eauto. simpl. intros [TY [t [v LOAD]]].
+  assert (t = E0) by admit. subst t.
   exists v; econstructor; eauto.
 (* deref *)
   StepR IHa (fun x => C(Ederef x ty)) a.
@@ -875,7 +900,7 @@ Hint Resolve contextlist'_head contextlist'_tail.
 
 Lemma eval_simple_list_steps:
   forall rl vl, eval_simple_list' rl vl ->
-  forall C, contextlist' C -> safe (ExprState f (C rl) k e m) ->
+  forall C, contextlist' C ->
   star Csem.step ge (ExprState f (C rl) k e m)
                 E0 (ExprState f (C (rval_list vl rl)) k e m).
 Proof.
@@ -883,9 +908,10 @@ Proof.
 (* nil *)
   apply star_refl.
 (* cons *)
-  eapply star_safe. eauto. 
+  eapply star_trans.
   eapply eval_simple_rvalue_steps with (C := fun x => C(Econs x rl)); eauto.
-  intros. apply IHeval_simple_list' with (C := fun x => C(Econs (Eval v (typeof r)) x)); auto.
+  apply IHeval_simple_list' with (C := fun x => C(Econs (Eval v (typeof r)) x)); auto.
+  auto.
 Qed.
 
 Lemma simple_list_can_eval:
@@ -1020,95 +1046,136 @@ End DECOMPOSITION.
 
 Lemma estep_simulation:
   forall S t S',
-  estep S t S' -> safe S -> plus Csem.step ge S t S'.
+  estep S t S' -> plus Csem.step ge S t S'.
 Proof.
   intros. inv H. 
 (* simple *)
   exploit eval_simple_rvalue_steps; eauto. simpl; intros STEPS.
-  exploit star_inv; eauto. intros [[EQ1 EQ2] | A]; auto. 
-  inversion EQ1. rewrite <- H3 in H2; contradiction.
+  exploit star_inv; eauto. intros [[EQ1 EQ2] | A]; eauto. 
+  inversion EQ1. rewrite <- H2 in H1; contradiction.
+(* valof volatile *)
+  eapply plus_right. 
+  eapply eval_simple_lvalue_steps with (C := fun x => C(Evalof x (typeof l))); eauto.
+  left. apply step_rred; eauto. econstructor; eauto. auto.
 (* condition *)
-  eapply plus_safe; eauto.
+  eapply plus_right.
   eapply eval_simple_rvalue_steps with (C := fun x => C(Econdition x r2 r3 ty)); eauto.
-  intros. apply plus_one. left; apply step_rred; eauto. constructor; auto. 
+  left; apply step_rred; eauto. constructor; auto. auto. 
 (* assign *)
-  eapply plus_safe; eauto.
+  eapply star_plus_trans.
   eapply eval_simple_lvalue_steps with (C := fun x => C(Eassign x r (typeof l))); eauto.
-  intros. eapply plus_safe; eauto.
+  eapply plus_right.
   eapply eval_simple_rvalue_steps with (C := fun x => C(Eassign (Eloc b ofs (typeof l)) x (typeof l))); eauto.
-  intros. apply plus_one; left; apply step_rred; eauto. econstructor; eauto.
+  left; apply step_rred; eauto. econstructor; eauto.
+  reflexivity. auto. 
 (* assignop *) 
-  eapply plus_safe; eauto.
+  eapply star_plus_trans.
   eapply eval_simple_lvalue_steps with (C := fun x => C(Eassignop op x r tyres (typeof l))); eauto.
-  intros. eapply plus_safe; eauto.
+  eapply star_plus_trans.
   eapply eval_simple_rvalue_steps with (C := fun x => C(Eassignop op (Eloc b ofs (typeof l)) x tyres (typeof l))); eauto.
-  intros. apply plus_one; left; apply step_rred; eauto. econstructor; eauto.
+  eapply plus_left.
+  left; apply step_rred; auto. econstructor; eauto.
+  apply star_one. 
+  left; apply step_rred; auto. econstructor; eauto. 
+  reflexivity. reflexivity. traceEq.
+(* assignop stuck *)
+  eapply star_plus_trans.
+  eapply eval_simple_lvalue_steps with (C := fun x => C(Eassignop op x r tyres (typeof l))); eauto.
+  eapply star_plus_trans.
+  eapply eval_simple_rvalue_steps with (C := fun x => C(Eassignop op (Eloc b ofs (typeof l)) x tyres (typeof l))); eauto.
+  eapply plus_left.
+  left; apply step_rred; auto. econstructor; eauto.
+  apply star_one. 
+  left; eapply step_stuck; eauto. 
+  reflexivity. reflexivity. traceEq.
 (* postincr *)
-  eapply plus_safe; eauto.
+  eapply star_plus_trans.
   eapply eval_simple_lvalue_steps with (C := fun x => C(Epostincr id x (typeof l))); eauto.
-  intros. apply plus_one; left; apply step_rred; eauto. econstructor; eauto.
+  eapply plus_left.
+  left; apply step_rred; auto. econstructor; eauto.
+  eapply star_left.
+  left; apply step_rred with (C := fun x => C (Ecomma x (Eval v1 (typeof l)) (typeof l))); eauto.
+  econstructor; eauto.
+  apply star_one.
+  left; apply step_rred; auto. econstructor; eauto. 
+  reflexivity. reflexivity. traceEq.
+(* postincr stuck *)
+  eapply star_plus_trans.
+  eapply eval_simple_lvalue_steps with (C := fun x => C(Epostincr id x (typeof l))); eauto.
+  eapply plus_left.
+  left; apply step_rred; auto. econstructor; eauto.
+  apply star_one.
+  left; eapply step_stuck with (C := fun x => C (Ecomma x (Eval v1 (typeof l)) (typeof l))); eauto.
+  reflexivity. traceEq.
 (* comma *)
-  eapply plus_safe; eauto.
+  eapply plus_right.
   eapply eval_simple_rvalue_steps with (C := fun x => C(Ecomma x r2 (typeof r2))); eauto.
-  intros. apply plus_one; left; apply step_rred; eauto. econstructor; eauto.
+  left; apply step_rred; eauto. econstructor; eauto. auto.
 (* paren *)
-  eapply plus_safe; eauto.
+  eapply plus_right; eauto.
   eapply eval_simple_rvalue_steps with (C := fun x => C(Eparen x ty)); eauto.
-  intros. apply plus_one; left; apply step_rred; eauto. econstructor; eauto.
+  left; apply step_rred; eauto. econstructor; eauto. auto.
 (* call *)
   exploit eval_simple_list_implies; eauto. intros [vl' [A B]].
-  eapply plus_safe; eauto.
+  eapply star_plus_trans. 
   eapply eval_simple_rvalue_steps with (C := fun x => C(Ecall x rargs ty)); eauto.
-  intros. eapply plus_safe; eauto. 
+  eapply plus_right.
   eapply eval_simple_list_steps with (C := fun x => C(Ecall (Eval vf (typeof rf)) x ty)); eauto.
   eapply contextlist'_intro with (rl0 := Enil); auto.
-  intros. apply plus_one; left; apply Csem.step_call; eauto.
-  econstructor; eauto.
+  left; apply Csem.step_call; eauto. econstructor; eauto.
+  traceEq. auto.
 Qed.
 
 Lemma can_estep:
   forall f a k e m,
   safe (ExprState f a k e m) ->
   match a with Eval _ _ => False | _ => True end ->
-  exists S, estep (ExprState f a k e m) E0 S.
+  exists t, exists S, estep (ExprState f a k e m) t S.
 Proof.
   intros. destruct (decompose_topexpr f k e m a H) as [A | [C [b [P [Q R]]]]].
 (* simple expr *)
   exploit (simple_can_eval f k e m a RV (fun x => x)); auto. intros [v P].
-  econstructor; eapply step_expr; eauto. 
+  econstructor; econstructor; eapply step_expr; eauto. 
 (* side effect *)
   clear H0. subst a. red in Q. destruct b; try contradiction. 
 (* condition *)
   exploit (simple_can_eval_rval f k e m b1 (fun x => C(Econdition x b2 b3 ty))); eauto.
   intros [v1 [E1 S1]].
   exploit safe_inv. eexact S1. eauto. simpl. intros [b BV].
-  econstructor. eapply step_condition; eauto. 
+  econstructor; econstructor. eapply step_condition; eauto. 
 (* assign *)
   destruct Q.
   exploit (simple_can_eval_lval f k e m b1 (fun x => C(Eassign x b2 ty))); eauto.
   intros [b [ofs [E1 S1]]].
   exploit (simple_can_eval_rval f k e m b2 (fun x => C(Eassign (Eloc b ofs (typeof b1)) x ty))); eauto.
   intros [v [E2 S2]].
-  exploit safe_inv. eexact S2. eauto. simpl. intros [v' [m' [A [B D]]]].
-  econstructor; eapply step_assign; eauto. 
+  exploit safe_inv. eexact S2. eauto. simpl. intros [v' [m' [t [A [B D]]]]].
+  econstructor; econstructor; eapply step_assign; eauto. 
 (* assignop *)
   destruct Q.
   exploit (simple_can_eval_lval f k e m b1 (fun x => C(Eassignop op x b2 tyres ty))); eauto.
   intros [b [ofs [E1 S1]]].
   exploit (simple_can_eval_rval f k e m b2 (fun x => C(Eassignop op (Eloc b ofs (typeof b1)) x tyres ty))); eauto.
   intros [v [E2 S2]].
-  exploit safe_inv. eexact S2. eauto. simpl. intros [v1 [v2 [v3 [m' [A [B [D [E F]]]]]]]].
-  econstructor; eapply step_assignop; eauto.
+  exploit safe_inv. eexact S2. eauto. simpl. intros [t1 [v1 [v2 [A [B D]]]]].
+  destruct (classic (imm_safe ge e RV (Eassign (Eloc b ofs ty) (Eval v2 tyres) ty) m)).
+  rewrite A in H2.
+  exploit imm_safe_inv; eauto. simpl. intros [v3 [m' [t2 [L [M N]]]]].
+  econstructor; econstructor; eapply step_assignop; eauto.
+  econstructor; econstructor; eapply step_assignop_stuck; eauto. 
 (* postincr *)
   exploit (simple_can_eval_lval f k e m b (fun x => C(Epostincr id x ty))); eauto.
   intros [b1 [ofs [E1 S1]]].
-  exploit safe_inv. eexact S1. eauto. simpl. intros [v1 [v2 [v3 [m' [A [B [D [E F]]]]]]]].
-  econstructor; eapply step_postincr; eauto.
+  exploit safe_inv. eexact S1. eauto. simpl. intros [t [v1 [v2 [A [B D]]]]].
+  destruct (classic (imm_safe ge e RV (Eassign (Eloc b1 ofs ty) (Eval v2 (typeconv ty)) ty) m)).
+  exploit imm_safe_inv; eauto. simpl. intros [v3 [m' [t2 [L [M N]]]]].
+  econstructor; econstructor; eapply step_postincr; eauto.
+  econstructor; econstructor; eapply step_postincr_stuck; eauto. 
 (* comma *)
   exploit (simple_can_eval_rval f k e m b1 (fun x => C(Ecomma x b2 ty))); eauto.
   intros [v1 [E1 S1]].
   exploit safe_inv. eexact S1. eauto. simpl. intros EQ.
-  econstructor; eapply step_comma; eauto.
+  econstructor; econstructor; eapply step_comma; eauto.
 (* call *)
   destruct Q.
   exploit (simple_can_eval_rval f k e m b (fun x => C(Ecall x rargs ty))); eauto.
@@ -1122,19 +1189,19 @@ Proof.
   apply (eval_simple_list_steps f k e m rargs vl E2 C'); auto.
   simpl. intros X. exploit X. eapply rval_list_all_values. 
   intros [tyargs [tyres [fd [vargs [P [Q [U V]]]]]]].
-  econstructor; eapply step_call; eauto. eapply can_eval_simple_list; eauto. 
+  econstructor; econstructor; eapply step_call; eauto. eapply can_eval_simple_list; eauto. 
 (* paren *)
   exploit (simple_can_eval_rval f k e m b (fun x => C(Eparen x ty))); eauto.
   intros [v1 [E1 S1]].
   exploit safe_inv. eexact S1. eauto. simpl. intros [v CAST].
-  econstructor; eapply step_paren; eauto.
+  econstructor; econstructor; eapply step_paren; eauto.
 Qed.
 
 (** Simulation for all states *)
 
 Theorem step_simulation:
   forall S1 t S2,
-  step S1 t S2 -> safe S1 -> plus Csem.step ge S1 t S2.
+  step S1 t S2 -> plus Csem.step ge S1 t S2.
 Proof.
   intros. inv H.
   apply estep_simulation; auto.
@@ -1150,16 +1217,19 @@ Proof.
   auto.
   right. destruct STEP.
   (* 2. Expression step. *)
-  assert (exists S', estep S E0 S').
+  assert (exists t, exists S', estep S t S').
     inv H0.
     (* lred *)
-    eapply can_estep; eauto. inv H3; auto. 
+    eapply can_estep; eauto. inv H2; auto. 
     (* rred *)
-    eapply can_estep; eauto. inv H3; auto. inv H1; auto. 
+    eapply can_estep; eauto. inv H2; auto. inv H1; auto. 
     (* callred *)
-    eapply can_estep; eauto. inv H3; auto. inv H1; auto.
-  destruct H1 as [S'' ESTEP].
-  exists E0; exists S''; left; auto.
+    eapply can_estep; eauto. inv H2; auto. inv H1; auto.
+    (* stuck *)
+    exploit (H Stuckstate). apply star_one. left. econstructor; eauto.
+    intros [[r F] | [t [S' R]]]. inv F. inv R. inv H0. inv H0.
+  destruct H1 as [t' [S'' ESTEP]].
+  exists t'; exists S''; left; auto.
   (* 3. Other step. *)
   exists t; exists S'; right; auto.
 Qed.
@@ -1172,7 +1242,7 @@ Definition semantics (p: program) :=
   Semantics step (initial_state p) final_state (Genv.globalenv p).
 
 (** This semantics is receptive to changes in events. *)
-
+(* FIXME 
 Lemma semantics_receptive: 
   forall p, receptive (semantics p).
 Proof.
@@ -1190,6 +1260,7 @@ Proof.
   inv H0; simpl; omega.
   inv H0; simpl; try omega. eapply external_call_trace_length; eauto.
 Qed.
+*)
 
 (** The main simulation result. *)
 
@@ -1201,7 +1272,8 @@ Proof.
 (* symbols *)
   auto.
 (* trace length *)
-  intros. eapply sr_traces. apply semantics_receptive. simpl. eauto.
+  admit.  (*FIXME*)
+  (* intros. eapply sr_traces. apply semantics_receptive. simpl. eauto. *)
 (* initial states exist *)
   intros. exists s1; auto.
 (* initial states match *)
@@ -1215,7 +1287,8 @@ Proof.
 Qed.
 
 (** * A big-step semantics implementing the reduction strategy. *)
-
+(** TO BE UPDATED *)
+(*
 Section BIGSTEP.
 
 Variable ge: genv.
@@ -2543,3 +2616,4 @@ Proof.
   apply lt_wf.
   eapply evalinf_funcall_steps; eauto.
 Qed.
+*)

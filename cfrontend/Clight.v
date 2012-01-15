@@ -179,6 +179,30 @@ Definition empty_env: env := (PTree.empty (block * type)).
 
 Definition temp_env := PTree.t val.
 
+(** [load_value_of_type ty m b ofs] computes the value of a datum
+  of type [ty] residing in memory [m] at block [b], offset [ofs].
+  If the type [ty] indicates an access by value, the corresponding
+  memory load is performed.  If the type [ty] indicates an access by
+  reference, the pointer [Vptr b ofs] is returned. *)
+
+Definition load_value_of_type (ty: type) (m: mem) (b: block) (ofs: int) : option val :=
+  match access_mode ty with
+  | By_value chunk => Mem.loadv chunk m (Vptr b ofs)
+  | By_reference => Some (Vptr b ofs)
+  | By_nothing => None
+  end.
+
+(** Symmetrically, [store_value_of_type ty m b ofs v] returns the
+  memory state after storing the value [v] in the datum
+  of type [ty] residing in memory [m] at block [b], offset [ofs].
+  This is allowed only if [ty] indicates an access by value. *)
+
+Definition store_value_of_type (ty_dest: type) (m: mem) (loc: block) (ofs: int) (v: val) : option mem :=
+  match access_mode ty_dest with
+  | By_value chunk => Mem.storev chunk m (Vptr loc ofs) v
+  | By_reference => None
+  | By_nothing => None
+  end.
 
 (** Selection of the appropriate case of a [switch], given the value [n]
   of the selector expression. *)

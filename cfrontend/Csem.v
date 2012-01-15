@@ -492,30 +492,36 @@ Definition env := PTree.t (block * type). (* map variable -> location & type *)
 
 Definition empty_env: env := (PTree.empty (block * type)).
 
-(** [load_value_of_type ty m b ofs] computes the value of a datum
+(** [deref_loc ty m b ofs t v] computes the value of a datum
   of type [ty] residing in memory [m] at block [b], offset [ofs].
   If the type [ty] indicates an access by value, the corresponding
   memory load is performed.  If the type [ty] indicates an access by
-  reference, the pointer [Vptr b ofs] is returned. *)
+  reference, the pointer [Vptr b ofs] is returned.  [v] is the value
+  returned, and [t] the trace of observables (nonempty if this is
+  a volatile access). *)
 
-Definition load_value_of_type (ty: type) (m: mem) (b: block) (ofs: int) : option val :=
-  match access_mode ty with
-  | By_value chunk => Mem.loadv chunk m (Vptr b ofs)
-  | By_reference => Some (Vptr b ofs)
-  | By_nothing => None
-  end.
+Inductive deref_loc (ty: type) (m: mem) (b: block) (ofs: int) : trace -> val -> Prop :=
+  | deref_loc_by_value: forall chunk v,
+      access_mode ty = By_value chunk ->
+      Mem.loadv chunk m (Vptr b ofs) = Some v ->
+      deref_loc ty m b ofs E0 v
+  | deref_loc_by_reference:
+      access_mode ty = By_reference ->
+      deref_loc ty m b ofs E0 (Vptr b ofs).
 
-(** Symmetrically, [store_value_of_type ty m b ofs v] returns the
+(** Symmetrically, [assign_loc ty m b ofs v t m'] returns the
   memory state after storing the value [v] in the datum
   of type [ty] residing in memory [m] at block [b], offset [ofs].
-  This is allowed only if [ty] indicates an access by value. *)
+  This is allowed only if [ty] indicates an access by value.
+  [m'] is the updated memory state and [t] the trace of observables
+  (nonempty if this is a volatile store). *)
 
-Definition store_value_of_type (ty_dest: type) (m: mem) (loc: block) (ofs: int) (v: val) : option mem :=
-  match access_mode ty_dest with
-  | By_value chunk => Mem.storev chunk m (Vptr loc ofs) v
-  | By_reference => None
-  | By_nothing => None
-  end.
+Inductive assign_loc (ty: type) (m: mem) (b: block) (ofs: int) (v: val):
+                                                  trace -> mem -> Prop :=
+  | assign_loc_by_value: forall chunk m',
+      access_mode ty = By_value chunk ->
+      Mem.storev chunk m (Vptr b ofs) v = Some m' ->
+      assign_loc ty m b ofs v E0 m'.
 
 (** Allocation of function-local variables.
   [alloc_variables e1 m1 vars e2 m2] allocates one memory block
@@ -550,7 +556,7 @@ Inductive bind_parameters: env ->
   | bind_parameters_cons:
       forall e m id ty params v1 vl b m1 m2,
       PTree.get id e = Some(b, ty) ->
-      store_value_of_type ty m b Int.zero v1 = Some m1 ->
+      assign_loc ty m b Int.zero v1 E0 m1 ->
       bind_parameters e m1 params vl m2 ->
       bind_parameters e m ((id, ty) :: params) (v1 :: vl) m2.
 
@@ -634,60 +640,57 @@ Inductive lred: expr -> mem -> expr -> mem -> Prop :=
 
 (** Head reductions for r-values *)
 
-Inductive rred: expr -> mem -> expr -> mem -> Prop :=
-  | red_rvalof: forall b ofs ty m v,
-      load_value_of_type ty m b ofs = Some v ->
+Inductive rred: expr -> mem -> trace -> expr -> mem -> Prop :=
+  | red_rvalof: forall b ofs ty m t v,
+      deref_loc ty m b ofs t v ->
       rred (Evalof (Eloc b ofs ty) ty) m
-           (Eval v ty) m
+         t (Eval v ty) m
   | red_addrof: forall b ofs ty1 ty m,
       rred (Eaddrof (Eloc b ofs ty1) ty) m
-           (Eval (Vptr b ofs) ty) m
+        E0 (Eval (Vptr b ofs) ty) m
   | red_unop: forall op v1 ty1 ty m v,
       sem_unary_operation op v1 ty1 = Some v ->
       rred (Eunop op (Eval v1 ty1) ty) m
-           (Eval v ty) m
+        E0 (Eval v ty) m
   | red_binop: forall op v1 ty1 v2 ty2 ty m v,
       sem_binary_operation op v1 ty1 v2 ty2 m = Some v ->
       rred (Ebinop op (Eval v1 ty1) (Eval v2 ty2) ty) m
-           (Eval v ty) m
+        E0 (Eval v ty) m
   | red_cast: forall ty v1 ty1 m v,
       sem_cast v1 ty1 ty = Some v ->
       rred (Ecast (Eval v1 ty1) ty) m
-           (Eval v ty) m
+        E0 (Eval v ty) m
   | red_condition: forall v1 ty1 r1 r2 ty b m,
       bool_val v1 ty1 = Some b ->
       rred (Econdition (Eval v1 ty1) r1 r2 ty) m
-           (Eparen (if b then r1 else r2) ty) m
+        E0 (Eparen (if b then r1 else r2) ty) m
   | red_sizeof: forall ty1 ty m,
       rred (Esizeof ty1 ty) m
-           (Eval (Vint (Int.repr (sizeof ty1))) ty) m
-  | red_assign: forall b ofs ty1 v2 ty2 m v m',
+        E0 (Eval (Vint (Int.repr (sizeof ty1))) ty) m
+  | red_assign: forall b ofs ty1 v2 ty2 m v t m',
       sem_cast v2 ty2 ty1 = Some v ->
-      store_value_of_type ty1 m b ofs v = Some m' ->
+      assign_loc ty1 m b ofs v t m' ->
       rred (Eassign (Eloc b ofs ty1) (Eval v2 ty2) ty1) m
-           (Eval v ty1) m'
-  | red_assignop: forall op b ofs ty1 v2 ty2 tyres m v1 v v' m',
-      load_value_of_type ty1 m b ofs = Some v1 ->
+         t (Eval v ty1) m'
+  | red_assignop: forall op b ofs ty1 v2 ty2 tyres m t v1 v,
+      deref_loc ty1 m b ofs t v1 ->
       sem_binary_operation op v1 ty1 v2 ty2 m = Some v ->
-      sem_cast v tyres ty1 = Some v' ->
-      store_value_of_type ty1 m b ofs v' = Some m' ->
       rred (Eassignop op (Eloc b ofs ty1) (Eval v2 ty2) tyres ty1) m
-           (Eval v' ty1) m'
-  | red_postincr: forall id b ofs ty m v1 v2 v3 m',
-      load_value_of_type ty m b ofs = Some v1 ->
+         t (Eassign (Eloc b ofs ty1) (Eval v tyres) ty1) m
+  | red_postincr: forall id b ofs ty m t v1 v2,
+      deref_loc ty m b ofs t v1 ->
       sem_incrdecr id v1 ty = Some v2 ->
-      sem_cast v2 (typeconv ty) ty = Some v3 ->
-      store_value_of_type ty m b ofs v3 = Some m' ->
       rred (Epostincr id (Eloc b ofs ty) ty) m
-           (Eval v1 ty) m'
+         t (Ecomma (Eassign (Eloc b ofs ty) (Eval v2 (typeconv ty)) ty)
+                   (Eval v1 ty) ty) m
   | red_comma: forall v ty1 r2 ty m,
       typeof r2 = ty ->
       rred (Ecomma (Eval v ty1) r2 ty) m
-           r2 m
+        E0 r2 m
   | red_paren: forall v1 ty1 ty m v,
       sem_cast v1 ty1 ty = Some v ->
       rred (Eparen (Eval v1 ty1) ty) m
-           (Eval v ty) m.
+        E0 (Eval v ty) m.
 
 (** Head reduction for function calls.
     (More exactly, identification of function calls that can reduce.) *)
@@ -789,31 +792,31 @@ with contextlist: kind -> (expr -> exprlist) -> Prop :=
   is not immediately stuck if it is a value (of the appropriate kind)
   or it can reduce (at head or within). *)
 
-Inductive not_imm_stuck: kind -> expr -> mem -> Prop :=
-  | not_stuck_val: forall v ty m,
-      not_imm_stuck RV (Eval v ty) m
-  | not_stuck_loc: forall b ofs ty m,
-      not_imm_stuck LV (Eloc b ofs ty) m
-  | not_stuck_lred: forall to C e m e' m',
+Inductive imm_safe: kind -> expr -> mem -> Prop :=
+  | imm_safe_val: forall v ty m,
+      imm_safe RV (Eval v ty) m
+  | imm_safe_loc: forall b ofs ty m,
+      imm_safe LV (Eloc b ofs ty) m
+  | imm_safe_lred: forall to C e m e' m',
       lred e m e' m' ->
       context LV to C ->
-      not_imm_stuck to (C e) m
-  | not_stuck_rred: forall to C e m e' m',
-      rred e m e' m' ->
+      imm_safe to (C e) m
+  | imm_safe_rred: forall to C e m t e' m',
+      rred e m t e' m' ->
       context RV to C ->
-      not_imm_stuck to (C e) m
-  | not_stuck_callred: forall to C e m fd args ty,
+      imm_safe to (C e) m
+  | imm_safe_callred: forall to C e m fd args ty,
       callred e fd args ty ->
       context RV to C ->
-      not_imm_stuck to (C e) m.
+      imm_safe to (C e) m.
 
 (* An expression is not stuck if none of the potential redexes contained within
    is immediately stuck. *)
-
+(*
 Definition not_stuck (e: expr) (m: mem) : Prop :=
   forall k C e' , 
   context k RV C -> e = C e' -> not_imm_stuck k e' m.
-
+*)
 End EXPR. 
 
 (** ** Transition semantics. *)
@@ -899,7 +902,8 @@ Inductive state: Type :=
   | Returnstate                         (**r returning from a function *)
       (res: val)
       (k: cont)
-      (m: mem) : state.
+      (m: mem) : state
+  | Stuckstate.                         (**r undefined behavior occurred *)
                  
 (** Find the statement and manufacture the continuation 
   corresponding to a label. *)
@@ -959,24 +963,26 @@ Inductive estep: state -> trace -> state -> Prop :=
 
   | step_lred: forall C f a k e m a' m',
       lred e a m a' m' ->
-      not_stuck e (C a) m ->
       context LV RV C ->
       estep (ExprState f (C a) k e m)
          E0 (ExprState f (C a') k e m')
 
-  | step_rred: forall C f a k e m a' m',
-      rred a m a' m' ->
-      not_stuck e (C a) m ->
+  | step_rred: forall C f a k e m t a' m',
+      rred a m t a' m' ->
       context RV RV C ->
       estep (ExprState f (C a) k e m)
-         E0 (ExprState f (C a') k e m')
+          t (ExprState f (C a') k e m')
 
   | step_call: forall C f a k e m fd vargs ty,
       callred a fd vargs ty ->
-      not_stuck e (C a) m ->
       context RV RV C ->
       estep (ExprState f (C a) k e m)
-         E0 (Callstate fd vargs (Kcall f e C ty k) m).
+         E0 (Callstate fd vargs (Kcall f e C ty k) m)
+
+  | step_stuck: forall C f a k e m K,
+      context K RV C -> ~(imm_safe e K a m) ->
+      estep (ExprState f (C a) k e m)
+         E0 Stuckstate.
 
 Inductive sstep: state -> trace -> state -> Prop :=
 

@@ -31,6 +31,22 @@ Require Import Clight.
 Require Import SimplExpr.
 Require Import SimplExprspec.
 
+(** Temporary *)
+
+Lemma deref_loc_load:
+  forall ty m b ofs t v,
+  deref_loc ty m b ofs t v -> load_value_of_type ty m b ofs = Some v /\ t = E0.
+Proof.
+  destruct 1; split; auto; unfold load_value_of_type; rewrite H; auto.
+Qed.
+
+Lemma assign_loc_store:
+  forall ty m b ofs v t m',
+  assign_loc ty m b ofs v t m' -> store_value_of_type ty m b ofs v = Some m' /\ t = E0.
+Proof.
+  destruct 1; split; auto; unfold store_value_of_type; rewrite H; auto.
+Qed.
+
 Section PRESERVATION.
 
 Variable prog: C.program.
@@ -165,7 +181,8 @@ Opaque makeif.
 (* rvalof *)
   exploit H0; eauto. intros [A [B C]].
   subst sl1; simpl.
-  assert (eval_expr tge e le m a v). eapply eval_Elvalue. eauto. congruence.
+  assert (eval_expr tge e le m a v).
+    eapply eval_Elvalue. eauto. exploit deref_loc_load; eauto. intuition congruence.
   destruct dst; auto.
   econstructor. split. simpl; eauto. auto. 
 (* addrof *)
@@ -853,7 +870,9 @@ Inductive match_states: Csem.state -> state -> Prop :=
   | match_returnstates: forall res k m tk,
       match_cont k tk ->
       match_states (Csem.Returnstate res k m)
-                   (Returnstate res tk m).
+                   (Returnstate res tk m)
+  | match_stuckstate: forall S,
+      match_states Csem.Stuckstate S.
 
 Lemma push_seq:
   forall f sl k e le m,
@@ -1234,7 +1253,9 @@ Proof.
   exploit tr_simple_rvalue; eauto. destruct dest.
   intros [A [B C]]. subst sl. apply tr_top_val_val; auto.
   intros A. subst sl. apply tr_top_base. constructor. 
-  intros [b [A [B C]]]. subst sl. apply tr_top_val_test; auto. 
+  intros [b [A [B C]]]. subst sl. apply tr_top_val_test; auto.
+(* rval volatile *)
+  exploit deref_loc_load; eauto. intuition.  
 (* condition true *)
   exploit tr_top_leftcontext; eauto. clear H9. 
   intros [dst' [sl1 [sl2 [a' [tmp' [P [Q [T [R S]]]]]]]]].
@@ -1286,6 +1307,7 @@ Proof.
     econstructor; eauto. 
   auto. auto.
 (* assign *)
+  exploit assign_loc_store; eauto. intros [ST EQ]; subst t. 
   exploit tr_top_leftcontext; eauto. clear H12. 
   intros [dst' [sl1 [sl2 [a' [tmp' [P [Q [T [R S]]]]]]]]].
   inv P. inv H4.
@@ -1322,7 +1344,9 @@ Proof.
   intros. apply PTree.gso. intuition congruence.
   auto. auto.
 (* assignop *)
-  exploit tr_top_leftcontext; eauto. clear H14. 
+  exploit deref_loc_load; eauto. intros [LD EQ]; subst t1.
+  exploit assign_loc_store; eauto. intros [ST EQ]; subst t2. simpl. 
+  exploit tr_top_leftcontext; eauto. clear H15. 
   intros [dst' [sl1 [sl2 [a' [tmp' [P [Q [T [R S]]]]]]]]].
   inv P. inv H6.
   (* for effects *)
@@ -1361,8 +1385,14 @@ Proof.
   rewrite H6; auto. apply PTree.gss. 
   intros. apply PTree.gso. intuition congruence.
   auto. auto.
+(* assignop stuck *)
+  (* temporary *)
+  exploit deref_loc_load; eauto. intros [LD EQ]. subst t. 
+  econstructor; split. right; split. apply star_refl. simpl. omega. constructor.
 (* postincr *)
-  exploit tr_top_leftcontext; eauto. clear H13. 
+  exploit deref_loc_load; eauto. intros [LD EQ]; subst t1.
+  exploit assign_loc_store; eauto. intros [ST EQ]; subst t2. simpl. 
+  exploit tr_top_leftcontext; eauto. clear H14. 
   intros [dst' [sl1 [sl2 [a' [tmp' [P [Q [T [R S]]]]]]]]].
   inv P. inv H5.
   (* for effects *)
@@ -1403,6 +1433,10 @@ Proof.
   rewrite H5; auto. apply PTree.gss. 
   intros. apply PTree.gso. intuition congruence.
   auto. auto.
+(* postincr stuck *)
+  (* temporary *)
+  exploit deref_loc_load; eauto. intros [LD EQ]. subst t. 
+  econstructor; split. right; split. apply star_refl. simpl. omega. constructor.
 (* comma *)
   exploit tr_top_leftcontext; eauto. clear H9. 
   intros [dst' [sl1 [sl2 [a' [tmp' [P [Q [T [R S]]]]]]]]].
