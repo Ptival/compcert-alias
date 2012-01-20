@@ -492,10 +492,6 @@ Definition env := PTree.t (block * type). (* map variable -> location & type *)
 
 Definition empty_env: env := (PTree.empty (block * type)).
 
-Section SEMANTICS.
-
-Variable ge: genv.
-
 (** [deref_loc ty m b ofs t v] computes the value of a datum
   of type [ty] residing in memory [m] at block [b], offset [ofs].
   If the type [ty] indicates an access by value, the corresponding
@@ -506,18 +502,19 @@ Variable ge: genv.
 
 Parameter type_is_volatile: type -> bool.
 
-Inductive deref_loc (ty: type) (m: mem) (b: block) (ofs: int) : trace -> val -> Prop :=
+Inductive deref_loc {F V: Type} (ge: Genv.t F V) (ty: type) (m: mem) (b: block) (ofs: int) : trace -> val -> Prop :=
   | deref_loc_value: forall chunk v,
-      access_mode ty = By_value chunk -> type_is_volatile ty = false ->
+      access_mode ty = By_value chunk ->
+      type_is_volatile ty = false -> (*block_is_volatile ge b = false ->*)
       Mem.loadv chunk m (Vptr b ofs) = Some v ->
-      deref_loc ty m b ofs E0 v
+      deref_loc ge ty m b ofs E0 v
   | deref_loc_volatile: forall chunk t v,
       access_mode ty = By_value chunk -> type_is_volatile ty = true ->
       volatile_load ge chunk m b ofs t v ->
-      deref_loc ty m b ofs t v
+      deref_loc ge ty m b ofs t v
   | deref_loc_reference:
       access_mode ty = By_reference ->
-      deref_loc ty m b ofs E0 (Vptr b ofs).
+      deref_loc ge ty m b ofs E0 (Vptr b ofs).
 
 (** Symmetrically, [assign_loc ty m b ofs v t m'] returns the
   memory state after storing the value [v] in the datum
@@ -526,16 +523,17 @@ Inductive deref_loc (ty: type) (m: mem) (b: block) (ofs: int) : trace -> val -> 
   [m'] is the updated memory state and [t] the trace of observables
   (nonempty if this is a volatile store). *)
 
-Inductive assign_loc (ty: type) (m: mem) (b: block) (ofs: int) (v: val):
+Inductive assign_loc {F V: Type} (ge: Genv.t F V) (ty: type) (m: mem) (b: block) (ofs: int) (v: val):
                                                   trace -> mem -> Prop :=
   | assign_loc_value: forall chunk m',
-      access_mode ty = By_value chunk -> type_is_volatile ty = false ->
+      access_mode ty = By_value chunk ->
+      type_is_volatile ty = false -> (*block_is_volatile ge b = false ->*)
       Mem.storev chunk m (Vptr b ofs) v = Some m' ->
-      assign_loc ty m b ofs v E0 m'
+      assign_loc ge ty m b ofs v E0 m'
   | assign_loc_volatile: forall chunk t m',
       access_mode ty = By_value chunk -> type_is_volatile ty = true ->
       volatile_store ge chunk m b ofs v t m' ->
-      assign_loc ty m b ofs v t m'.
+      assign_loc ge ty m b ofs v t m'.
 
 (** Allocation of function-local variables.
   [alloc_variables e1 m1 vars e2 m2] allocates one memory block
@@ -561,18 +559,18 @@ Inductive alloc_variables: env -> mem ->
   in the memory blocks corresponding to the variables [params].
   [m1] is the initial memory state and [m2] the final memory state. *)
 
-Inductive bind_parameters: env ->
+Inductive bind_parameters {F V: Type} (ge: Genv.t F V) (e: env):
                            mem -> list (ident * type) -> list val ->
                            mem -> Prop :=
   | bind_parameters_nil:
-      forall e m,
-      bind_parameters e m nil nil m
+      forall m,
+      bind_parameters ge e m nil nil m
   | bind_parameters_cons:
-      forall e m id ty params v1 vl b m1 m2,
+      forall m id ty params v1 vl b m1 m2,
       PTree.get id e = Some(b, ty) ->
-      assign_loc ty m b Int.zero v1 E0 m1 ->
-      bind_parameters e m1 params vl m2 ->
-      bind_parameters e m ((id, ty) :: params) (v1 :: vl) m2.
+      assign_loc ge ty m b Int.zero v1 E0 m1 ->
+      bind_parameters ge e m1 params vl m2 ->
+      bind_parameters ge e m ((id, ty) :: params) (v1 :: vl) m2.
 
 (** Return the list of blocks in the codomain of [e], with low and high bounds. *)
 
@@ -599,6 +597,10 @@ Fixpoint seq_of_labeled_statement (sl: labeled_statements) : statement :=
   | LSdefault s => s
   | LScase c s sl' => Ssequence s (seq_of_labeled_statement sl')
   end.
+
+Section SEMANTICS.
+
+Variable ge: genv.
 
 (** [type_of_global b] returns the type of the global variable or function
   at address [b]. *)
@@ -652,7 +654,7 @@ Inductive lred: expr -> mem -> expr -> mem -> Prop :=
 
 Inductive rred: expr -> mem -> trace -> expr -> mem -> Prop :=
   | red_rvalof: forall b ofs ty m t v,
-      deref_loc ty m b ofs t v ->
+      deref_loc ge ty m b ofs t v ->
       rred (Evalof (Eloc b ofs ty) ty) m
          t (Eval v ty) m
   | red_addrof: forall b ofs ty1 ty m,
@@ -679,16 +681,16 @@ Inductive rred: expr -> mem -> trace -> expr -> mem -> Prop :=
         E0 (Eval (Vint (Int.repr (sizeof ty1))) ty) m
   | red_assign: forall b ofs ty1 v2 ty2 m v t m',
       sem_cast v2 ty2 ty1 = Some v ->
-      assign_loc ty1 m b ofs v t m' ->
+      assign_loc ge ty1 m b ofs v t m' ->
       rred (Eassign (Eloc b ofs ty1) (Eval v2 ty2) ty1) m
          t (Eval v ty1) m'
   | red_assignop: forall op b ofs ty1 v2 ty2 tyres m t v1,
-      deref_loc ty1 m b ofs t v1 ->
+      deref_loc ge ty1 m b ofs t v1 ->
       rred (Eassignop op (Eloc b ofs ty1) (Eval v2 ty2) tyres ty1) m
          t (Eassign (Eloc b ofs ty1)
                     (Ebinop op (Eval v1 ty1) (Eval v2 ty2) tyres) ty1) m
   | red_postincr: forall id b ofs ty m t v1 op,
-      deref_loc ty m b ofs t v1 ->
+      deref_loc ge ty m b ofs t v1 ->
       op = match id with Incr => Oadd | Decr => Osub end ->
       rred (Epostincr id (Eloc b ofs ty) ty) m
          t (Ecomma (Eassign (Eloc b ofs ty) 
@@ -1135,7 +1137,7 @@ Inductive sstep: state -> trace -> state -> Prop :=
   | step_internal_function: forall f vargs k m e m1 m2,
       list_norepet (var_names (fn_params f) ++ var_names (fn_vars f)) ->
       alloc_variables empty_env m (f.(fn_params) ++ f.(fn_vars)) e m1 ->
-      bind_parameters e m1 f.(fn_params) vargs m2 ->
+      bind_parameters ge e m1 f.(fn_params) vargs m2 ->
       sstep (Callstate (Internal f) vargs k m)
          E0 (State f f.(fn_body) k e m2)
 

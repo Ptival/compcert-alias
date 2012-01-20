@@ -101,7 +101,7 @@ with eval_simple_rvalue: expr -> val -> Prop :=
   | esr_rvalof: forall b ofs l ty v,
       eval_simple_lvalue l b ofs ->
       ty = typeof l ->
-      load_value_of_type ty m b ofs = Some v ->
+      deref_loc ge ty m b ofs E0 v ->
       eval_simple_rvalue (Evalof l ty) v
   | esr_addrof: forall b ofs l ty,
       eval_simple_lvalue l b ofs ->
@@ -166,17 +166,17 @@ Proof.
 Qed.
 
 Lemma rred_simple:
-  forall r m r' m', rred r m r' m' -> simple r -> simple r'.
+  forall r m t r' m', rred ge r m t r' m' -> simple r -> simple r'.
 Proof.
   induction 1; simpl; intuition. destruct b; auto. 
 Qed.
 
 Lemma rred_compat:
-  forall e r m r' m', rred r m r' m' ->
+  forall e r m r' m', rred ge r m E0 r' m' ->
   simple r ->
   m = m' /\ compat_eval RV e r r' m.
 Proof.
-  induction 1; simpl; intro SIMP; try contradiction; split; auto; split; auto; intros vx EV.
+  intros until m'; intros RED SIMP. inv RED; simpl in SIMP; try contradiction; split; auto; split; auto; intros vx EV.
   inv EV. econstructor. constructor. auto. auto. 
   inv EV. econstructor. constructor.
   inv EV. econstructor; eauto. constructor. 
@@ -227,12 +227,12 @@ Qed.
 Lemma simple_context_2:
   forall a a', simple a' -> forall from to C, context from to C -> simple (C a) -> simple (C a').
 Proof.
-  induction 2; simpl; tauto. 
+  induction 2; simpl; try tauto. 
 Qed.
 
 Lemma compat_eval_steps:
-  forall f r e m w r' m',
-  star step ge (ExprState f r Kstop e m) w (ExprState f r' Kstop e m') ->
+  forall f r e m  r' m',
+  star step ge (ExprState f r Kstop e m) E0 (ExprState f r' Kstop e m') ->
   simple r -> 
   m' = m /\ compat_eval RV e r r' m.
 Proof.
@@ -240,10 +240,10 @@ Proof.
   (* base case *) 
   split. auto. red; auto.
   (* inductive case *)
-  destruct H.
+  destruct (app_eq_nil t1 t2); auto. subst. inv H.
   (* expression step *)
   assert (X: exists r1, s2 = ExprState f r1 Kstop e m /\ compat_eval RV e r r1 m /\ simple r1).
-    inv H.
+    inv H3.
     (* lred *)
     assert (S: simple a) by (eapply simple_context_1; eauto).
     exploit lred_compat; eauto. intros [A B]. subst m'0.
@@ -258,17 +258,19 @@ Proof.
     eapply simple_context_2; eauto. eapply rred_simple; eauto.
     (* callred *)
     assert (S: simple a) by (eapply simple_context_1; eauto).
-    inv H10; simpl in S; contradiction.
+    inv H9; simpl in S; contradiction.
+    (* stuckred *)
+    inv H2. destruct H; inv H. 
   destruct X as [r1 [A [B C]]]. subst s2. 
   exploit IHstar; eauto. intros [D E]. 
   split. auto. destruct B; destruct E. split. congruence. auto. 
   (* statement steps *)
-  inv H.
+  inv H3.
 Qed.
 
 Theorem eval_simple_steps:
-  forall f r e m w v ty m',
-  star step ge (ExprState f r Kstop e m) w (ExprState f (Eval v ty) Kstop e m') ->
+  forall f r e m v ty m',
+  star step ge (ExprState f r Kstop e m) E0 (ExprState f (Eval v ty) Kstop e m') ->
   simple r ->
   m' = m /\ ty = typeof r /\ eval_simple_rvalue e m r v.
 Proof.
@@ -437,8 +439,7 @@ Proof.
   (* val *)
   destruct v; monadInv CV; constructor.
   (* rval *)
-  unfold load_value_of_type in H1. destruct (access_mode ty); try congruence. inv H1. 
-  eauto.
+  inv H1; rewrite H2 in CV; try congruence. eauto. 
   (* addrof *)
   eauto.
   (* unop *)
@@ -487,8 +488,8 @@ Qed.
 (** Soundness of [constval] with respect to the reduction semantics. *)
 
 Theorem constval_steps:
-  forall f r m w v v' ty m',
-  star step ge (ExprState f r Kstop empty_env m) w (ExprState f (Eval v' ty) Kstop empty_env m') ->
+  forall f r m v v' ty m',
+  star step ge (ExprState f r Kstop empty_env m) E0 (ExprState f (Eval v' ty) Kstop empty_env m') ->
   constval r = OK v ->
   m' = m /\ ty = typeof r /\ match_val v v'.
 Proof.
@@ -501,9 +502,9 @@ Qed.
 (** Soundness for single initializers. *)
 
 Theorem transl_init_single_steps:
-  forall ty a data f m w v1 ty1 m' v chunk b ofs m'',
+  forall ty a data f m v1 ty1 m' v chunk b ofs m'',
   transl_init_single ty a = OK data ->
-  star step ge (ExprState f a Kstop empty_env m) w (ExprState f (Eval v1 ty1) Kstop empty_env m') ->
+  star step ge (ExprState f a Kstop empty_env m) E0 (ExprState f (Eval v1 ty1) Kstop empty_env m') ->
   sem_cast v1 ty1 ty = Some v ->
   access_mode ty = By_value chunk ->
   Mem.store chunk m' b ofs v = Some m'' ->

@@ -31,22 +31,6 @@ Require Import Clight.
 Require Import SimplExpr.
 Require Import SimplExprspec.
 
-(** Temporary *)
-
-Lemma deref_loc_load:
-  forall ty m b ofs t v,
-  deref_loc ty m b ofs t v -> load_value_of_type ty m b ofs = Some v /\ t = E0.
-Proof.
-  destruct 1; split; auto; unfold load_value_of_type; rewrite H; auto.
-Qed.
-
-Lemma assign_loc_store:
-  forall ty m b ofs v t m',
-  assign_loc ty m b ofs v t m' -> store_value_of_type ty m b ofs v = Some m' /\ t = E0.
-Proof.
-  destruct 1; split; auto; unfold store_value_of_type; rewrite H; auto.
-Qed.
-
 Section PRESERVATION.
 
 Variable prog: C.program.
@@ -83,6 +67,12 @@ Lemma varinfo_preserved:
   forall b, Genv.find_var_info tge b = Genv.find_var_info ge b.
 Proof
   (Genv.find_var_info_transf_partial transl_fundef _ TRANSL).
+
+Lemma block_is_volatile_preserved:
+  forall b, block_is_volatile tge b = block_is_volatile ge b.
+Proof.
+  intros. unfold block_is_volatile. rewrite varinfo_preserved. auto.
+Qed.
 
 Lemma type_of_fundef_preserved:
   forall f tf, transl_fundef f = OK tf ->
@@ -130,7 +120,7 @@ Proof.
   rewrite H0; auto. simpl; auto.
   rewrite H0; auto. simpl; auto.
   destruct H1; congruence.
-  rewrite H0; auto. simpl; auto.
+  destruct H6. inv H1; try congruence. rewrite H0; auto. simpl; auto.
   rewrite H0; auto. simpl; auto.
   rewrite H0; auto. simpl; auto.
   destruct H7. rewrite H0; auto. rewrite H2; auto. simpl; auto.
@@ -149,6 +139,29 @@ Lemma tr_simple_exprlist_nil:
 Proof (proj2 tr_simple_nil).
 
 (** Evaluation of simple expressions and of their translation *)
+
+Remark deref_loc_preserved:
+  forall ty m b ofs t v,
+  deref_loc ge ty m b ofs t v -> deref_loc tge ty m b ofs t v.
+Proof.
+  intros. inv H. 
+  eapply deref_loc_value; eauto.
+  eapply deref_loc_volatile; eauto.
+  eapply volatile_load_preserved with (ge1 := ge); auto.
+  exact symbols_preserved. exact block_is_volatile_preserved.
+  eapply deref_loc_reference; eauto.
+Qed.
+
+Remark assign_loc_preserved:
+  forall ty m b ofs v t m',
+  assign_loc ge ty m b ofs v t m' -> assign_loc tge ty m b ofs v t m'.
+Proof.
+  intros. inv H. 
+  eapply assign_loc_value; eauto.
+  eapply assign_loc_volatile; eauto.
+  eapply volatile_store_preserved with (ge1 := ge); auto.
+  exact symbols_preserved. exact block_is_volatile_preserved.
+Qed.
 
 Lemma tr_simple:
  forall e m,
@@ -179,10 +192,11 @@ Opaque makeif.
   auto.
   exists a0; auto.
 (* rvalof *)
+  inv H7; try congruence. 
   exploit H0; eauto. intros [A [B C]].
   subst sl1; simpl.
   assert (eval_expr tge e le m a v).
-    eapply eval_Elvalue. eauto. exploit deref_loc_load; eauto. intuition congruence.
+    eapply eval_Elvalue. eauto. congruence. rewrite <- B. eapply deref_loc_preserved; eauto. 
   destruct dst; auto.
   econstructor. split. simpl; eauto. auto. 
 (* addrof *)
@@ -363,9 +377,9 @@ Ltac TR :=
 Ltac NOTIN :=
   match goal with
   | [ H1: In ?x ?l, H2: list_disjoint ?l _ |- ~In ?x _ ] =>
-        red; intro; elim (H2 x x); auto
+        red; intro; elim (H2 x x); auto; fail
   | [ H1: In ?x ?l, H2: list_disjoint _ ?l |- ~In ?x _ ] =>
-        red; intro; elim (H2 x x); auto
+        red; intro; elim (H2 x x); auto; fail
   end.
 
 Ltac UNCHANGED :=
@@ -394,8 +408,9 @@ Ltac UNCHANGED :=
 (* rvalof *)
   inv H1.
   exploit H0; eauto. intros [dst' [sl1' [sl2' [a' [tmp' [P [Q [U [R S]]]]]]]]].
-  TR. subst sl1; rewrite app_ass; eauto. auto. 
-  intros. rewrite <- app_ass; econstructor; eauto.
+  TR. subst sl1; rewrite app_ass; eauto. red; eauto. 
+  intros. rewrite <- app_ass; econstructor; eauto. 
+  exploit typeof_context; eauto. congruence.
 (* addrof *)
   inv H1. 
   exploit H0; eauto. intros [dst' [sl1' [sl2' [a' [tmp' [P [Q [U [R S]]]]]]]]].
@@ -492,15 +507,16 @@ Ltac UNCHANGED :=
   TR. subst sl1. rewrite app_ass. eauto. 
   red; auto. 
   intros. rewrite <- app_ass. econstructor. apply S; auto.
-  eapply tr_expr_invariant; eauto. UNCHANGED.
-  auto. auto. auto.
+  eapply tr_expr_invariant; eauto. UNCHANGED. 
+  symmetry; eapply typeof_context; eauto. eauto.  
+  auto. auto. auto. auto. auto. auto.
   (* for val *)
   exploit H0; eauto. intros [dst' [sl1' [sl2' [a' [tmp' [P [Q [U [R S]]]]]]]]].
   TR. subst sl1. rewrite app_ass. eauto. 
   red; auto. 
   intros. rewrite <- app_ass. econstructor. apply S; auto.
-  eapply tr_expr_invariant; eauto. UNCHANGED.
-  auto. auto. auto. auto. auto. auto.
+  eapply tr_expr_invariant; eauto. UNCHANGED. 
+  eauto. auto. auto. auto. auto. auto. auto. auto. auto. auto. auto. 
   eapply typeof_context; eauto.
 (* assignop right *)
   inv H2.
@@ -509,25 +525,24 @@ Ltac UNCHANGED :=
   exploit H1; eauto. intros [dst' [sl1' [sl2' [a' [tmp' [P [Q [U [R S]]]]]]]]].
   TR. subst sl2. rewrite app_ass. eauto. 
   red; auto.
-  intros. rewrite <- app_ass. change (sl3 ++ sl2') with (nil ++ sl3 ++ sl2'). rewrite app_ass. econstructor. 
+  intros. rewrite <- app_ass. change (sl0 ++ sl2') with (nil ++ sl0 ++ sl2'). rewrite app_ass. econstructor. 
   eapply tr_expr_invariant; eauto. UNCHANGED.
-  apply S; auto. auto. auto. auto.
+  apply S; auto. auto. eauto. auto. auto. auto. auto. auto. auto. 
   (* for val *)
   assert (sl1 = nil) by (eapply tr_simple_expr_nil; eauto). subst sl1; simpl.
   exploit H1; eauto. intros [dst' [sl1' [sl2' [a' [tmp' [P [Q [U [R S]]]]]]]]].
   TR. subst sl2. rewrite app_ass. eauto. 
   red; auto. 
-  intros. rewrite <- app_ass. change (sl3 ++ sl2') with (nil ++ sl3 ++ sl2'). rewrite app_ass. econstructor. 
+  intros. rewrite <- app_ass. change (sl0 ++ sl2') with (nil ++ sl0 ++ sl2'). rewrite app_ass. econstructor. 
   eapply tr_expr_invariant; eauto. UNCHANGED.
-  apply S; auto. auto. auto. auto. auto. auto. auto. auto. 
+  apply S; auto. eauto. auto. auto. auto. auto. auto. auto. auto. auto. auto. auto. auto. 
 (* postincr *)
   inv H1.
   (* for effects *)
   exploit H0; eauto. intros [dst' [sl1' [sl2' [a' [tmp' [P [Q [U [R S]]]]]]]]].
   TR. rewrite Q; rewrite app_ass; eauto. red; auto. 
-  intros. replace (C.typeof (C e)) with (C.typeof (C e')). rewrite <- app_ass.
-  econstructor; eauto. 
-  eapply typeof_context; eauto.
+  intros. rewrite <- app_ass. econstructor; eauto. 
+  symmetry; eapply typeof_context; eauto. 
   (* for val *)
   exploit H0; eauto. intros [dst' [sl1' [sl2' [a' [tmp' [P [Q [U [R S]]]]]]]]].
   TR. rewrite Q; rewrite app_ass; eauto. red; auto. 
@@ -723,7 +738,20 @@ Proof.
   apply star_one. eapply step_ifthenelse; eauto. 
 Qed.
 
-(** Matching between continuations *)
+Lemma step_make_set:
+  forall id a ty m b ofs t v e le f k,
+  deref_loc ge ty m b ofs t v ->
+  eval_lvalue tge e le m a b ofs ->
+  typeof a = ty ->
+  step tge (State f (make_set id a) k e le m)
+         t (State f Sskip k e (PTree.set id v le) m).
+Proof.
+  intros. exploit deref_loc_preserved; eauto. rewrite <- H1. intros DEREF.
+  unfold make_set. destruct (type_is_volatile (typeof a)) as []_eqn.
+  econstructor; eauto.
+  assert (t = E0). inv H; congruence. subst t.
+  constructor. eapply eval_Elvalue; eauto.
+Qed. 
 
 Fixpoint Kseqlist (sl: list statement) (k: cont) :=
   match sl with
@@ -737,6 +765,40 @@ Remark Kseqlist_app:
 Proof.
   induction sl1; simpl; congruence.
 Qed.
+
+(*
+Axiom only_scalar_types_volatile:
+  forall ty, type_is_volatile ty = true -> exists chunk, access_mode ty = By_value chunk.
+*)
+
+Lemma step_tr_rvalof:
+  forall ty m b ofs t v e le a sl a' tmp f k,
+  deref_loc ge ty m b ofs t v ->
+  eval_lvalue tge e le m a b ofs ->
+  tr_rvalof ty a sl a' tmp ->
+  typeof a = ty ->
+  exists le',
+    star step tge (State f Sskip (Kseqlist sl k) e le m)
+               t (State f Sskip k e le' m)
+  /\ eval_expr tge e le' m a' v
+  /\ typeof a' = typeof a
+  /\ forall x, ~In x tmp -> le'!x = le!x.
+Proof.
+  intros. inv H1. 
+  (* non volatile *)
+  assert (t = E0). inv H; auto. congruence. subst t.  
+  exists le; intuition. apply star_refl.
+  eapply eval_Elvalue; eauto. eapply deref_loc_preserved; eauto.
+  (* volatile *)
+  exists (PTree.set t0 v le); intuition.
+  simpl. eapply star_two. econstructor. eapply step_vol_read; eauto. 
+  eapply deref_loc_preserved; eauto. traceEq.
+  constructor. apply PTree.gss.
+  apply PTree.gso. congruence. 
+Qed.
+
+(** Matching between continuations *)
+
 
 Inductive match_cont : Csem.cont -> cont -> Prop :=
   | match_Kstop:
@@ -950,6 +1012,12 @@ Proof.
   red; simpl; intros. rewrite H; auto.
 Qed.
 
+Lemma tr_rvalof_nolabel:
+  forall ty a sl a' tmp, tr_rvalof ty a sl a' tmp -> nolabel_list sl.
+Proof.
+  destruct 1; simpl; intuition. red; simpl; auto.
+Qed.
+
 Definition nolabel_dest (dst: destination) : Prop :=
   match dst with
   | For_val => True
@@ -989,13 +1057,18 @@ Lemma tr_find_label_expr:
 /\(forall le rl sl al tmps, tr_exprlist le rl sl al tmps -> nolabel_list sl).
 Proof.
   apply tr_expr_exprlist; intros; NoLabelTac.
-  destruct H1. apply makeif_nolabel; auto. 
+  destruct H1. apply makeif_nolabel; auto.
+  eapply tr_rvalof_nolabel; eauto.
   apply makeif_nolabel; NoLabelTac.
   rewrite (makeseq_nolabel sl2); auto.
   rewrite (makeseq_nolabel sl3); auto.
   apply makeif_nolabel; NoLabelTac.
   rewrite (makeseq_nolabel sl2). auto. apply H3. apply nolabel_dest_cast; auto. 
   rewrite (makeseq_nolabel sl3). auto. apply H5. apply nolabel_dest_cast; auto.
+  eapply tr_rvalof_nolabel; eauto.
+  eapply tr_rvalof_nolabel; eauto.
+  eapply tr_rvalof_nolabel; eauto.
+  unfold make_set. destruct (type_is_volatile (typeof a1)); auto.
   apply nolabel_dest_cast; auto.
 Qed.
 
@@ -1255,7 +1328,17 @@ Proof.
   intros A. subst sl. apply tr_top_base. constructor. 
   intros [b [A [B C]]]. subst sl. apply tr_top_val_test; auto.
 (* rval volatile *)
-  exploit deref_loc_load; eauto. intuition.  
+  exploit tr_top_leftcontext; eauto. clear H11.
+  intros [dst' [sl1 [sl2 [a' [tmp' [P [Q [T [R S]]]]]]]]].
+  inv P. inv H2. inv H7; try congruence. 
+  exploit tr_simple_lvalue; eauto. intros [SL [TY EV]]. subst sl0; simpl.
+  econstructor; split.
+  left. eapply plus_two. constructor. eapply step_vol_read; eauto. 
+  rewrite <- TY. eapply deref_loc_preserved; eauto. congruence. auto.
+  econstructor; eauto. change (final dst' (Etempvar t0 (C.typeof l)) ++ sl2) with (nil ++ (final dst' (Etempvar t0 (C.typeof l)) ++ sl2)).
+  apply S. apply tr_val_gen. auto. intros. constructor. rewrite H5; auto. apply PTree.gss.
+  intros. apply PTree.gso. red; intros; subst; elim H5; auto. 
+  auto.
 (* condition true *)
   exploit tr_top_leftcontext; eauto. clear H9. 
   intros [dst' [sl1 [sl2 [a' [tmp' [P [Q [T [R S]]]]]]]]].
@@ -1307,7 +1390,6 @@ Proof.
     econstructor; eauto. 
   auto. auto.
 (* assign *)
-  exploit assign_loc_store; eauto. intros [ST EQ]; subst t. 
   exploit tr_top_leftcontext; eauto. clear H12. 
   intros [dst' [sl1 [sl2 [a' [tmp' [P [Q [T [R S]]]]]]]]].
   inv P. inv H4.
@@ -1319,14 +1401,14 @@ Proof.
   left. eapply plus_left. constructor.
   apply star_one. econstructor; eauto.
   rewrite <- TY1; rewrite <- TY2; eauto.
-  rewrite <- TY1; eauto.
+  rewrite <- TY1. eapply assign_loc_preserved; eauto.
   traceEq.
   econstructor. auto. change sl2 with (nil ++ sl2). apply S.
   constructor. auto. auto. auto.
   (* for value *)
   exploit tr_simple_rvalue; eauto. intros [SL2 [TY2 EV2]].
   exploit tr_simple_lvalue. eauto.
-    eapply tr_expr_invariant with (le' := PTree.set t v le). eauto. 
+    eapply tr_expr_invariant with (le' := PTree.set t0 v le). eauto. 
     intros. apply PTree.gso. intuition congruence.
   intros [SL1 [TY1 EV1]].
   subst; simpl Kseqlist.
@@ -1336,7 +1418,7 @@ Proof.
   eapply star_left. constructor.
   apply star_one. econstructor; eauto. constructor. apply PTree.gss.
   simpl. rewrite <- TY1; eauto.
-  rewrite <- TY1; eauto.
+  rewrite <- TY1. eapply assign_loc_preserved; eauto.
   reflexivity. reflexivity. traceEq.
   econstructor. auto. apply S.
   apply tr_val_gen. auto. intros. econstructor; eauto. constructor. 
@@ -1344,70 +1426,100 @@ Proof.
   intros. apply PTree.gso. intuition congruence.
   auto. auto.
 (* assignop *)
-  exploit deref_loc_load; eauto. intros [LD EQ]; subst t1.
-  exploit assign_loc_store; eauto. intros [ST EQ]; subst t2. simpl. 
   exploit tr_top_leftcontext; eauto. clear H15. 
   intros [dst' [sl1 [sl2 [a' [tmp' [P [Q [T [R S]]]]]]]]].
   inv P. inv H6.
   (* for effects *)
-  exploit tr_simple_rvalue; eauto. intros [SL2 [TY2 EV2]].
   exploit tr_simple_lvalue; eauto. intros [SL1 [TY1 EV1]].
-  subst; simpl Kseqlist.
+  exploit step_tr_rvalof; eauto. intros [le' [EXEC [EV3 [TY3 INV]]]].
+  exploit tr_simple_lvalue. eauto. eapply tr_expr_invariant with (le := le) (le' := le'). eauto. 
+  intros. apply INV. NOTIN. intros [? [? EV1']].
+  exploit tr_simple_rvalue. eauto. eapply tr_expr_invariant with (le := le) (le' := le'). eauto. 
+  intros. apply INV. NOTIN. simpl. intros [SL2 [TY2 EV2]].
+  subst; simpl Kseqlist. 
   econstructor; split.
-  left. eapply plus_left. constructor.
-  apply star_one. econstructor; eauto.
-    econstructor; eauto. eapply eval_Elvalue; eauto. rewrite <- TY1; eauto. 
-    rewrite <- TY1; rewrite <- TY2; eauto.
+  left. eapply star_plus_trans. rewrite app_ass. rewrite Kseqlist_app. eexact EXEC.
+  eapply plus_two. simpl. econstructor. econstructor. eexact EV1'. 
+    econstructor. eexact EV3. eexact EV2. 
+    rewrite TY3; rewrite <- TY1; rewrite <- TY2; eauto.
     rewrite <- TY1; eauto.
-    rewrite <- TY1; eauto.
-  traceEq.
+    rewrite <- TY1. eapply assign_loc_preserved; eauto.
+  reflexivity. traceEq.
   econstructor. auto. change sl2 with (nil ++ sl2). apply S.
   constructor. auto. auto. auto.
   (* for value *)
-  exploit tr_simple_rvalue; eauto. intros [SL2 [TY2 EV2]].
   exploit tr_simple_lvalue; eauto. intros [SL1 [TY1 EV1]].
-  exploit tr_simple_lvalue. eauto.
-    eapply tr_expr_invariant with (le' := PTree.set t v3 le). eauto. 
-    intros. apply PTree.gso. intuition congruence.
-  intros [SL3 [TY3 EV3]]. 
+  exploit step_tr_rvalof; eauto. intros [le' [EXEC [EV3 [TY3 INV]]]].
+  exploit tr_simple_lvalue. eauto. eapply tr_expr_invariant with (le := le) (le' := le'). eauto. 
+  intros. apply INV. NOTIN. intros [? [? EV1']].
+  exploit tr_simple_rvalue. eauto. eapply tr_expr_invariant with (le := le) (le' := le'). eauto. 
+  intros. apply INV. NOTIN. simpl. intros [SL2 [TY2 EV2]].
+  exploit tr_simple_lvalue. eauto. 
+    eapply tr_expr_invariant with (le := le) (le' := PTree.set t v3 le'). eauto. 
+    intros. rewrite PTree.gso. apply INV. NOTIN. intuition congruence.
+  intros [? [? EV1'']].
   subst; simpl Kseqlist.
   econstructor; split.
-  left. eapply plus_left. constructor. 
-  eapply star_left. constructor.
-    econstructor. eapply eval_Elvalue; eauto. rewrite <- TY1; eauto. eauto.
-    rewrite <- TY1; rewrite <- TY2. eauto. 
-  eapply star_left. constructor.
-  apply star_one. econstructor. eauto. constructor. apply PTree.gss. 
-    rewrite <- TY1. eauto. rewrite <- TY1. eauto.
-  reflexivity. reflexivity. traceEq.
+  left. rewrite app_ass. rewrite Kseqlist_app. 
+  eapply star_plus_trans. eexact EXEC.
+  simpl. eapply plus_four. econstructor. econstructor.
+    econstructor. eexact EV3. eexact EV2. 
+    rewrite TY3; rewrite <- TY1; rewrite <- TY2. eauto.
+  econstructor. econstructor.
+    eexact EV1''. constructor. apply PTree.gss. 
+    simpl. rewrite <- TY1; eauto.
+    rewrite <- TY1. eapply assign_loc_preserved; eauto. 
+  reflexivity. traceEq.
   econstructor. auto. apply S.
   apply tr_val_gen. auto. intros. econstructor; eauto. constructor. 
-  rewrite H6; auto. apply PTree.gss. 
-  intros. apply PTree.gso. intuition congruence.
+  rewrite H10; auto. apply PTree.gss. 
+  intros. rewrite PTree.gso. apply INV. 
+  red; intros; elim H10; auto. 
+  intuition congruence.
   auto. auto.
 (* assignop stuck *)
-  (* temporary *)
-  exploit deref_loc_load; eauto. intros [LD EQ]. subst t. 
-  econstructor; split. right; split. apply star_refl. simpl. omega. constructor.
+  exploit tr_top_leftcontext; eauto. clear H12. 
+  intros [dst' [sl1 [sl2 [a' [tmp' [P [Q [T [R S]]]]]]]]].
+  inv P. inv H4.
+  (* for effects *)
+  exploit tr_simple_lvalue; eauto. intros [SL1 [TY1 EV1]].
+  exploit tr_simple_rvalue; eauto. intros [SL2 [TY2 EV2]].
+  exploit step_tr_rvalof; eauto. intros [le' [EXEC [EV3 [TY3 INV]]]].
+  subst; simpl Kseqlist. 
+  econstructor; split.
+  right; split. rewrite app_ass. rewrite Kseqlist_app. eexact EXEC. 
+  simpl. omega.
+  constructor.
+  (* for value *)
+  exploit tr_simple_lvalue; eauto. intros [SL1 [TY1 EV1]].
+  exploit tr_simple_rvalue; eauto. intros [SL2 [TY2 EV2]].
+  exploit step_tr_rvalof; eauto. intros [le' [EXEC [EV3 [TY3 INV]]]].
+  subst; simpl Kseqlist. 
+  econstructor; split.
+  right; split. rewrite app_ass. rewrite Kseqlist_app. eexact EXEC. 
+  simpl. omega.
+  constructor.
 (* postincr *)
-  exploit deref_loc_load; eauto. intros [LD EQ]; subst t1.
-  exploit assign_loc_store; eauto. intros [ST EQ]; subst t2. simpl. 
   exploit tr_top_leftcontext; eauto. clear H14. 
   intros [dst' [sl1 [sl2 [a' [tmp' [P [Q [T [R S]]]]]]]]].
   inv P. inv H5.
   (* for effects *)
   exploit tr_simple_lvalue; eauto. intros [SL1 [TY1 EV1]].
-  assert (EV2: eval_expr tge e le m a1 v1). eapply eval_Elvalue; eauto. rewrite <- TY1; auto.
+  exploit step_tr_rvalof; eauto. intros [le' [EXEC [EV3 [TY3 INV]]]].
+  exploit tr_simple_lvalue. eauto. eapply tr_expr_invariant with (le := le) (le' := le'). eauto. 
+  intros. apply INV. NOTIN. intros [? [? EV1']].
   subst; simpl Kseqlist.
   econstructor; split.
-  left. eapply plus_two. constructor.
+  left. rewrite app_ass; rewrite Kseqlist_app. 
+  eapply star_plus_trans. eexact EXEC. 
+  eapply plus_two. simpl. constructor.
   econstructor; eauto.
   unfold transl_incrdecr. destruct id; simpl in H2. 
-  econstructor. eauto. constructor. simpl. rewrite <- TY1. eauto.
-  econstructor. eauto. constructor. simpl. rewrite <- TY1. eauto.
+  econstructor. eauto. constructor. simpl. rewrite TY3; rewrite <- TY1. eauto.
+  econstructor. eauto. constructor. simpl. rewrite TY3; rewrite <- TY1. eauto.
   rewrite <- TY1. instantiate (1 := v3). destruct id; auto. 
-  rewrite <- TY1. eauto. 
-  traceEq.
+  rewrite <- TY1. eapply assign_loc_preserved; eauto. 
+  reflexivity. traceEq.
   econstructor. auto. change sl2 with (nil ++ sl2). apply S.
   constructor. auto. auto. auto.
   (* for value *)
@@ -1418,15 +1530,15 @@ Proof.
   intros [SL2 [TY2 EV2]].
   subst; simpl Kseqlist.
   econstructor; split.
-  left. eapply plus_four. constructor. 
-  constructor. eapply eval_Elvalue; eauto. rewrite <- TY1; eauto.
+  left. eapply plus_four. constructor.
+  eapply step_make_set; eauto. 
   constructor.
   econstructor. eauto. 
   unfold transl_incrdecr. destruct id; simpl in H2. 
   econstructor. constructor. apply PTree.gss. constructor. simpl. eauto.
   econstructor. constructor. apply PTree.gss. constructor. simpl. eauto.
   rewrite <- TY1. instantiate (1 := v3). destruct id; auto. 
-  rewrite <- TY1. eauto. 
+  rewrite <- TY1. eapply assign_loc_preserved; eauto. 
   traceEq.
   econstructor. auto. apply S.
   apply tr_val_gen. auto. intros. econstructor; eauto.
@@ -1434,9 +1546,24 @@ Proof.
   intros. apply PTree.gso. intuition congruence.
   auto. auto.
 (* postincr stuck *)
-  (* temporary *)
-  exploit deref_loc_load; eauto. intros [LD EQ]. subst t. 
-  econstructor; split. right; split. apply star_refl. simpl. omega. constructor.
+  exploit tr_top_leftcontext; eauto. clear H11. 
+  intros [dst' [sl1 [sl2 [a' [tmp' [P [Q [T [R S]]]]]]]]].
+  inv P. inv H3.
+  (* for effects *)
+  exploit tr_simple_lvalue; eauto. intros [SL1 [TY1 EV1]].
+  exploit step_tr_rvalof; eauto. intros [le' [EXEC [EV3 [TY3 INV]]]].
+  subst. simpl Kseqlist. 
+  econstructor; split.
+  right; split. rewrite app_ass; rewrite Kseqlist_app. eexact EXEC.
+  simpl; omega.
+  constructor.
+  (* for value *)
+  exploit tr_simple_lvalue; eauto. intros [SL1 [TY1 EV1]].
+  subst. simpl Kseqlist. 
+  econstructor; split.
+  left. eapply plus_two. constructor. eapply step_make_set; eauto. 
+  traceEq.
+  constructor.
 (* comma *)
   exploit tr_top_leftcontext; eauto. clear H9. 
   intros [dst' [sl1 [sl2 [a' [tmp' [P [Q [T [R S]]]]]]]]].
@@ -1542,6 +1669,14 @@ Lemma tr_top_val_for_test_inv:
 Proof.
   intros. inv H. exists a0; auto. 
   inv H0. exists a0; auto.
+Qed.
+
+Lemma bind_parameters_preserved:
+  forall e m params args m',
+  bind_parameters ge e m params args m' ->
+  bind_parameters tge e m params args m'.
+Proof.
+  induction 1; econstructor; eauto. eapply assign_loc_preserved; eauto.
 Qed.
 
 Lemma sstep_simulation:
@@ -1800,7 +1935,7 @@ Proof.
   left; apply plus_one. eapply step_internal_function. 
   rewrite C; rewrite D; auto.
   rewrite C; rewrite D; eauto.
-  rewrite C; eauto.
+  rewrite C. eapply bind_parameters_preserved; eauto.
   constructor; auto. 
 
 (* external function *)

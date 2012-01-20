@@ -103,6 +103,7 @@ Inductive stmt : Type :=
   | Sstore : memory_chunk -> expr -> expr -> stmt
   | Scall : option ident -> signature -> expr -> list expr -> stmt
   | Stailcall: signature -> expr -> list expr -> stmt
+  | Sbuiltin : option ident -> external_function -> list expr -> stmt
   | Sseq: stmt -> stmt -> stmt
   | Sifthenelse: expr -> stmt -> stmt -> stmt
   | Sloop: stmt -> stmt
@@ -401,6 +402,12 @@ Inductive step: state -> trace -> state -> Prop :=
       step (State f (Stailcall sig a bl) k (Vptr sp Int.zero) e m)
         E0 (Callstate fd vargs (call_cont k) m')
 
+  | step_builtin: forall f optid ef bl k sp e m vargs t vres m',
+      eval_exprlist sp e m bl vargs ->
+      external_call ef ge vargs m t vres m' ->
+      step (State f (Sbuiltin optid ef bl) k sp e m)
+         t (State f Sskip k sp (set_optvar optid vres e) m')
+
   | step_seq: forall f s1 s2 k sp e m,
       step (State f (Sseq s1 s2) k sp e m)
         E0 (State f s1 (Kseq s2 k) sp e m)
@@ -505,9 +512,11 @@ Proof.
     intros. subst. inv H0. exists s1; auto.
   inversion H; subst; auto.
   exploit external_call_receptive; eauto. intros [vres2 [m2 EC2]]. 
+  exists (State f Sskip k sp (set_optvar optid vres2 e) m2). econstructor; eauto. 
+  exploit external_call_receptive; eauto. intros [vres2 [m2 EC2]]. 
   exists (Returnstate vres2 k m2). econstructor; eauto.
 (* trace length *)
-  inv H; simpl; try omega. eapply external_call_trace_length; eauto.
+  red; intros; inv H; simpl; try omega; eapply external_call_trace_length; eauto.
 Qed.
 
 (** * Alternate operational semantics (big-step) *)
@@ -608,6 +617,12 @@ with exec_stmt:
       eval_funcall m fd vargs t m' vres ->
       e' = set_optvar optid vres e ->
       exec_stmt f sp e m (Scall optid sig a bl) t e' m' Out_normal
+  | exec_Sbuiltin:
+      forall f sp e m optid ef bl t m' vargs vres e',
+      eval_exprlist ge sp e m bl vargs ->
+      external_call ef ge vargs m t vres m' ->
+      e' = set_optvar optid vres e ->
+      exec_stmt f sp e m (Sbuiltin optid ef bl) t e' m' Out_normal
   | exec_Sifthenelse:
       forall f sp e m a s1 s2 v b t e' m' out,
       eval_expr ge sp e m a v ->
@@ -882,6 +897,11 @@ Proof.
   eapply star_left. econstructor; eauto. 
   eapply star_right. apply H4. red; auto. 
   constructor. reflexivity. traceEq.
+  subst e'. constructor.
+
+(* builtin *)
+  econstructor; split.
+  apply star_one. econstructor; eauto. 
   subst e'. constructor.
 
 (* ifthenelse *)

@@ -250,7 +250,18 @@ Definition make_load (addr: expr) (ty_res: type) :=
   | By_nothing => Error (msg "Cshmgen.make_load")
   end.
 
-(** [make_store addr ty_res rhs ty_rhs] stores the value of the
+(** [make_vol_load dst addr ty] loads a volatile value of type [ty] from
+   the memory location denoted by the Csharpminor expression [addr],
+   and stores its result in variable [dst]. *)
+
+Definition make_vol_load (dst: ident) (addr: expr) (ty: type) :=
+  match (access_mode ty) with
+  | By_value chunk => OK (Sbuiltin (Some dst) (EF_vload chunk) (addr :: nil))
+  | By_reference => OK (Sset dst addr)
+  | By_nothing => Error (msg "Cshmgen.make_vol_load")
+  end.
+
+(** [make_store addr ty rhs] stores the value of the
    Csharpminor expression [rhs] into the memory location denoted by the
    Csharpminor expression [addr].  
    [ty] is the type of the memory location. *)
@@ -258,6 +269,15 @@ Definition make_load (addr: expr) (ty_res: type) :=
 Definition make_store (addr: expr) (ty: type) (rhs: expr) :=
   match access_mode ty with
   | By_value chunk => OK (Sstore chunk addr rhs)
+  | _ => Error (msg "Cshmgen.make_store")
+  end.
+
+(** [make_vol_store] is similar, but for a store to a location that
+    can be volatile. *)
+
+Definition make_vol_store (addr: expr) (ty: type) (rhs: expr) :=
+  match access_mode ty with
+  | By_value chunk => OK (Sbuiltin None (EF_vstore chunk) (addr :: rhs :: nil))
   | _ => Error (msg "Cshmgen.make_store")
   end.
 
@@ -503,7 +523,11 @@ Fixpoint transl_statement (tyret: type) (nbrk ncnt: nat)
   | Clight.Sskip =>
       OK Sskip
   | Clight.Sassign b c =>
-      match is_variable b with
+      if Csem.type_is_volatile (typeof b) then
+         (do tb <- transl_lvalue b;
+          do tc <- transl_expr c;
+          make_vol_store tb (typeof b) (make_cast (typeof c) (typeof b) tc))
+      else match is_variable b with
       | Some id =>
           do tc <- transl_expr c;
           var_set id (typeof b) (make_cast (typeof c) (typeof b) tc)
@@ -515,6 +539,9 @@ Fixpoint transl_statement (tyret: type) (nbrk ncnt: nat)
   | Clight.Sset x b =>
       do tb <- transl_expr b;
       OK(Sset x tb)
+  | Clight.Svolread x b =>
+      do tb <- transl_lvalue b;
+      make_vol_load x tb (typeof b)
   | Clight.Scall x b cl =>
       match classify_fun (typeof b) with
       | fun_case_f args res =>

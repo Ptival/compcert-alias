@@ -202,6 +202,8 @@ Fixpoint sel_stmt (ge: Cminor.genv) (s: Cminor.stmt) : stmt :=
       | None => Scall optid sg (sel_expr fn) (sel_exprlist args)
       | Some ef => Sbuiltin optid ef (sel_exprlist args)
       end
+  | Cminor.Sbuiltin optid ef args =>
+      Sbuiltin optid ef (sel_exprlist args)
   | Cminor.Stailcall sg fn args => 
       Stailcall sg (sel_expr fn) (sel_exprlist args)
   | Cminor.Sseq s1 s2 => Sseq (sel_stmt ge s1) (sel_stmt ge s2)

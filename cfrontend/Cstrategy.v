@@ -1293,7 +1293,7 @@ Definition semantics (p: program) :=
 (** This semantics is receptive to changes in events. *)
 
 Remark deref_loc_trace:
-  forall ge ty m b ofs t v,
+  forall F V (ge: Genv.t F V) ty m b ofs t v,
   deref_loc ge ty m b ofs t v ->
   match t with nil => True | ev :: nil => True | _ => False end.
 Proof.
@@ -1301,7 +1301,7 @@ Proof.
 Qed.
 
 Remark deref_loc_receptive:
-  forall ge ty m b ofs ev1 t1 v ev2,
+  forall F V (ge: Genv.t F V) ty m b ofs ev1 t1 v ev2,
   deref_loc ge ty m b ofs (ev1 :: t1) v ->
   match_traces ge (ev1 :: nil) (ev2 :: nil) ->
   t1 = nil /\ exists v', deref_loc ge ty m b ofs (ev2 :: nil) v'.
@@ -1313,7 +1313,7 @@ Proof.
 Qed.
 
 Remark assign_loc_trace:
-  forall ge ty m b ofs t v m',
+  forall F V (ge: Genv.t F V) ty m b ofs t v m',
   assign_loc ge ty m b ofs v t m' ->
   match t with nil => True | ev :: nil => output_event ev | _ => False end.
 Proof.
@@ -1321,7 +1321,7 @@ Proof.
 Qed.
 
 Remark assign_loc_receptive:
-  forall ge ty m b ofs ev1 t1 v m' ev2,
+  forall F V (ge: Genv.t F V) ty m b ofs ev1 t1 v m' ev2,
   assign_loc ge ty m b ofs v (ev1 :: t1) m' ->
   match_traces ge (ev1 :: nil) (ev2 :: nil) ->
   ev1 :: t1 = ev2 :: nil.

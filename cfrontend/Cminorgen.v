@@ -432,6 +432,9 @@ Fixpoint transl_stmt (ret: option typ) (cenv: compilenv)
       do (te, a) <- transl_expr cenv e;
       do tel <- transl_exprlist cenv el;
       OK (Scall (option_map for_temp optid) sig te tel)
+  | Csharpminor.Sbuiltin optid ef el =>
+      do tel <- transl_exprlist cenv el;
+      OK (Sbuiltin (option_map for_temp optid) ef tel)
   | Csharpminor.Sseq s1 s2 =>
       do ts1 <- transl_stmt ret cenv xenv s1;
       do ts2 <- transl_stmt ret cenv xenv s2;
@@ -515,6 +518,8 @@ Fixpoint addr_taken_stmt (s: Csharpminor.stmt): Identset.t :=
       Identset.union (addr_taken_expr e1) (addr_taken_expr e2)
   | Csharpminor.Scall optid sig e el =>
       Identset.union (addr_taken_expr e) (addr_taken_exprlist el)
+  | Csharpminor.Sbuiltin optid ef el =>
+      addr_taken_exprlist el
   | Csharpminor.Sseq s1 s2 =>
       Identset.union (addr_taken_stmt s1) (addr_taken_stmt s2)
   | Csharpminor.Sifthenelse e s1 s2 =>

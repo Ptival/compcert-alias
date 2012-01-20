@@ -61,6 +61,18 @@ Lemma functions_translated:
   Genv.find_funct tge v = Some tf /\ transl_fundef gce f = OK tf.
 Proof (Genv.find_funct_transf_partial2 (transl_fundef gce) transl_globvar _ TRANSL).
 
+Lemma var_info_translated:
+  forall b v,
+  Genv.find_var_info ge b = Some v ->
+  exists tv, Genv.find_var_info tge b = Some tv /\ transf_globvar transl_globvar v = OK tv.
+Proof (Genv.find_var_info_transf_partial2 (transl_fundef gce) transl_globvar _ TRANSL).
+
+Lemma var_info_rev_translated:
+  forall b tv,
+  Genv.find_var_info tge b = Some tv ->
+  exists v, Genv.find_var_info ge b = Some v /\ transf_globvar transl_globvar v = OK tv.
+Proof (Genv.find_var_info_rev_transf_partial2 (transl_fundef gce) transl_globvar _ TRANSL).
+
 Lemma sig_preserved_body:
   forall f tf cenv size,
   transl_funbody cenv size f = OK tf -> 
@@ -3114,6 +3126,35 @@ Proof.
   eapply match_Kcall with (cenv' := cenv); eauto.
   red; auto.
 
+(* builtin *)
+  monadInv TR.
+  exploit transl_exprlist_correct; eauto.
+  intros [tvargs [EVAL2 VINJ2]].
+  exploit match_callstack_match_globalenvs; eauto. intros [hi' MG].
+  exploit external_call_mem_inject; eauto. 
+  eapply inj_preserves_globals; eauto.
+  intros [f' [vres' [tm' [EC [VINJ [MINJ' [UNMAPPED [OUTOFREACH [INCR SEPARATED]]]]]]]]].
+  left; econstructor; split.
+  apply plus_one. econstructor. eauto. 
+  eapply external_call_symbols_preserved_2; eauto.
+  exact symbols_preserved.
+  eexact var_info_translated.
+  eexact var_info_rev_translated.
+  assert (MCS': match_callstack f' m' tm'
+                 (Frame cenv tfn e le te sp lo hi :: cs)
+                 (Mem.nextblock m') (Mem.nextblock tm')).
+    apply match_callstack_incr_bound with (Mem.nextblock m) (Mem.nextblock tm).
+    eapply match_callstack_external_call; eauto.
+    intros. eapply external_call_bounds; eauto.
+    omega. omega. 
+    eapply external_call_nextblock_incr; eauto.
+    eapply external_call_nextblock_incr; eauto.
+  econstructor; eauto.
+Opaque PTree.set.
+  unfold set_optvar. destruct optid; simpl. 
+  eapply match_callstack_set_temp; eauto. 
+  auto.
+
 (* seq *)
   monadInv TR. 
   left; econstructor; split.
@@ -3256,8 +3297,8 @@ Proof.
   apply plus_one. econstructor.
   eapply external_call_symbols_preserved_2; eauto.
   exact symbols_preserved.
-  eexact (Genv.find_var_info_transf_partial2 (transl_fundef gce) transl_globvar _ TRANSL).
-  eexact (Genv.find_var_info_rev_transf_partial2 (transl_fundef gce) transl_globvar _ TRANSL).
+  eexact var_info_translated.
+  eexact var_info_rev_translated.
   econstructor; eauto.
   apply match_callstack_incr_bound with (Mem.nextblock m) (Mem.nextblock tm).
   eapply match_callstack_external_call; eauto.

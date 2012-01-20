@@ -619,6 +619,15 @@ Proof.
   eapply functions_translated; eauto. 
   apply sig_function_translated.
   constructor; auto. apply call_cont_commut; auto.
+  (* Sbuiltin *)
+  exploit sel_exprlist_correct; eauto. intros [vargs' [P Q]].
+  exploit external_call_mem_extends; eauto. 
+  intros [vres' [m2 [A [B [C D]]]]].
+  left; econstructor; split.
+  econstructor. eauto. eapply external_call_symbols_preserved; eauto.
+  exact symbols_preserved. exact varinfo_preserved.
+  constructor; auto.
+  destruct optid; simpl; auto. apply set_var_lessdef; auto.
   (* Seq *)
   left; econstructor; split. constructor. constructor; auto. constructor; auto.
   (* Sifthenelse *)
