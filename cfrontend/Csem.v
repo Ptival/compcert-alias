@@ -1182,3 +1182,17 @@ Inductive final_state: state -> int -> Prop :=
 Definition semantics (p: program) :=
   Semantics step (initial_state p) final_state (Genv.globalenv p).
 
+(** This semantics has the single-event property. *)
+
+Lemma semantics_single_events: 
+  forall p, single_events (semantics p).
+Proof.
+  intros; red; intros. destruct H. 
+  set (ge := globalenv (semantics p)) in *.
+  assert (DEREF: forall chunk m b ofs t v, deref_loc ge chunk m b ofs t v -> (length t <= 1)%nat).
+    intros. inv H0; simpl; try omega. inv H3; simpl; try omega.
+  assert (ASSIGN: forall chunk m b ofs t v m', assign_loc ge chunk m b ofs v t m' -> (length t <= 1)%nat).
+    intros. inv H0; simpl; try omega. inv H3; simpl; try omega.
+  inv H; simpl; try omega. inv H0; eauto; simpl; try omega.
+  inv H; simpl; try omega. eapply external_call_trace_length; eauto.
+Qed.

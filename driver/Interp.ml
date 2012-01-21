@@ -119,6 +119,7 @@ let mem_of_state = function
   | ExprState(f, r, k, e, m) -> m
   | Callstate(fd, args, k, m) -> m
   | Returnstate(res, k, m) -> m
+  | Stuckstate -> assert false
 
 (* Comparing memory states *)
 
@@ -211,6 +212,7 @@ let rank_state = function
   | ExprState _ -> 1
   | Callstate _ -> 2
   | Returnstate _ -> 3
+  | Stuckstate -> 4
 
 let compare_state s1 s2 =
   if s1 == s2 then 0 else
@@ -382,16 +384,17 @@ let do_step p prog ge time s =
         exit (Int32.to_int (camlint_of_coqint r))
       end
   | None ->
-      match Cexec.do_step ge world s with
-      | [] ->
-          if !trace = 1 then
-            fprintf p "@[<hov 2>Time %d: %a@]@." time (print_state prog) s;
-          fprintf p "ERROR: Undefined behavior@.";
-          fprintf p "@].";
-          exit 126
-      | l ->
-          List.iter (fun (t, s') -> do_events p ge time s t) l;
-          List.map snd l
+      let l = Cexec.do_step ge world s in
+      if l = [] || List.exists (fun (t,s) -> s = Stuckstate) l then begin
+        if !trace = 1 then
+          fprintf p "@[<hov 2>Time %d: %a@]@." time (print_state prog) s;
+        fprintf p "ERROR: Undefined behavior@.";
+        fprintf p "@].";
+        exit 126
+      end else begin
+        List.iter (fun (t, s') -> do_events p ge time s t) l;
+        List.map snd l
+      end
 
 let rec explore p prog ge time ss =
   let succs =
