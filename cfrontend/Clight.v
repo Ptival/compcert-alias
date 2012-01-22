@@ -325,14 +325,14 @@ with eval_lvalue: expr -> block -> int -> Prop :=
   | eval_Ederef: forall a ty l ofs,
       eval_expr a (Vptr l ofs) ->
       eval_lvalue (Ederef a ty) l ofs
- | eval_Efield_struct:   forall a i ty l ofs id fList delta,
+ | eval_Efield_struct:   forall a i ty l ofs id fList att delta,
       eval_lvalue a l ofs ->
-      typeof a = Tstruct id fList ->
+      typeof a = Tstruct id fList att ->
       field_offset i fList = OK delta ->
       eval_lvalue (Efield a i ty) l (Int.add ofs (Int.repr delta))
- | eval_Efield_union:   forall a i ty l ofs id fList,
+ | eval_Efield_union:   forall a i ty l ofs id fList att,
       eval_lvalue a l ofs ->
-      typeof a = Tunion id fList ->
+      typeof a = Tunion id fList att ->
       eval_lvalue (Efield a i ty) l ofs.
 
 Scheme eval_expr_ind2 := Minimality for eval_expr Sort Prop
@@ -935,7 +935,7 @@ Inductive initial_state (p: program): state -> Prop :=
       Genv.init_mem p = Some m0 ->
       Genv.find_symbol ge p.(prog_main) = Some b ->
       Genv.find_funct_ptr ge b = Some f ->
-      type_of_fundef f = Tfunction Tnil (Tint I32 Signed) ->
+      type_of_fundef f = Tfunction Tnil type_int32s ->
       initial_state p (Callstate f nil Kstop m0).
 
 (** A final state is a [Returnstate] with an empty continuation. *)
@@ -982,7 +982,7 @@ Inductive bigstep_program_terminates (p: program): trace -> int -> Prop :=
       Genv.init_mem p = Some m0 ->
       Genv.find_symbol ge p.(prog_main) = Some b ->
       Genv.find_funct_ptr ge b = Some f ->
-      type_of_fundef f = Tfunction Tnil (Tint I32 Signed) ->
+      type_of_fundef f = Tfunction Tnil type_int32s ->
       eval_funcall ge m0 f nil t m1 (Vint r) ->
       bigstep_program_terminates p t r.
 
@@ -992,7 +992,7 @@ Inductive bigstep_program_diverges (p: program): traceinf -> Prop :=
       Genv.init_mem p = Some m0 ->
       Genv.find_symbol ge p.(prog_main) = Some b ->
       Genv.find_funct_ptr ge b = Some f ->
-      type_of_fundef f = Tfunction Tnil (Tint I32 Signed) ->
+      type_of_fundef f = Tfunction Tnil type_int32s ->
       evalinf_funcall ge m0 f nil t ->
       bigstep_program_diverges p t.
 

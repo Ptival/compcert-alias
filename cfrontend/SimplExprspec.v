@@ -50,10 +50,10 @@ Definition final (dst: destination) (a: expr) : list statement :=
 
 Inductive tr_rvalof: type -> expr -> list statement -> expr -> list ident -> Prop :=
   | tr_rvalof_nonvol: forall ty a tmp,
-      Csem.type_is_volatile ty = false ->
+      type_is_volatile ty = false ->
       tr_rvalof ty a nil a tmp
   | tr_rvalof_vol: forall ty a t tmp,
-      Csem.type_is_volatile ty = true -> In t tmp ->
+      type_is_volatile ty = true -> In t tmp ->
       tr_rvalof ty a (Svolread t a :: nil) (Etempvar t ty) tmp.
 (*
 Inductive tr_rvalof: type -> expr -> list statement -> expr -> list ident -> Prop :=
@@ -612,7 +612,7 @@ Lemma transl_valof_meets_spec:
   exists tmps, tr_rvalof ty a sl b tmps /\ contained tmps g g'.
 Proof.
   unfold transl_valof; intros.
-  destruct (Csem.type_is_volatile ty) as []_eqn; monadInv H.
+  destruct (type_is_volatile ty) as []_eqn; monadInv H.
   exists (x :: nil); split; eauto with gensym. econstructor; eauto with coqlib.
   exists (@nil ident); split; eauto with gensym. constructor; auto.
 (*

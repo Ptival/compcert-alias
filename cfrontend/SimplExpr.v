@@ -129,8 +129,8 @@ Function makeif (a: expr) (s1 s2: statement) : statement :=
 
 Definition transl_incrdecr (id: incr_or_decr) (a: expr) (ty: type) : expr :=
   match id with
-  | Incr => Ebinop Oadd a (Econst_int Int.one (Tint I32 Signed)) (typeconv ty)
-  | Decr => Ebinop Osub a (Econst_int Int.one (Tint I32 Signed)) (typeconv ty)
+  | Incr => Ebinop Oadd a (Econst_int Int.one type_int32s) (typeconv ty)
+  | Decr => Ebinop Osub a (Econst_int Int.one type_int32s) (typeconv ty)
   end.
 
 (** Generate a [Sset] or [Svolread] operation as appropriate
@@ -177,7 +177,7 @@ Inductive destination : Type :=
   | For_effects
   | For_test (tyl: list type) (s1 s2: statement).
 
-Definition dummy_expr := Econst_int Int.zero (Tint I32 Signed).
+Definition dummy_expr := Econst_int Int.zero type_int32s.
 
 Definition finish (dst: destination) (sl: list statement) (a: expr) :=
   match dst with
@@ -331,7 +331,7 @@ Definition transl_if (r: C.expr) (s1 s2: statement) : mon statement :=
 
 (** Translation of statements *)
 
-Definition expr_true := Econst_int Int.one (Tint I32 Signed).
+Definition expr_true := Econst_int Int.one type_int32s.
 
 Definition is_Sskip:
   forall s, {s = C.Sskip} + {s <> C.Sskip}.

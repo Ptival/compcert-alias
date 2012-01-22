@@ -36,6 +36,7 @@ Proof.
   assert (forall (x y: intsize), {x=y} + {x<>y}). decide equality.
   assert (forall (x y: signedness), {x=y} + {x<>y}). decide equality.
   assert (forall (x y: floatsize), {x=y} + {x<>y}). decide equality.
+  assert (forall (x y: attr), {x=y} + {x<>y}). decide equality. apply bool_dec.
   generalize ident_eq zeq. intros E1 E2. 
   decide equality.
   decide equality.
@@ -690,12 +691,12 @@ Fixpoint step_expr (k: kind) (a: expr) (m: mem): reducts expr :=
       match is_loc l with
       | Some(b, ofs, ty') =>
           match ty' with
-          | Tstruct id fList =>
+          | Tstruct id fList _ =>
               match field_offset f fList with
               | Error _ => stuck
               | OK delta => topred (Lred (Eloc b (Int.add ofs (Int.repr delta)) ty) m)
               end
-          | Tunion id fList =>
+          | Tunion id fList _ =>
               topred (Lred (Eloc b ofs ty) m)
           | _ => stuck
           end
@@ -784,7 +785,7 @@ Fixpoint step_expr (k: kind) (a: expr) (m: mem): reducts expr :=
           let op := match id with Incr => Oadd | Decr => Osub end in
           let r' :=
             Ecomma (Eassign (Eloc b ofs ty) 
-                           (Ebinop op (Eval v1 ty) (Eval (Vint Int.one) (Tint I32 Signed)) (typeconv ty))
+                           (Ebinop op (Eval v1 ty) (Eval (Vint Int.one) type_int32s) (typeconv ty))
                            ty)
                    (Eval v1 ty) ty in
           topred (Rred r' m t)
@@ -898,8 +899,8 @@ Definition invert_expr_prop (a: expr) (m: mem) : Prop :=
       exists b, exists ofs, v = Vptr b ofs
   | Efield (Eloc b ofs ty1) f ty =>
       match ty1 with
-      | Tstruct _ fList => exists delta, field_offset f fList = Errors.OK delta
-      | Tunion _ _ => True
+      | Tstruct _ fList _ => exists delta, field_offset f fList = Errors.OK delta
+      | Tunion _ _ _ => True
       | _ => False
       end
   | Eval v ty => False
@@ -1849,9 +1850,9 @@ Definition do_step (w: world) (s: state) : list (trace * state) :=
       ret (Returnstate Vundef (call_cont k) m')
   | State f (Sreturn (Some x)) k e m => ret (ExprState f x (Kreturn k) e m)
   | State f Sskip ((Kstop | Kcall _ _ _ _ _) as k) e m => 
-     check (type_eq f.(fn_return) Tvoid);
-     do m' <- Mem.free_list m (blocks_of_env e);
-     ret (Returnstate Vundef k m')
+      check type_eq (f.(fn_return)) Tvoid;
+      do m' <- Mem.free_list m (blocks_of_env e);
+      ret (Returnstate Vundef k m')
 
   | State f (Sswitch x sl) k e m => ret (ExprState f x (Kswitch1 sl k) e m)
   | State f (Sskip|Sbreak) (Kswitch2 k) e m => ret (State f Sskip k e m)
@@ -2017,7 +2018,7 @@ Proof with (unfold ret; auto with coqlib).
   destruct H0; subst x...
   rewrite H0...
   rewrite H0; rewrite H1...
-  rewrite pred_dec_true; auto. rewrite H2. red in H0. destruct k; try contradiction...
+  rewrite H1. rewrite dec_eq_true. rewrite H2. red in H0. destruct k; try contradiction...
   destruct H0; subst x...
   rewrite H0...
 
@@ -2036,7 +2037,7 @@ Definition do_initial_state (p: program): option (genv * state) :=
   do m0 <- Genv.init_mem p;
   do b <- Genv.find_symbol ge p.(prog_main);
   do f <- Genv.find_funct_ptr ge b;
-  check (type_eq (type_of_fundef f) (Tfunction Tnil (Tint I32 Signed)));
+  check (type_eq (type_of_fundef f) (Tfunction Tnil type_int32s));
   Some (ge, Callstate f nil Kstop m0).
 
 Definition at_final_state (S: state): option int :=

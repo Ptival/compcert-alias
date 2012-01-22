@@ -48,6 +48,15 @@ Inductive floatsize : Type :=
   | F32: floatsize
   | F64: floatsize.
 
+(** Every type carries a set of attributes.  Currently, only one
+  attribute is modeled: [volatile]. *)
+
+Record attr : Type := mk_attr {
+  attr_volatile: bool
+}.
+
+Definition noattr := {| attr_volatile := false |}.
+
 (** The syntax of type expressions.  Some points to note:
 - Array types [Tarray n] carry the size [n] of the array.
   Arrays with unknown sizes are represented by pointer types.
@@ -84,15 +93,15 @@ Inductive floatsize : Type :=
 *)
 
 Inductive type : Type :=
-  | Tvoid: type                            (**r the [void] type *)
-  | Tint: intsize -> signedness -> type    (**r integer types *)
-  | Tfloat: floatsize -> type              (**r floating-point types *)
-  | Tpointer: type -> type                 (**r pointer types ([*ty]) *)
-  | Tarray: type -> Z -> type              (**r array types ([ty[len]]) *)
-  | Tfunction: typelist -> type -> type    (**r function types *)
-  | Tstruct: ident -> fieldlist -> type    (**r struct types *)
-  | Tunion: ident -> fieldlist -> type     (**r union types *)
-  | Tcomp_ptr: ident -> type               (**r pointer to named struct or union *)
+  | Tvoid: type                                    (**r the [void] type *)
+  | Tint: intsize -> signedness -> attr -> type    (**r integer types *)
+  | Tfloat: floatsize -> attr -> type              (**r floating-point types *)
+  | Tpointer: type -> attr -> type                 (**r pointer types ([*ty]) *)
+  | Tarray: type -> Z -> attr -> type              (**r array types ([ty[len]]) *)
+  | Tfunction: typelist -> type -> type            (**r function types *)
+  | Tstruct: ident -> fieldlist -> attr -> type    (**r struct types *)
+  | Tunion: ident -> fieldlist -> attr -> type     (**r union types *)
+  | Tcomp_ptr: ident -> attr -> type               (**r pointer to named struct or union *)
 
 with typelist : Type :=
   | Tnil: typelist
@@ -102,16 +111,33 @@ with fieldlist : Type :=
   | Fnil: fieldlist
   | Fcons: ident -> type -> fieldlist -> fieldlist.
 
+(** Extract the attributes of a type. *)
+
+Definition attr_of_type (ty: type) :=
+  match ty with
+  | Tvoid => noattr
+  | Tint sz si a => a
+  | Tfloat sz a => a
+  | Tpointer elt a => a
+  | Tarray elt sz a => a
+  | Tfunction args res => noattr
+  | Tstruct id fld a => a
+  | Tunion id fld a => a
+  | Tcomp_ptr id a => a
+  end.
+
+Definition type_int32s := Tint I32 Signed noattr.
+
 (** The usual unary conversion.  Promotes small integer types to [signed int32]
   and degrades array types and function types to pointer types. *)
 
 Definition typeconv (ty: type) : type :=
   match ty with
-  | Tint I32 Unsigned => ty
-  | Tint _ _ => Tint I32 Signed
-  | Tarray t sz => Tpointer t
-  | Tfunction _ _ => Tpointer ty
-  | _ => ty
+  | Tint I32 Unsigned _ => ty
+  | Tint _ _ a          => Tint I32 Signed a
+  | Tarray t sz a       => Tpointer t a
+  | Tfunction _ _       => Tpointer ty noattr
+  | _                   => ty
   end.
 
 (** ** Expressions *)
@@ -207,23 +233,23 @@ as [*(r1 + r2)].
 *)
 
 Definition Eindex (r1 r2: expr) (ty: type) :=
-  Ederef (Ebinop Oadd r1 r2 (Tpointer ty)) ty.
+  Ederef (Ebinop Oadd r1 r2 (Tpointer ty noattr)) ty.
 
 (** Pre-increment [++l] and pre-decrement [--l] are expressed as
     [l += 1] and [l -= 1], respectively. *)
 
 Definition Epreincr (id: incr_or_decr) (l: expr) (ty: type) :=
   Eassignop (match id with Incr => Oadd | Decr => Osub end) 
-            l (Eval (Vint Int.one) (Tint I32 Signed)) (typeconv ty) ty.
+            l (Eval (Vint Int.one) type_int32s) (typeconv ty) ty.
 
 (** Sequential ``and'' [r1 && r2] is viewed as two conditionals
     [r1 ? (r2 ? 1 : 0) : 0]. *)
 
 Definition Eseqand (r1 r2: expr) (ty: type) :=
   Econdition r1 
-    (Econdition r2 (Eval (Vint Int.one) (Tint I32 Signed))
-                   (Eval (Vint Int.zero) (Tint I32 Signed)) ty)
-    (Eval (Vint Int.zero) (Tint I32 Signed))
+    (Econdition r2 (Eval (Vint Int.one) type_int32s)
+                   (Eval (Vint Int.zero) type_int32s) ty)
+    (Eval (Vint Int.zero) type_int32s)
     ty.
                   
 (** Sequential ``or'' [r1 || r2] is viewed as two conditionals
@@ -231,9 +257,9 @@ Definition Eseqand (r1 r2: expr) (ty: type) :=
 
 Definition Eseqor (r1 r2: expr) (ty: type) :=
   Econdition r1 
-    (Eval (Vint Int.one) (Tint I32 Signed))
-    (Econdition r2 (Eval (Vint Int.one) (Tint I32 Signed))
-                   (Eval (Vint Int.zero) (Tint I32 Signed)) ty)
+    (Eval (Vint Int.one) type_int32s)
+    (Econdition r2 (Eval (Vint Int.one) type_int32s)
+                   (Eval (Vint Int.zero) type_int32s) ty)
     ty.
 
 (** Extract the type part of a type-annotated expression. *)
@@ -353,17 +379,17 @@ Definition type_of_fundef (f: fundef) : type :=
 Fixpoint alignof (t: type) : Z :=
   match t with
   | Tvoid => 1
-  | Tint I8 _ => 1
-  | Tint I16 _ => 2
-  | Tint I32 _ => 4
-  | Tfloat F32 => 4
-  | Tfloat F64 => 8
-  | Tpointer _ => 4
-  | Tarray t' n => alignof t'
+  | Tint I8 _ _ => 1
+  | Tint I16 _ _ => 2
+  | Tint I32 _ _ => 4
+  | Tfloat F32 _ => 4
+  | Tfloat F64 _ => 8
+  | Tpointer _ _ => 4
+  | Tarray t' _ _ => alignof t'
   | Tfunction _ _ => 1
-  | Tstruct _ fld => alignof_fields fld
-  | Tunion _ fld => alignof_fields fld
-  | Tcomp_ptr _ => 4
+  | Tstruct _ fld _ => alignof_fields fld
+  | Tunion _ fld _ => alignof_fields fld
+  | Tcomp_ptr _ _ => 4
   end
 
 with alignof_fields (f: fieldlist) : Z :=
@@ -407,58 +433,22 @@ Proof.
   intros. destruct (alignof_fields_power_of_2 f) as [p EQ]. rewrite EQ. apply two_power_nat_pos. 
 Qed.
 
-(*
-Fixpoint In_fieldlist (id: ident) (ty: type) (f: fieldlist) : Prop :=
-  match f with
-  | Fnil => False
-  | Fcons id1 ty1 f1 => (id1 = id /\ ty1 = ty) \/ In_fieldlist id ty f1
-  end.
-
-Remark divides_max_pow_two:
-  forall a b,
-  (two_power_nat b | Zmax (two_power_nat a) (two_power_nat b)).
-Proof.
-  intros.
-  rewrite Zmax_spec. destruct (zlt (two_power_nat b) (two_power_nat a)).
-  repeat rewrite two_power_nat_two_p in *. 
-  destruct (zle (Z_of_nat a) (Z_of_nat b)).
-  assert (two_p (Z_of_nat a) <= two_p (Z_of_nat b)). apply two_p_monotone; omega.
-  omegaContradiction.
-  exists (two_p (Z_of_nat a - Z_of_nat b)). 
-  rewrite <- two_p_is_exp. decEq. omega. omega. omega. 
-  apply Zdivide_refl.
-Qed.
-
-Lemma alignof_each_field:
-  forall f id t, In_fieldlist id t f -> (alignof t | alignof_fields f).
-Proof.
-  induction f; simpl; intros.
-  contradiction.
-  destruct (alignof_power_of_2 t) as [k1 EQ1].
-  destruct (alignof_fields_power_of_2 f) as [k2 EQ2].
-  destruct H as [[A B] | A]; subst; rewrite EQ1; rewrite EQ2. 
-  rewrite Zmax_comm. apply divides_max_pow_two.
-  eapply Zdivide_trans. eapply IHf; eauto. 
-  rewrite EQ2. apply divides_max_pow_two.
-Qed.
-*)
-
 (** Size of a type, in bytes. *)
 
 Fixpoint sizeof (t: type) : Z :=
   match t with
   | Tvoid => 1
-  | Tint I8 _ => 1
-  | Tint I16 _ => 2
-  | Tint I32 _ => 4
-  | Tfloat F32 => 4
-  | Tfloat F64 => 8
-  | Tpointer _ => 4
-  | Tarray t' n => sizeof t' * Zmax 1 n
+  | Tint I8 _ _ => 1
+  | Tint I16 _ _ => 2
+  | Tint I32 _ _ => 4
+  | Tfloat F32 _ => 4
+  | Tfloat F64 _ => 8
+  | Tpointer _ _ => 4
+  | Tarray t' n _ => sizeof t' * Zmax 1 n
   | Tfunction _ _ => 1
-  | Tstruct _ fld => align (Zmax 1 (sizeof_struct fld 0)) (alignof t)
-  | Tunion _ fld => align (Zmax 1 (sizeof_union fld)) (alignof t)
-  | Tcomp_ptr _ => 4
+  | Tstruct _ fld _ => align (Zmax 1 (sizeof_struct fld 0)) (alignof t)
+  | Tunion _ fld _ => align (Zmax 1 (sizeof_union fld)) (alignof t)
+  | Tcomp_ptr _ _ => 4
   end
 
 with sizeof_struct (fld: fieldlist) (pos: Z) {struct fld} : Z :=
@@ -557,9 +547,9 @@ Proof.
 Qed.
 
 Lemma field_offset_in_range:
-  forall sid fld fid ofs ty,
+  forall sid fld a fid ofs ty,
   field_offset fid fld = OK ofs -> field_type fid fld = OK ty ->
-  0 <= ofs /\ ofs + sizeof ty <= sizeof (Tstruct sid fld).
+  0 <= ofs /\ ofs + sizeof ty <= sizeof (Tstruct sid fld a).
 Proof.
   intros. exploit field_offset_rec_in_range; eauto. intros [A B].
   split. auto.  simpl. eapply Zle_trans. eauto.
@@ -649,21 +639,31 @@ Inductive mode: Type :=
 
 Definition access_mode (ty: type) : mode :=
   match ty with
-  | Tint I8 Signed => By_value Mint8signed
-  | Tint I8 Unsigned => By_value Mint8unsigned
-  | Tint I16 Signed => By_value Mint16signed
-  | Tint I16 Unsigned => By_value Mint16unsigned
-  | Tint I32 _ => By_value Mint32
-  | Tfloat F32 => By_value Mfloat32
-  | Tfloat F64 => By_value Mfloat64
+  | Tint I8 Signed _ => By_value Mint8signed
+  | Tint I8 Unsigned _ => By_value Mint8unsigned
+  | Tint I16 Signed _ => By_value Mint16signed
+  | Tint I16 Unsigned _ => By_value Mint16unsigned
+  | Tint I32 _ _ => By_value Mint32
+  | Tfloat F32 _ => By_value Mfloat32
+  | Tfloat F64 _ => By_value Mfloat64
   | Tvoid => By_nothing
-  | Tpointer _ => By_value Mint32
-  | Tarray _ _ => By_reference
+  | Tpointer _ _ => By_value Mint32
+  | Tarray _ _ _ => By_reference
   | Tfunction _ _ => By_reference
-  | Tstruct _ fList => By_nothing
-  | Tunion _ fList => By_nothing
-  | Tcomp_ptr _ => By_nothing
+  | Tstruct _ fList _ => By_nothing
+  | Tunion _ fList _ => By_nothing
+  | Tcomp_ptr _ _ => By_nothing
 end.
+
+(** For the purposes of the semantics and the compiler, a type denotes
+  a volatile access if it carries the [volatile] attribute and it is
+  accessed by value. *)
+
+Definition type_is_volatile (ty: type) : bool :=
+  match access_mode ty with
+  | By_value _ => attr_volatile (attr_of_type ty)
+  | _          => false
+  end.
 
 (** Unroll the type of a structure or union field, substituting
     [Tcomp_ptr] by a pointer to the structure. *)
@@ -676,14 +676,14 @@ Variable comp: type.
 Fixpoint unroll_composite (ty: type) : type :=
   match ty with
   | Tvoid => ty
-  | Tint _ _ => ty
-  | Tfloat _ => ty
-  | Tpointer t1 => Tpointer (unroll_composite t1)
-  | Tarray t1 sz => Tarray (unroll_composite t1) sz
+  | Tint _ _ _ => ty
+  | Tfloat _ _ => ty
+  | Tpointer t1 a => Tpointer (unroll_composite t1) a
+  | Tarray t1 sz a => Tarray (unroll_composite t1) sz a
   | Tfunction t1 t2 => Tfunction (unroll_composite_list t1) (unroll_composite t2)
-  | Tstruct id fld => if ident_eq id cid then ty else Tstruct id (unroll_composite_fields fld)
-  | Tunion id fld => if ident_eq id cid then ty else Tunion id (unroll_composite_fields fld)
-  | Tcomp_ptr id => if ident_eq id cid then Tpointer comp else ty
+  | Tstruct id fld a => if ident_eq id cid then ty else Tstruct id (unroll_composite_fields fld) a
+  | Tunion id fld a => if ident_eq id cid then ty else Tunion id (unroll_composite_fields fld) a
+  | Tcomp_ptr id a => if ident_eq id cid then Tpointer comp a else ty
   end
 
 with unroll_composite_list (tl: typelist) : typelist :=
@@ -721,9 +721,9 @@ Opaque alignof.
                       sizeof_struct (unroll_composite_fields fld) pos = sizeof_struct fld pos));
   simpl; intros; auto.
   congruence.
-  destruct H. rewrite <- (alignof_unroll_composite (Tstruct i f)).
+  destruct H. rewrite <- (alignof_unroll_composite (Tstruct i f a)).
   simpl. destruct (ident_eq i cid); simpl. auto. rewrite H0; auto.
-  destruct H. rewrite <- (alignof_unroll_composite (Tunion i f)).
+  destruct H. rewrite <- (alignof_unroll_composite (Tunion i f a)).
   simpl. destruct (ident_eq i cid); simpl. auto. rewrite H; auto.
   destruct (ident_eq i cid); auto.
   destruct H0. split. congruence.
@@ -750,9 +750,9 @@ Inductive classify_neg_cases : Type :=
 
 Definition classify_neg (ty: type) : classify_neg_cases :=
   match ty with
-  | Tint I32 Unsigned => neg_case_i Unsigned
-  | Tint _ _ => neg_case_i Signed
-  | Tfloat _ => neg_case_f
+  | Tint I32 Unsigned _ => neg_case_i Unsigned
+  | Tint _ _ _ => neg_case_i Signed
+  | Tfloat _ _ => neg_case_f
   | _ => neg_default
   end.
 
@@ -762,8 +762,8 @@ Inductive classify_notint_cases : Type :=
 
 Definition classify_notint (ty: type) : classify_notint_cases :=
   match ty with
-  | Tint I32 Unsigned => notint_case_i Unsigned
-  | Tint _ _ => notint_case_i Signed
+  | Tint I32 Unsigned _ => notint_case_i Unsigned
+  | Tint _ _ _ => notint_case_i Signed
   | _ => notint_default
   end.
 
@@ -778,9 +778,9 @@ Inductive classify_bool_cases : Type :=
 
 Definition classify_bool (ty: type) : classify_bool_cases :=
   match typeconv ty with
-  | Tint _ _ => bool_case_ip
-  | Tpointer _ => bool_case_ip
-  | Tfloat _ => bool_case_f
+  | Tint _ _ _ => bool_case_ip
+  | Tpointer _ _ => bool_case_ip
+  | Tfloat _ _ => bool_case_f
   | _ => bool_default
   end.
 
@@ -789,20 +789,20 @@ Inductive classify_add_cases : Type :=
   | add_case_ff                        (**r float, float *)
   | add_case_if(s: signedness)         (**r int, float *)
   | add_case_fi(s: signedness)         (**r float, int *)
-  | add_case_pi(ty: type)              (**r pointer, int *)
-  | add_case_ip(ty: type)              (**r int, pointer *)
+  | add_case_pi(ty: type)(a: attr)     (**r pointer, int *)
+  | add_case_ip(ty: type)(a: attr)     (**r int, pointer *)
   | add_default.
 
 Definition classify_add (ty1: type) (ty2: type) :=
   match typeconv ty1, typeconv ty2 with
-  | Tint I32 Unsigned, Tint _ _ => add_case_ii Unsigned
-  | Tint _ _, Tint I32 Unsigned => add_case_ii Unsigned
-  | Tint _ _, Tint _ _ => add_case_ii Signed
-  | Tfloat _, Tfloat _ => add_case_ff
-  | Tint _ sg, Tfloat _ => add_case_if sg
-  | Tfloat _, Tint _ sg => add_case_fi sg
-  | Tpointer ty, Tint _ _ => add_case_pi ty
-  | Tint _ _, Tpointer ty => add_case_ip ty
+  | Tint I32 Unsigned _, Tint _ _ _ => add_case_ii Unsigned
+  | Tint _ _ _, Tint I32 Unsigned _ => add_case_ii Unsigned
+  | Tint _ _ _, Tint _ _ _ => add_case_ii Signed
+  | Tfloat _ _, Tfloat _ _ => add_case_ff
+  | Tint _ sg _, Tfloat _ _ => add_case_if sg
+  | Tfloat _ _, Tint _ sg _ => add_case_fi sg
+  | Tpointer ty a, Tint _ _ _ => add_case_pi ty a
+  | Tint _ _ _, Tpointer ty a => add_case_ip ty a
   | _, _ => add_default
   end.
 
@@ -817,14 +817,14 @@ Inductive classify_sub_cases : Type :=
 
 Definition classify_sub (ty1: type) (ty2: type) :=
   match typeconv ty1, typeconv ty2 with
-  | Tint I32 Unsigned, Tint _ _ => sub_case_ii Unsigned
-  | Tint _ _, Tint I32 Unsigned => sub_case_ii Unsigned
-  | Tint _ _, Tint _ _ => sub_case_ii Signed
-  | Tfloat _ , Tfloat _ => sub_case_ff
-  | Tint _ sg, Tfloat _ => sub_case_if sg
-  | Tfloat _, Tint _ sg => sub_case_fi sg
-  | Tpointer ty , Tint _ _ => sub_case_pi ty
-  | Tpointer ty , Tpointer _ => sub_case_pp ty
+  | Tint I32 Unsigned _, Tint _ _ _ => sub_case_ii Unsigned
+  | Tint _ _ _, Tint I32 Unsigned _ => sub_case_ii Unsigned
+  | Tint _ _ _, Tint _ _ _ => sub_case_ii Signed
+  | Tfloat _ _ , Tfloat _ _ => sub_case_ff
+  | Tint _ sg _, Tfloat _ _ => sub_case_if sg
+  | Tfloat _ _, Tint _ sg _ => sub_case_fi sg
+  | Tpointer ty _, Tint _ _ _ => sub_case_pi ty
+  | Tpointer ty _ , Tpointer _ _ => sub_case_pp ty
   | _ ,_ => sub_default
   end.
 
@@ -837,12 +837,12 @@ Inductive classify_mul_cases : Type:=
 
 Definition classify_mul (ty1: type) (ty2: type) :=
   match typeconv ty1, typeconv ty2 with
-  | Tint I32 Unsigned, Tint _ _ => mul_case_ii Unsigned
-  | Tint _ _, Tint I32 Unsigned => mul_case_ii Unsigned
-  | Tint _ _, Tint _ _ => mul_case_ii Signed
-  | Tfloat _ , Tfloat _ => mul_case_ff
-  | Tint _ sg, Tfloat _ => mul_case_if sg
-  | Tfloat _, Tint _ sg => mul_case_fi sg
+  | Tint I32 Unsigned _, Tint _ _ _ => mul_case_ii Unsigned
+  | Tint _ _ _, Tint I32 Unsigned _ => mul_case_ii Unsigned
+  | Tint _ _ _, Tint _ _ _ => mul_case_ii Signed
+  | Tfloat _ _ , Tfloat _ _ => mul_case_ff
+  | Tint _ sg _, Tfloat _ _ => mul_case_if sg
+  | Tfloat _ _, Tint _ sg _ => mul_case_fi sg
   | _,_  => mul_default
 end.
 
@@ -855,12 +855,12 @@ Inductive classify_div_cases : Type:=
 
 Definition classify_div (ty1: type) (ty2: type) :=
   match typeconv ty1, typeconv ty2 with
-  | Tint I32 Unsigned, Tint _ _ => div_case_ii Unsigned
-  | Tint _ _, Tint I32 Unsigned => div_case_ii Unsigned
-  | Tint _ _, Tint _ _ => div_case_ii Signed
-  | Tfloat _ , Tfloat _ => div_case_ff
-  | Tint _ sg, Tfloat _ => div_case_if sg
-  | Tfloat _, Tint _ sg => div_case_fi sg
+  | Tint I32 Unsigned _, Tint _ _ _ => div_case_ii Unsigned
+  | Tint _ _ _, Tint I32 Unsigned _ => div_case_ii Unsigned
+  | Tint _ _ _, Tint _ _ _ => div_case_ii Signed
+  | Tfloat _ _ , Tfloat _ _ => div_case_ff
+  | Tint _ sg _, Tfloat _ _ => div_case_if sg
+  | Tfloat _ _, Tint _ sg _ => div_case_fi sg
   | _,_  => div_default
 end.
 
@@ -873,9 +873,9 @@ Inductive classify_binint_cases : Type:=
 
 Definition classify_binint (ty1: type) (ty2: type) :=
   match typeconv ty1, typeconv ty2 with
-  | Tint I32 Unsigned, Tint _ _ => binint_case_ii Unsigned
-  | Tint _ _, Tint I32 Unsigned => binint_case_ii Unsigned
-  | Tint _ _, Tint _ _ => binint_case_ii Signed
+  | Tint I32 Unsigned _, Tint _ _ _ => binint_case_ii Unsigned
+  | Tint _ _ _, Tint I32 Unsigned _ => binint_case_ii Unsigned
+  | Tint _ _ _, Tint _ _ _ => binint_case_ii Signed
   | _,_  => binint_default
 end.
 
@@ -887,8 +887,8 @@ Inductive classify_shift_cases : Type:=
 
 Definition classify_shift (ty1: type) (ty2: type) :=
   match typeconv ty1, typeconv ty2 with
-  | Tint I32 Unsigned, Tint _ _ => shift_case_ii Unsigned
-  | Tint _ _, Tint _ _ => shift_case_ii Signed
+  | Tint I32 Unsigned _, Tint _ _ _ => shift_case_ii Unsigned
+  | Tint _ _ _, Tint _ _ _ => shift_case_ii Signed
   | _,_  => shift_default
 end.
 
@@ -902,15 +902,15 @@ Inductive classify_cmp_cases : Type:=
 
 Definition classify_cmp (ty1: type) (ty2: type) :=
   match typeconv ty1, typeconv ty2 with 
-  | Tint I32 Unsigned , Tint _ _ => cmp_case_ii Unsigned
-  | Tint _ _ , Tint I32 Unsigned => cmp_case_ii Unsigned
-  | Tint _ _ , Tint _ _ => cmp_case_ii Signed
-  | Tfloat _ , Tfloat _ => cmp_case_ff
-  | Tint _ sg, Tfloat _ => cmp_case_if sg
-  | Tfloat _, Tint _ sg => cmp_case_fi sg
-  | Tpointer _ , Tpointer _ => cmp_case_pp
-  | Tpointer _ , Tint _ _ => cmp_case_pp
-  | Tint _ _, Tpointer _ => cmp_case_pp
+  | Tint I32 Unsigned _ , Tint _ _ _ => cmp_case_ii Unsigned
+  | Tint _ _ _ , Tint I32 Unsigned _ => cmp_case_ii Unsigned
+  | Tint _ _ _ , Tint _ _ _ => cmp_case_ii Signed
+  | Tfloat _ _ , Tfloat _ _ => cmp_case_ff
+  | Tint _ sg _, Tfloat _ _ => cmp_case_if sg
+  | Tfloat _ _, Tint _ sg _ => cmp_case_fi sg
+  | Tpointer _ _ , Tpointer _ _ => cmp_case_pp
+  | Tpointer _ _ , Tint _ _ _ => cmp_case_pp
+  | Tint _ _ _, Tpointer _ _ => cmp_case_pp
   | _ , _ => cmp_default
   end.
 
@@ -921,7 +921,7 @@ Inductive classify_fun_cases : Type:=
 Definition classify_fun (ty: type) :=
   match ty with 
   | Tfunction args res => fun_case_f args res
-  | Tpointer (Tfunction args res) => fun_case_f args res
+  | Tpointer (Tfunction args res) _ => fun_case_f args res
   | _ => fun_default
   end.
 
@@ -936,12 +936,12 @@ Inductive classify_cast_cases : Type :=
 
 Function classify_cast (tfrom tto: type) : classify_cast_cases :=
   match tto, tfrom with
-  | Tint I32 si2, (Tint _ _ | Tpointer _ | Tarray _ _ | Tfunction _ _) => cast_case_neutral
-  | Tint sz2 si2, Tint sz1 si1 => cast_case_i2i sz2 si2
-  | Tint sz2 si2, Tfloat sz1 => cast_case_f2i sz2 si2
-  | Tfloat sz2, Tfloat sz1 => cast_case_f2f sz2
-  | Tfloat sz2, Tint sz1 si1 => cast_case_i2f si1 sz2
-  | Tpointer _, (Tint _ _ | Tpointer _ | Tarray _ _ | Tfunction _ _) => cast_case_neutral
+  | Tint I32 si2 _, (Tint _ _ _ | Tpointer _ _ | Tarray _ _ _ | Tfunction _ _) => cast_case_neutral
+  | Tint sz2 si2 _, Tint sz1 si1 _ => cast_case_i2i sz2 si2
+  | Tint sz2 si2 _, Tfloat sz1 _ => cast_case_f2i sz2 si2
+  | Tfloat sz2 _, Tfloat sz1 _ => cast_case_f2f sz2
+  | Tfloat sz2 _, Tint sz1 si1 _ => cast_case_i2f si1 sz2
+  | Tpointer _ _, (Tint _ _ _ | Tpointer _ _ | Tarray _ _ _ | Tfunction _ _) => cast_case_neutral
   | Tvoid, _ => cast_case_void
   | _, _ => cast_case_default
   end.
@@ -951,14 +951,14 @@ Function classify_cast (tfrom tto: type) : classify_cast_cases :=
 
 Definition typ_of_type (t: type) : AST.typ :=
   match t with
-  | Tfloat _ => AST.Tfloat
+  | Tfloat _ _ => AST.Tfloat
   | _ => AST.Tint
   end.
 
 Definition opttyp_of_type (t: type) : option AST.typ :=
   match t with
   | Tvoid => None
-  | Tfloat _ => Some AST.Tfloat
+  | Tfloat _ _ => Some AST.Tfloat
   | _ => Some AST.Tint
   end.
 

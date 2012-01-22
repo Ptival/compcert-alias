@@ -105,11 +105,11 @@ Function sem_cast (v: val) (t1 t2: type) : option val :=
 
 Function bool_val (v: val) (t: type) : option bool :=
   match v, t with
-  | Vint n, Tint sz sg => Some (negb (Int.eq n Int.zero))
-  | Vint n, Tpointer t' => Some (negb (Int.eq n Int.zero))
-  | Vptr b ofs, Tint sz sg => Some true
-  | Vptr b ofs, Tpointer t' => Some true
-  | Vfloat f, Tfloat sz => Some (negb(Float.cmp Ceq f Float.zero))
+  | Vint n, Tint sz sg _ => Some (negb (Int.eq n Int.zero))
+  | Vint n, Tpointer t' _ => Some (negb (Int.eq n Int.zero))
+  | Vptr b ofs, Tint sz sg _ => Some true
+  | Vptr b ofs, Tpointer t' _ => Some true
+  | Vfloat f, Tfloat sz _ => Some (negb(Float.cmp Ceq f Float.zero))
   | _, _ => None
   end.
 
@@ -193,13 +193,13 @@ Function sem_add (v1:val) (t1:type) (v2: val) (t2:type) : option val :=
       | Vfloat n1, Vint n2 => Some (Vfloat (Float.add n1 (cast_int_float sg n2)))
       | _, _ => None
       end
-  | add_case_pi ty =>                   (**r pointer plus integer *)
+  | add_case_pi ty _ =>                 (**r pointer plus integer *)
       match v1,v2 with
       | Vptr b1 ofs1, Vint n2 => 
         Some (Vptr b1 (Int.add ofs1 (Int.mul (Int.repr (sizeof ty)) n2)))
       | _,  _ => None
       end   
-  | add_case_ip ty =>                   (**r integer plus pointer *)
+  | add_case_ip ty _ =>                 (**r integer plus pointer *)
       match v1,v2 with
       | Vint n1, Vptr b2 ofs2 => 
         Some (Vptr b2 (Int.add ofs2 (Int.mul (Int.repr (sizeof ty)) n1)))
@@ -472,8 +472,8 @@ Definition sem_binary_operation
 
 Definition sem_incrdecr (id: incr_or_decr) (v: val) (ty: type) :=
   match id with
-  | Incr => sem_add v ty (Vint Int.one) (Tint I32 Signed)
-  | Decr => sem_sub v ty (Vint Int.one) (Tint I32 Signed)
+  | Incr => sem_add v ty (Vint Int.one) type_int32s
+  | Decr => sem_sub v ty (Vint Int.one) type_int32s
   end.
 
 (** * Operational semantics *)
@@ -500,12 +500,10 @@ Definition empty_env: env := (PTree.empty (block * type)).
   returned, and [t] the trace of observables (nonempty if this is
   a volatile access). *)
 
-Parameter type_is_volatile: type -> bool.
-
 Inductive deref_loc {F V: Type} (ge: Genv.t F V) (ty: type) (m: mem) (b: block) (ofs: int) : trace -> val -> Prop :=
   | deref_loc_value: forall chunk v,
       access_mode ty = By_value chunk ->
-      type_is_volatile ty = false -> (*block_is_volatile ge b = false ->*)
+      type_is_volatile ty = false ->
       Mem.loadv chunk m (Vptr b ofs) = Some v ->
       deref_loc ge ty m b ofs E0 v
   | deref_loc_volatile: forall chunk t v,
@@ -527,7 +525,7 @@ Inductive assign_loc {F V: Type} (ge: Genv.t F V) (ty: type) (m: mem) (b: block)
                                                   trace -> mem -> Prop :=
   | assign_loc_value: forall chunk m',
       access_mode ty = By_value chunk ->
-      type_is_volatile ty = false -> (*block_is_volatile ge b = false ->*)
+      type_is_volatile ty = false ->
       Mem.storev chunk m (Vptr b ofs) v = Some m' ->
       assign_loc ge ty m b ofs v E0 m'
   | assign_loc_volatile: forall chunk t m',
@@ -642,12 +640,12 @@ Inductive lred: expr -> mem -> expr -> mem -> Prop :=
   | red_deref: forall b ofs ty1 ty m,
       lred (Ederef (Eval (Vptr b ofs) ty1) ty) m
            (Eloc b ofs ty) m
-  | red_field_struct: forall b ofs id fList f ty m delta,
+  | red_field_struct: forall b ofs id fList a f ty m delta,
       field_offset f fList = OK delta ->
-      lred (Efield (Eloc b ofs (Tstruct id fList)) f ty) m
+      lred (Efield (Eloc b ofs (Tstruct id fList a)) f ty) m
            (Eloc b (Int.add ofs (Int.repr delta)) ty) m
-  | red_field_union: forall b ofs id fList f ty m,
-      lred (Efield (Eloc b ofs (Tunion id fList)) f ty) m
+  | red_field_union: forall b ofs id fList a f ty m,
+      lred (Efield (Eloc b ofs (Tunion id fList a)) f ty) m
            (Eloc b ofs ty) m.
 
 (** Head reductions for r-values *)
@@ -694,7 +692,7 @@ Inductive rred: expr -> mem -> trace -> expr -> mem -> Prop :=
       op = match id with Incr => Oadd | Decr => Osub end ->
       rred (Epostincr id (Eloc b ofs ty) ty) m
          t (Ecomma (Eassign (Eloc b ofs ty) 
-                           (Ebinop op (Eval v1 ty) (Eval (Vint Int.one) (Tint I32 Signed)) (typeconv ty))
+                           (Ebinop op (Eval v1 ty) (Eval (Vint Int.one) type_int32s) (typeconv ty))
                            ty)
                    (Eval v1 ty) ty) m
   | red_comma: forall v ty1 r2 ty m,
@@ -1168,7 +1166,7 @@ Inductive initial_state (p: program): state -> Prop :=
       Genv.init_mem p = Some m0 ->
       Genv.find_symbol ge p.(prog_main) = Some b ->
       Genv.find_funct_ptr ge b = Some f ->
-      type_of_fundef f = Tfunction Tnil (Tint I32 Signed) ->
+      type_of_fundef f = Tfunction Tnil type_int32s ->
       initial_state p (Callstate f nil Kstop m0).
 
 (** A final state is a [Returnstate] with an empty continuation. *)

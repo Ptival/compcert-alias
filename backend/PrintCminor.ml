@@ -21,6 +21,7 @@ open Datatypes
 open BinPos
 open Integers
 open AST
+open PrintAST
 open Cminor
 
 (* Precedences and associativity -- like those of C *)
@@ -193,6 +194,15 @@ let rec print_stmt p s =
                 print_expr e1
                 print_expr_list (true, el)
                 print_sig sg
+  | Sbuiltin(None, ef, el) ->
+      fprintf p "@[<hv 2>builtin %s@,(@[<hov 0>%a@])@;@]"
+                (name_of_external ef)
+                print_expr_list (true, el)
+  | Sbuiltin(Some id, ef, el) ->
+      fprintf p "@[<hv 2>%s =@ builtin %s@,(@[<hov 0>%a@]);@]@]"
+                (ident_name id)
+                (name_of_external ef)
+                print_expr_list (true, el)
   | Sseq(Sskip, s2) ->
       print_stmt p s2
   | Sseq(s1, Sskip) ->

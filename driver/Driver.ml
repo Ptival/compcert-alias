@@ -73,7 +73,6 @@ let parse_c_file sourcename ifile =
   ^ (if !option_fstruct_assign then "S" else "")
   ^ (if !option_fbitfields then "f" else "")
   ^ (if !option_fpacked_structs then "p" else "")
-  ^ (if !option_fvolatile_rmw then "v" else "")
   in
   (* Parsing and production of a simplified C AST *)
   let ast =
@@ -336,7 +335,6 @@ Language support options (use -fno-<opt> to turn off -f<opt>) :
   -fstruct-passing  Emulate passing structs and unions by value [off]
   -fstruct-assign   Emulate assignment between structs or unions [off]
   -fvararg-calls Emulate calls to variable-argument functions [on]
-  -fvolatile-rmw Emulate ++, -- and op= on volatile l-values [on]
   -fpacked-structs  Emulate packed structs [off]
   -fall          Activate all language support options above
   -fnone         Turn off all language support options above
@@ -375,8 +373,7 @@ Interpreter mode:
 
 let language_support_options = [
   option_fbitfields; option_flonglong; option_flongdouble; option_fstruct_passing;
-  option_fstruct_assign; option_fvararg_calls; option_fpacked_structs;
-  option_fvolatile_rmw
+  option_fstruct_assign; option_fvararg_calls; option_fpacked_structs
 ]
 
 let cmdline_actions =
@@ -441,7 +438,6 @@ let cmdline_actions =
   @ f_opt "madd" option_fmadd
   @ f_opt "packed-structs" option_fpacked_structs
   @ f_opt "sse" option_fsse
-  @ f_opt "volatile-rmw" option_fvolatile_rmw
 
 let _ =
   Gc.set { (Gc.get()) with Gc.minor_heap_size = 524288 };

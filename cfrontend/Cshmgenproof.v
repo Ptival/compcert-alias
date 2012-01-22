@@ -107,8 +107,8 @@ Proof.
 Qed.
 
 Remark cast_int_int_normalized:
-  forall sz si chunk n,
-  access_mode (Tint sz si) = By_value chunk ->
+  forall sz si a chunk n,
+  access_mode (Tint sz si a) = By_value chunk ->
   val_normalized (Vint (cast_int_int sz si n)) chunk.
 Proof.
   unfold access_mode, cast_int_int, val_normalized; intros. destruct sz.
@@ -122,8 +122,8 @@ Proof.
 Qed.
 
 Remark cast_float_float_normalized:
-  forall sz chunk n,
-  access_mode (Tfloat sz) = By_value chunk ->
+  forall sz a chunk n,
+  access_mode (Tfloat sz a) = By_value chunk ->
   val_normalized (Vfloat (cast_float_float sz n)) chunk.
 Proof.
   unfold access_mode, cast_float_float, val_normalized; intros. 
@@ -715,7 +715,7 @@ Lemma make_store_correct:
   eval_expr ge e le m addr (Vptr b ofs) ->
   eval_expr ge e le m rhs v ->
   assign_loc ge ty m b ofs v t m' ->
-  Csem.type_is_volatile ty = false ->
+  type_is_volatile ty = false ->
   step ge (State f code k e le m) t (State f Sskip k e le m').
 Proof.
   unfold make_store. intros until k; intros MKSTORE EV1 EV2 ASSIGN NONVOL.
@@ -733,7 +733,7 @@ Lemma make_vol_store_correct:
   eval_expr ge e le m addr (Vptr b ofs) ->
   eval_expr ge e le m rhs v ->
   assign_loc ge ty m b ofs v t m' ->
-  Csem.type_is_volatile ty = true ->
+  type_is_volatile ty = true ->
   step ge (State f code k e le m) t (State f Sskip k e le m').
 Proof.
   unfold make_vol_store. intros until k; intros MKSTORE EV1 EV2 ASSIGN VOL.
@@ -1034,7 +1034,7 @@ Lemma var_set_correct:
   Clight.eval_lvalue ge e le m (Clight.Evar id ty) loc ofs ->
   val_casted v ty ->
   assign_loc ge ty m loc ofs v t m' ->
-  Csem.type_is_volatile ty = false ->
+  type_is_volatile ty = false ->
   var_set id ty rhs = OK code ->
   match_env e te ->
   eval_expr tge te le m rhs v ->
@@ -1871,7 +1871,7 @@ Proof.
     rewrite symbols_preserved. replace (prog_main tprog) with (prog_main prog).
     auto. symmetry. unfold transl_program in TRANSL. 
     eapply transform_partial_program2_main; eauto.
-  assert (funsig tf = signature_of_type Tnil (Tint I32 Signed)).
+  assert (funsig tf = signature_of_type Tnil type_int32s).
     eapply transl_fundef_sig2; eauto. 
   econstructor; split.
   econstructor; eauto. eapply Genv.init_mem_transf_partial2; eauto. 

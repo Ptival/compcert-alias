@@ -113,6 +113,8 @@ let print_state prog p = function
   | Returnstate(res, k, m) ->
       fprintf p "returning@ %a"
               print_val res
+  | Stuckstate ->
+      fprintf p "stuck after an undefined expression"
 
 let mem_of_state = function
   | State(f, s, k, e, m) -> m
@@ -418,14 +420,13 @@ let unvolatile prog =
   {prog with prog_vars = List.map unvolatile_globvar prog.prog_vars}
 
 let change_main_function p old_main old_main_ty =
-  let tint = Tint(I32, Signed) in
   let old_main = Evalof(Evar(old_main, old_main_ty), old_main_ty) in
-  let arg1 = Eval(Vint(coqint_of_camlint 0l), tint) in
+  let arg1 = Eval(Vint(coqint_of_camlint 0l), type_int32s) in
   let arg2 = arg1 in
   let body =
-    Sreturn(Some(Ecall(old_main, Econs(arg1, Econs(arg2, Enil)), tint))) in
+    Sreturn(Some(Ecall(old_main, Econs(arg1, Econs(arg2, Enil)), type_int32s))) in
   let new_main_fn =
-    { fn_return = tint; fn_params = []; fn_vars = []; fn_body = body } in
+    { fn_return = type_int32s; fn_params = []; fn_vars = []; fn_body = body } in
   let new_main_id = intern_string "___main" in
   { p with
     prog_main = new_main_id;
@@ -434,9 +435,9 @@ let change_main_function p old_main old_main_ty =
 let fixup_main p =
   try
     match type_of_fundef (List.assoc p.prog_main p.prog_funct) with
-    | Tfunction(Tnil, Tint(I32, Signed)) ->
+    | Tfunction(Tnil, Tint(I32, Signed, _)) ->
         Some p
-    | Tfunction(Tcons(Tint _, Tcons(Tpointer(Tpointer(Tint(I8,_))), Tnil)),
+    | Tfunction(Tcons(Tint _, Tcons(Tpointer(Tpointer(Tint(I8,_,_),_),_), Tnil)),
                 Tint _) as ty ->
         Some (change_main_function p p.prog_main ty)
     | _ ->

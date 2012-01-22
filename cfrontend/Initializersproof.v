@@ -86,13 +86,13 @@ Inductive eval_simple_lvalue: expr -> block -> int -> Prop :=
   | esl_deref: forall r ty b ofs,
       eval_simple_rvalue r (Vptr b ofs) ->
       eval_simple_lvalue (Ederef r ty) b ofs
-  | esl_field_struct: forall l f ty b ofs id fList delta,
+  | esl_field_struct: forall l f ty b ofs id fList a delta,
       eval_simple_lvalue l b ofs ->
-      typeof l = Tstruct id fList -> field_offset f fList = OK delta ->
+      typeof l = Tstruct id fList a -> field_offset f fList = OK delta ->
       eval_simple_lvalue (Efield l f ty) b (Int.add ofs (Int.repr delta))
-  | esl_field_union: forall l f ty b ofs id fList,
+  | esl_field_union: forall l f ty b ofs id fList a,
       eval_simple_lvalue l b ofs ->
-      typeof l = Tunion id fList ->
+      typeof l = Tunion id fList a ->
       eval_simple_lvalue (Efield l f ty) b ofs
 
 with eval_simple_rvalue: expr -> val -> Prop :=
@@ -584,9 +584,9 @@ Proof.
 Qed.
 
 Remark sizeof_struct_eq:
-  forall id fl,
+  forall id fl a,
   fl <> Fnil ->
-  sizeof (Tstruct id fl) = align (sizeof_struct fl 0) (alignof (Tstruct id fl)).
+  sizeof (Tstruct id fl a) = align (sizeof_struct fl 0) (alignof (Tstruct id fl a)).
 Proof.
   intros. simpl. f_equal. rewrite Zmax_spec. apply zlt_false. 
   destruct fl. congruence. simpl. 
@@ -596,9 +596,9 @@ Proof.
 Qed.
 
 Remark sizeof_union_eq:
-  forall id fl,
+  forall id fl a,
   fl <> Fnil ->
-  sizeof (Tunion id fl) = align (sizeof_union fl) (alignof (Tunion id fl)).
+  sizeof (Tunion id fl a) = align (sizeof_union fl) (alignof (Tunion id fl a)).
 Proof.
   intros. simpl. f_equal. rewrite Zmax_spec. apply zlt_false. 
   destruct fl. congruence. simpl. 
@@ -706,15 +706,15 @@ Inductive exec_init: mem -> block -> Z -> type -> initializer -> mem -> Prop :=
       access_mode ty = By_value chunk ->
       Mem.store chunk m' b ofs v = Some m'' ->
       exec_init m b ofs ty (Init_single a) m''
-  | exec_init_compound_array: forall m b ofs ty sz il m',
+  | exec_init_compound_array: forall m b ofs ty sz a il m',
       exec_init_array m b ofs ty sz il m' ->
-      exec_init m b ofs (Tarray ty sz) (Init_compound il) m'
-  | exec_init_compound_struct: forall m b ofs id fl il m',
-      exec_init_list m b ofs (fields_of_struct id (Tstruct id fl) fl 0) il m' ->
-      exec_init m b ofs (Tstruct id fl) (Init_compound il) m'
-  | exec_init_compound_union: forall m b ofs id id1 ty1 fl i m',
-      exec_init m b ofs (unroll_composite id (Tunion id (Fcons id1 ty1 fl)) ty1) i m' ->
-      exec_init m b ofs (Tunion id (Fcons id1 ty1 fl)) (Init_compound (Init_cons i Init_nil)) m'
+      exec_init m b ofs (Tarray ty sz a) (Init_compound il) m'
+  | exec_init_compound_struct: forall m b ofs id fl a il m',
+      exec_init_list m b ofs (fields_of_struct id (Tstruct id fl a) fl 0) il m' ->
+      exec_init m b ofs (Tstruct id fl a) (Init_compound il) m'
+  | exec_init_compound_union: forall m b ofs id id1 ty1 fl a i m',
+      exec_init m b ofs (unroll_composite id (Tunion id (Fcons id1 ty1 fl) a) ty1) i m' ->
+      exec_init m b ofs (Tunion id (Fcons id1 ty1 fl) a) (Init_compound (Init_cons i Init_nil)) m'
 
 with exec_init_array: mem -> block -> Z -> type -> Z -> initializer_list -> mem -> Prop :=
   | exec_init_array_nil: forall m b ofs ty,

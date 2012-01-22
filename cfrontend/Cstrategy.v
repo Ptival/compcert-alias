@@ -93,13 +93,13 @@ Inductive eval_simple_lvalue: expr -> block -> int -> Prop :=
   | esl_deref: forall r ty b ofs,
       eval_simple_rvalue r (Vptr b ofs) ->
       eval_simple_lvalue (Ederef r ty) b ofs
-  | esl_field_struct: forall l f ty b ofs id fList delta,
+  | esl_field_struct: forall l f ty b ofs id fList a delta,
       eval_simple_lvalue l b ofs ->
-      typeof l = Tstruct id fList -> field_offset f fList = OK delta ->
+      typeof l = Tstruct id fList a -> field_offset f fList = OK delta ->
       eval_simple_lvalue (Efield l f ty) b (Int.add ofs (Int.repr delta))
-  | esl_field_union: forall l f ty b ofs id fList,
+  | esl_field_union: forall l f ty b ofs id fList a,
       eval_simple_lvalue l b ofs ->
-      typeof l = Tunion id fList ->
+      typeof l = Tunion id fList a ->
       eval_simple_lvalue (Efield l f ty) b ofs
 
 with eval_simple_rvalue: expr -> val -> Prop :=
@@ -478,8 +478,8 @@ Definition invert_expr_prop (a: expr) (m: mem) : Prop :=
       exists b, exists ofs, v = Vptr b ofs
   | Efield (Eloc b ofs ty1) f ty =>
       match ty1 with
-      | Tstruct _ fList => exists delta, field_offset f fList = Errors.OK delta
-      | Tunion _ _ => True
+      | Tstruct _ fList _ => exists delta, field_offset f fList = Errors.OK delta
+      | Tunion _ _ _ => True
       | _ => False
       end
   | Eval v ty => False
@@ -1120,7 +1120,7 @@ Proof.
   eapply plus_left.
   left; apply step_rred; auto. econstructor; eauto.
   set (op := match id with Incr => Oadd | Decr => Osub end).
-  assert (SEM: sem_binary_operation op v1 (typeof l) (Vint Int.one) (Tint I32 Signed) m =
+  assert (SEM: sem_binary_operation op v1 (typeof l) (Vint Int.one) type_int32s m =
               sem_incrdecr id v1 (typeof l)).
     destruct id; auto.
   destruct (sem_incrdecr id v1 (typeof l)) as [v2|].
@@ -2368,16 +2368,15 @@ Proof.
   (* Out_normal *)
   assert (fn_return f = Tvoid /\ vres = Vundef).
     destruct (fn_return f); auto || contradiction.
-  destruct H7. subst vres. right; apply step_skip_call; auto.
+  destruct H7 as [P Q]. subst vres. right; eapply step_skip_call; eauto.
   (* Out_return None *)
   assert (fn_return f = Tvoid /\ vres = Vundef).
     destruct (fn_return f); auto || contradiction.
-  destruct H8. subst vres.
+  destruct H8 as [P Q]. subst vres.
   rewrite <- (is_call_cont_call_cont k H6). rewrite <- H7.
   right; apply step_return_0; auto.
   (* Out_return Some *)
-  destruct H4.
-  rewrite <- (is_call_cont_call_cont k H6). rewrite <- H7.
+  destruct H4. rewrite <- (is_call_cont_call_cont k H6). rewrite <- H7.
   right; eapply step_return_2; eauto.
   reflexivity. traceEq.
 
@@ -2765,7 +2764,7 @@ Inductive bigstep_program_terminates (p: program): trace -> int -> Prop :=
       Genv.init_mem p = Some m0 ->
       Genv.find_symbol ge p.(prog_main) = Some b ->
       Genv.find_funct_ptr ge b = Some f ->
-      type_of_fundef f = Tfunction Tnil (Tint I32 Signed) ->
+      type_of_fundef f = Tfunction Tnil type_int32s ->
       eval_funcall ge m0 f nil t m1 (Vint r) ->
       bigstep_program_terminates p t r.
 
@@ -2775,7 +2774,7 @@ Inductive bigstep_program_diverges (p: program): traceinf -> Prop :=
       Genv.init_mem p = Some m0 ->
       Genv.find_symbol ge p.(prog_main) = Some b ->
       Genv.find_funct_ptr ge b = Some f ->
-      type_of_fundef f = Tfunction Tnil (Tint I32 Signed) ->
+      type_of_fundef f = Tfunction Tnil type_int32s ->
       evalinf_funcall ge m0 f nil t ->
       bigstep_program_diverges p t.
 

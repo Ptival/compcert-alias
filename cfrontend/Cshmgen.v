@@ -46,20 +46,20 @@ Definition chunk_of_type (ty: type): res memory_chunk :=
 
 Definition var_kind_of_type (ty: type): res var_kind :=
   match ty with
-  | Tint I8 Signed => OK(Vscalar Mint8signed)
-  | Tint I8 Unsigned => OK(Vscalar Mint8unsigned)
-  | Tint I16 Signed => OK(Vscalar Mint16signed)
-  | Tint I16 Unsigned => OK(Vscalar Mint16unsigned)
-  | Tint I32 _ => OK(Vscalar Mint32)
-  | Tfloat F32 => OK(Vscalar Mfloat32)
-  | Tfloat F64 => OK(Vscalar Mfloat64)
+  | Tint I8 Signed _ => OK(Vscalar Mint8signed)
+  | Tint I8 Unsigned _ => OK(Vscalar Mint8unsigned)
+  | Tint I16 Signed _ => OK(Vscalar Mint16signed)
+  | Tint I16 Unsigned _ => OK(Vscalar Mint16unsigned)
+  | Tint I32 _ _ => OK(Vscalar Mint32)
+  | Tfloat F32 _ => OK(Vscalar Mfloat32)
+  | Tfloat F64 _ => OK(Vscalar Mfloat64)
   | Tvoid => Error (msg "Cshmgen.var_kind_of_type(void)")
-  | Tpointer _ => OK(Vscalar Mint32)
-  | Tarray _ _ => OK(Varray (Csyntax.sizeof ty))
+  | Tpointer _ _ => OK(Vscalar Mint32)
+  | Tarray _ _ _ => OK(Varray (Csyntax.sizeof ty))
   | Tfunction _ _ => Error (msg "Cshmgen.var_kind_of_type(function)")
-  | Tstruct _ fList => OK(Varray (Csyntax.sizeof ty))
-  | Tunion _ fList => OK(Varray (Csyntax.sizeof ty))
-  | Tcomp_ptr _ => OK(Vscalar Mint32)
+  | Tstruct _ fList _ => OK(Varray (Csyntax.sizeof ty))
+  | Tunion _ fList _ => OK(Varray (Csyntax.sizeof ty))
+  | Tcomp_ptr _ _ => OK(Vscalar Mint32)
 end.
   
 (** * Csharpminor constructors *)
@@ -101,7 +101,7 @@ Definition make_intoffloat (e: expr) (sg: signedness) :=
 *)
 Definition make_boolean (e: expr) (ty: type) :=
   match ty with
-  | Tfloat _ => Ebinop (Ocmpf Cne) e (make_floatconst Float.zero)
+  | Tfloat _ _ => Ebinop (Ocmpf Cne) e (make_floatconst Float.zero)
   | _ => e
   end.
 
@@ -128,10 +128,10 @@ Definition make_add (e1: expr) (ty1: type) (e2: expr) (ty2: type) :=
   | add_case_ff => OK (Ebinop Oaddf e1 e2)
   | add_case_if sg => OK (Ebinop Oaddf (make_floatofint e1 sg) e2)
   | add_case_fi sg => OK (Ebinop Oaddf e1 (make_floatofint e2 sg))
-  | add_case_pi ty =>
+  | add_case_pi ty _ =>
       let n := make_intconst (Int.repr (Csyntax.sizeof ty)) in
       OK (Ebinop Oadd e1 (Ebinop Omul n e2))
-  | add_case_ip ty =>
+  | add_case_ip ty _ =>
       let n := make_intconst (Int.repr (Csyntax.sizeof ty)) in
       OK (Ebinop Oadd e2 (Ebinop Omul n e1))
   | add_default => Error (msg "Cshmgen.make_add")
@@ -388,13 +388,13 @@ Fixpoint transl_expr (a: Clight.expr) {struct a} : res expr :=
       OK(make_intconst (Int.repr (Csyntax.sizeof ty)))
   | Clight.Efield b i ty => 
       match typeof b with
-      | Tstruct _ fld =>
+      | Tstruct _ fld _ =>
           do tb <- transl_lvalue b;
           do ofs <- field_offset i fld;
           make_load
             (Ebinop Oadd tb (make_intconst (Int.repr ofs)))
             ty
-      | Tunion _ fld =>
+      | Tunion _ fld _ =>
           do tb <- transl_lvalue b;
           make_load tb ty
       | _ =>
@@ -415,11 +415,11 @@ with transl_lvalue (a: Clight.expr) {struct a} : res expr :=
       transl_expr b
   | Clight.Efield b i ty => 
       match typeof b with
-      | Tstruct _ fld =>
+      | Tstruct _ fld _ =>
           do tb <- transl_lvalue b;
           do ofs <- field_offset i fld;
           OK (Ebinop Oadd tb (make_intconst (Int.repr ofs)))
-      | Tunion _ fld =>
+      | Tunion _ fld _ =>
           transl_lvalue b
       | _ =>
           Error(msg "Cshmgen.transl_lvalue(field)")
@@ -523,7 +523,7 @@ Fixpoint transl_statement (tyret: type) (nbrk ncnt: nat)
   | Clight.Sskip =>
       OK Sskip
   | Clight.Sassign b c =>
-      if Csem.type_is_volatile (typeof b) then
+      if type_is_volatile (typeof b) then
          (do tb <- transl_lvalue b;
           do tc <- transl_expr c;
           make_vol_store tb (typeof b) (make_cast (typeof c) (typeof b) tc))
