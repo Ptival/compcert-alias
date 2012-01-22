@@ -18,6 +18,7 @@ cparser/Transform
 cparser/Unblock
 cparser/SimplExpr
 cparser/AddCasts
+cparser/StructReturn
 cparser/StructByValue
 cparser/StructAssign
 cparser/Bitfields

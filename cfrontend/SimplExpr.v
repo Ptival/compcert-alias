@@ -202,8 +202,8 @@ Fixpoint transl_expr (dst: destination) (a: C.expr) : mon (list statement * expr
   | C.Ederef r ty =>
       do (sl, a) <- transl_expr For_val r;
       ret (finish dst sl (Ederef a ty))
-  | C.Efield l1 f ty =>
-      do (sl, a) <- transl_expr For_val l1;
+  | C.Efield r f ty =>
+      do (sl, a) <- transl_expr For_val r;
       ret (finish dst sl (Efield a f ty))
   | C.Eval (Vint n) ty =>
       ret (finish dst nil (Econst_int n ty))

@@ -92,6 +92,10 @@ Function sem_cast (v: val) (t1 t2: type) : option val :=
           end
       | _ => None
       end
+  | cast_case_struct id1 fld1 id2 fld2 =>
+      if ident_eq id1 id2 && fieldlist_eq fld1 fld2 then Some v else None
+  | cast_case_union id1 fld1 id2 fld2 =>
+      if ident_eq id1 id2 && fieldlist_eq fld1 fld2 then Some v else None
   | cast_case_void =>
       Some v
   | cast_case_default =>
@@ -512,26 +516,38 @@ Inductive deref_loc {F V: Type} (ge: Genv.t F V) (ty: type) (m: mem) (b: block) 
       deref_loc ge ty m b ofs t v
   | deref_loc_reference:
       access_mode ty = By_reference ->
+      deref_loc ge ty m b ofs E0 (Vptr b ofs)
+  | deref_loc_copy:
+      access_mode ty = By_copy ->
       deref_loc ge ty m b ofs E0 (Vptr b ofs).
 
 (** Symmetrically, [assign_loc ty m b ofs v t m'] returns the
   memory state after storing the value [v] in the datum
   of type [ty] residing in memory [m] at block [b], offset [ofs].
-  This is allowed only if [ty] indicates an access by value.
+  This is allowed only if [ty] indicates an access by value or by copy.
   [m'] is the updated memory state and [t] the trace of observables
   (nonempty if this is a volatile store). *)
 
-Inductive assign_loc {F V: Type} (ge: Genv.t F V) (ty: type) (m: mem) (b: block) (ofs: int) (v: val):
-                                                  trace -> mem -> Prop :=
-  | assign_loc_value: forall chunk m',
+Inductive assign_loc {F V: Type} (ge: Genv.t F V) (ty: type) (m: mem) (b: block) (ofs: int):
+                                            val -> trace -> mem -> Prop :=
+  | assign_loc_value: forall v chunk m',
       access_mode ty = By_value chunk ->
       type_is_volatile ty = false ->
       Mem.storev chunk m (Vptr b ofs) v = Some m' ->
       assign_loc ge ty m b ofs v E0 m'
-  | assign_loc_volatile: forall chunk t m',
+  | assign_loc_volatile: forall v chunk t m',
       access_mode ty = By_value chunk -> type_is_volatile ty = true ->
       volatile_store ge chunk m b ofs v t m' ->
-      assign_loc ge ty m b ofs v t m'.
+      assign_loc ge ty m b ofs v t m'
+  | assign_loc_copy: forall b' ofs' bytes m',
+      access_mode ty = By_copy ->
+      (alignof ty | Int.unsigned ofs') -> (alignof ty | Int.unsigned ofs) ->
+      b' <> b \/ Int.unsigned ofs' = Int.unsigned ofs
+              \/ Int.unsigned ofs' + sizeof ty <= Int.unsigned ofs
+              \/ Int.unsigned ofs + sizeof ty <= Int.unsigned ofs' ->
+      Mem.loadbytes m b' (Int.unsigned ofs') (sizeof ty) = Some bytes ->
+      Mem.storebytes m b (Int.unsigned ofs) bytes = Some m' ->
+      assign_loc ge ty m b ofs (Vptr b' ofs') E0 m'.
 
 (** Allocation of function-local variables.
   [alloc_variables e1 m1 vars e2 m2] allocates one memory block
@@ -642,10 +658,10 @@ Inductive lred: expr -> mem -> expr -> mem -> Prop :=
            (Eloc b ofs ty) m
   | red_field_struct: forall b ofs id fList a f ty m delta,
       field_offset f fList = OK delta ->
-      lred (Efield (Eloc b ofs (Tstruct id fList a)) f ty) m
+      lred (Efield (Eval (Vptr b ofs) (Tstruct id fList a)) f ty) m
            (Eloc b (Int.add ofs (Int.repr delta)) ty) m
   | red_field_union: forall b ofs id fList a f ty m,
-      lred (Efield (Eloc b ofs (Tunion id fList a)) f ty) m
+      lred (Efield (Eval (Vptr b ofs) (Tunion id fList a)) f ty) m
            (Eloc b ofs ty) m.
 
 (** Head reductions for r-values *)
@@ -744,7 +760,7 @@ Inductive context: kind -> kind -> (expr -> expr) -> Prop :=
   | ctx_deref: forall k C ty,
       context k RV C -> context k LV (fun x => Ederef (C x) ty)
   | ctx_field: forall k C f ty,
-      context k LV C -> context k LV (fun x => Efield (C x) f ty)
+      context k RV C -> context k LV (fun x => Efield (C x) f ty)
   | ctx_rvalof: forall k C ty,
       context k LV C -> context k RV (fun x => Evalof (C x) ty)
   | ctx_addrof: forall k C ty,

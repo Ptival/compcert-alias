@@ -55,10 +55,10 @@ Definition var_kind_of_type (ty: type): res var_kind :=
   | Tfloat F64 _ => OK(Vscalar Mfloat64)
   | Tvoid => Error (msg "Cshmgen.var_kind_of_type(void)")
   | Tpointer _ _ => OK(Vscalar Mint32)
-  | Tarray _ _ _ => OK(Varray (Csyntax.sizeof ty))
+  | Tarray _ _ _ => OK(Varray (Csyntax.sizeof ty) (Csyntax.alignof ty))
   | Tfunction _ _ => Error (msg "Cshmgen.var_kind_of_type(function)")
-  | Tstruct _ fList _ => OK(Varray (Csyntax.sizeof ty))
-  | Tunion _ fList _ => OK(Varray (Csyntax.sizeof ty))
+  | Tstruct _ fList _ => OK(Varray (Csyntax.sizeof ty) (Csyntax.alignof ty))
+  | Tunion _ fList _ => OK(Varray (Csyntax.sizeof ty) (Csyntax.alignof ty))
   | Tcomp_ptr _ _ => OK(Vscalar Mint32)
 end.
   
@@ -233,6 +233,8 @@ Definition make_cast (from to: type) (e: expr) :=
   | cast_case_f2f sz2 => make_cast_float e sz2
   | cast_case_i2f si1 sz2 => make_cast_float (make_floatofint e si1) sz2
   | cast_case_f2i sz2 si2 => make_cast_int (make_intoffloat e si2) sz2 si2
+  | cast_case_struct id1 fld1 id2 fld2 => e
+  | cast_case_union id1 fld1 id2 fld2 => e
   | cast_case_void => e
   | cast_case_default => e
   end.
@@ -247,6 +249,7 @@ Definition make_load (addr: expr) (ty_res: type) :=
   match (access_mode ty_res) with
   | By_value chunk => OK (Eload chunk addr)
   | By_reference => OK addr
+  | By_copy => OK addr
   | By_nothing => Error (msg "Cshmgen.make_load")
   end.
 
@@ -258,8 +261,15 @@ Definition make_vol_load (dst: ident) (addr: expr) (ty: type) :=
   match (access_mode ty) with
   | By_value chunk => OK (Sbuiltin (Some dst) (EF_vload chunk) (addr :: nil))
   | By_reference => OK (Sset dst addr)
+  | By_copy => OK (Sset dst addr)
   | By_nothing => Error (msg "Cshmgen.make_vol_load")
   end.
+
+(** [make_memcpy dst src ty] returns a [memcpy] builtin appropriate for
+  by-copy assignment of a value of Clight type [ty]. *)
+
+Definition make_memcpy (dst src: expr) (ty: type) :=
+  Sbuiltin None (EF_memcpy (Csyntax.sizeof ty) (Csyntax.alignof ty)) (dst :: src :: nil).
 
 (** [make_store addr ty rhs] stores the value of the
    Csharpminor expression [rhs] into the memory location denoted by the
@@ -269,6 +279,7 @@ Definition make_vol_load (dst: ident) (addr: expr) (ty: type) :=
 Definition make_store (addr: expr) (ty: type) (rhs: expr) :=
   match access_mode ty with
   | By_value chunk => OK (Sstore chunk addr rhs)
+  | By_copy => OK (make_memcpy addr rhs ty)
   | _ => Error (msg "Cshmgen.make_store")
   end.
 
@@ -278,6 +289,7 @@ Definition make_store (addr: expr) (ty: type) (rhs: expr) :=
 Definition make_vol_store (addr: expr) (ty: type) (rhs: expr) :=
   match access_mode ty with
   | By_value chunk => OK (Sbuiltin None (EF_vstore chunk) (addr :: rhs :: nil))
+  | By_copy => OK (make_memcpy addr rhs ty)
   | _ => Error (msg "Cshmgen.make_store")
   end.
 
@@ -302,6 +314,7 @@ Definition var_get (id: ident) (ty: type) :=
   match access_mode ty with
   | By_value chunk => OK (Evar id)
   | By_reference => OK (Eaddrof id)
+  | By_copy => OK (Eaddrof id)
   | _ => Error (MSG "Cshmgen.var_get " :: CTX id :: nil)
   end.
 
@@ -312,6 +325,7 @@ Definition var_get (id: ident) (ty: type) :=
 Definition var_set (id: ident) (ty: type) (rhs: expr) :=
   match access_mode ty with
   | By_value chunk => OK (Sassign id rhs)
+  | By_copy => OK (make_memcpy (Eaddrof id) rhs ty)
   | _ => Error (MSG "Cshmgen.var_set " :: CTX id :: nil)
   end.
 
@@ -389,13 +403,13 @@ Fixpoint transl_expr (a: Clight.expr) {struct a} : res expr :=
   | Clight.Efield b i ty => 
       match typeof b with
       | Tstruct _ fld _ =>
-          do tb <- transl_lvalue b;
+          do tb <- transl_expr b;
           do ofs <- field_offset i fld;
           make_load
             (Ebinop Oadd tb (make_intconst (Int.repr ofs)))
             ty
       | Tunion _ fld _ =>
-          do tb <- transl_lvalue b;
+          do tb <- transl_expr b;
           make_load tb ty
       | _ =>
           Error(msg "Cshmgen.transl_expr(field)")
@@ -416,11 +430,11 @@ with transl_lvalue (a: Clight.expr) {struct a} : res expr :=
   | Clight.Efield b i ty => 
       match typeof b with
       | Tstruct _ fld _ =>
-          do tb <- transl_lvalue b;
+          do tb <- transl_expr b;
           do ofs <- field_offset i fld;
           OK (Ebinop Oadd tb (make_intconst (Int.repr ofs)))
       | Tunion _ fld _ =>
-          transl_lvalue b
+          transl_expr b
       | _ =>
           Error(msg "Cshmgen.transl_lvalue(field)")
       end
@@ -610,13 +624,11 @@ with transl_lbl_stmt (tyret: type) (nbrk ncnt: nat)
 Definition prefix_var_name (id: ident) : errmsg :=
   MSG "In local variable " :: CTX id :: MSG ": " :: nil.
 
-Definition transl_params (l: list (ident * type)) :=
-   AST.map_partial prefix_var_name chunk_of_type l.
 Definition transl_vars (l: list (ident * type)) :=
    AST.map_partial prefix_var_name var_kind_of_type l.
 
 Definition transl_function (f: Clight.function) : res function :=
-  do tparams <- transl_params (Clight.fn_params f);
+  do tparams <- transl_vars (Clight.fn_params f);
   do tvars <- transl_vars (Clight.fn_vars f);
   do tbody <- transl_statement f.(Clight.fn_return) 1%nat 0%nat (Clight.fn_body f);
   OK (mkfunction 

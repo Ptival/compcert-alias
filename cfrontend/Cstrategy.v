@@ -49,7 +49,7 @@ Fixpoint simple (a: expr) : Prop :=
   | Eloc _ _ _ => True
   | Evar _ _ => True
   | Ederef r _ => simple r
-  | Efield l1 _ _ => simple l1
+  | Efield r _ _ => simple r
   | Eval _ _ => True
   | Evalof l _ => simple l /\ type_is_volatile (typeof l) = false
   | Eaddrof l _ => simple l
@@ -93,14 +93,14 @@ Inductive eval_simple_lvalue: expr -> block -> int -> Prop :=
   | esl_deref: forall r ty b ofs,
       eval_simple_rvalue r (Vptr b ofs) ->
       eval_simple_lvalue (Ederef r ty) b ofs
-  | esl_field_struct: forall l f ty b ofs id fList a delta,
-      eval_simple_lvalue l b ofs ->
-      typeof l = Tstruct id fList a -> field_offset f fList = OK delta ->
-      eval_simple_lvalue (Efield l f ty) b (Int.add ofs (Int.repr delta))
-  | esl_field_union: forall l f ty b ofs id fList a,
-      eval_simple_lvalue l b ofs ->
-      typeof l = Tunion id fList a ->
-      eval_simple_lvalue (Efield l f ty) b ofs
+  | esl_field_struct: forall r f ty b ofs id fList a delta,
+      eval_simple_rvalue r (Vptr b ofs) ->
+      typeof r = Tstruct id fList a -> field_offset f fList = OK delta ->
+      eval_simple_lvalue (Efield r f ty) b (Int.add ofs (Int.repr delta))
+  | esl_field_union: forall r f ty b ofs id fList a,
+      eval_simple_rvalue r (Vptr b ofs) ->
+      typeof r = Tunion id fList a ->
+      eval_simple_lvalue (Efield r f ty) b ofs
 
 with eval_simple_rvalue: expr -> val -> Prop :=
   | esr_val: forall v ty,
@@ -151,7 +151,7 @@ Inductive leftcontext: kind -> kind -> (expr -> expr) -> Prop :=
   | lctx_deref: forall k C ty,
       leftcontext k RV C -> leftcontext k LV (fun x => Ederef (C x) ty)
   | lctx_field: forall k C f ty,
-      leftcontext k LV C -> leftcontext k LV (fun x => Efield (C x) f ty)
+      leftcontext k RV C -> leftcontext k LV (fun x => Efield (C x) f ty)
   | lctx_rvalof: forall k C ty,
       leftcontext k LV C -> leftcontext k RV (fun x => Evalof (C x) ty)
   | lctx_addrof: forall k C ty,
@@ -476,7 +476,8 @@ Definition invert_expr_prop (a: expr) (m: mem) : Prop :=
       \/ (e!x = None /\ Genv.find_symbol ge x = Some b /\ type_of_global ge b = Some ty)
   | Ederef (Eval v ty1) ty =>
       exists b, exists ofs, v = Vptr b ofs
-  | Efield (Eloc b ofs ty1) f ty =>
+  | Efield (Eval v ty1) f ty =>
+      exists b, exists ofs, v = Vptr b ofs /\
       match ty1 with
       | Tstruct _ fList _ => exists delta, field_offset f fList = Errors.OK delta
       | Tunion _ _ _ => True
@@ -525,7 +526,8 @@ Proof.
   exists b; auto.
   exists b; auto.
   exists b; exists ofs; auto.
-  exists delta; auto.
+  exists b; exists ofs; split; auto. exists delta; auto.
+  exists b; exists ofs; auto.
 Qed.
 
 Lemma rred_invert:
@@ -748,9 +750,10 @@ Ltac StepR REC C' a :=
   exists b; exists Int.zero.
   intuition. apply esl_var_local; auto. apply esl_var_global; auto.
 (* field *)
-  StepL IHa (fun x => C(Efield x f0 ty)) a.
-  exploit safe_inv. eexact SAFE0. eauto. simpl. case_eq (typeof a); intros; try contradiction.
-  destruct H0 as [delta OFS]. exists b; exists (Int.add ofs (Int.repr delta)); econstructor; eauto.
+  StepR IHa (fun x => C(Efield x f0 ty)) a.
+  exploit safe_inv. eexact SAFE0. eauto. simpl.
+  intros [b [ofs [EQ TY]]]. subst v. destruct (typeof a) as []_eqn; try contradiction.
+  destruct TY as [delta OFS]. exists b; exists (Int.add ofs (Int.repr delta)); econstructor; eauto.
   exists b; exists ofs; econstructor; eauto.
 (* valof *)
   destruct S. StepL IHa (fun x => C(Evalof x ty)) a.
@@ -988,7 +991,7 @@ Ltac Base :=
   right; exists (fun x => x); econstructor; split; [eauto | simpl; auto].
 
 (* field *)
-  Kind. Rec H LV C (fun x => Efield x f0 ty).
+  Kind. Rec H RV C (fun x => Efield x f0 ty).
 (* rvalof *)
   Kind. Rec H LV C (fun x => Evalof x ty).
   destruct (type_is_volatile (typeof l)) as []_eqn.
@@ -1509,7 +1512,7 @@ with eval_expr: env -> mem -> kind -> expr -> trace -> mem -> expr -> Prop :=
   | eval_var: forall e m x ty,
       eval_expr e m LV (Evar x ty) E0 m (Evar x ty)
   | eval_field: forall e m a t m' a' f ty,
-      eval_expr e m LV a t m' a' ->
+      eval_expr e m RV a t m' a' ->
       eval_expr e m LV (Efield a f ty) t m' (Efield a' f ty)
   | eval_valof: forall e m a t m' a' ty,
       type_is_volatile (typeof a) = false ->
@@ -1745,7 +1748,7 @@ Combined Scheme bigstep_induction from
 
 CoInductive evalinf_expr: env -> mem -> kind -> expr -> traceinf -> Prop :=
   | evalinf_field: forall e m a t f ty,
-      evalinf_expr e m LV a t ->
+      evalinf_expr e m RV a t ->
       evalinf_expr e m LV (Efield a f ty) t
   | evalinf_valof: forall e m a t ty,
       evalinf_expr e m LV a t ->

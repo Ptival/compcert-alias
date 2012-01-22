@@ -55,15 +55,6 @@ Inductive tr_rvalof: type -> expr -> list statement -> expr -> list ident -> Pro
   | tr_rvalof_vol: forall ty a t tmp,
       type_is_volatile ty = true -> In t tmp ->
       tr_rvalof ty a (Svolread t a :: nil) (Etempvar t ty) tmp.
-(*
-Inductive tr_rvalof: type -> expr -> list statement -> expr -> list ident -> Prop :=
-  | tr_rvalof_nonvol: forall ty a tmp,
-      access_mode ty = By_reference \/ access_mode ty = By_nothing \/ Csem.type_is_volatile ty = false ->
-      tr_rvalof ty a nil a tmp
-  | tr_rvalof_vol: forall ty chunk a t tmp,
-      access_mode ty = chunk -> Csem.type_is_volatile ty = true -> In t tmp ->
-      tr_rvalof ty a (Sset t a :: nil) (Etempvar t ty) tmp.
-*)
 
 Inductive tr_expr: temp_env -> destination -> C.expr -> list statement -> expr -> list ident -> Prop :=
   | tr_var: forall le dst id ty tmp,

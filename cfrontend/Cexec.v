@@ -29,23 +29,6 @@ Require Import Csyntax.
 Require Import Csem.
 Require Cstrategy.
 
-Lemma type_eq: forall (ty1 ty2: type), {ty1=ty2} + {ty1<>ty2}
-with typelist_eq: forall (tyl1 tyl2: typelist), {tyl1=tyl2} + {tyl1<>tyl2}
-with fieldlist_eq: forall (fld1 fld2: fieldlist), {fld1=fld2} + {fld1<>fld2}.
-Proof.
-  assert (forall (x y: intsize), {x=y} + {x<>y}). decide equality.
-  assert (forall (x y: signedness), {x=y} + {x<>y}). decide equality.
-  assert (forall (x y: floatsize), {x=y} + {x<>y}). decide equality.
-  assert (forall (x y: attr), {x=y} + {x<>y}). decide equality. apply bool_dec.
-  generalize ident_eq zeq. intros E1 E2. 
-  decide equality.
-  decide equality.
-  generalize ident_eq. intros E1.
-  decide equality.
-Defined.
-
-Opaque type_eq.
-
 (** Error monad with options or lists *)
 
 Notation "'do' X <- A ; B" := (match A with Some X => B | None => None end)
@@ -286,8 +269,39 @@ Definition do_deref_loc (w: world) (ty: type) (m: mem) (b: block) (ofs: int) : o
       | true => do_volatile_load w chunk m b ofs
       end
   | By_reference => Some(w, E0, Vptr b ofs)
+  | By_copy => Some(w, E0, Vptr b ofs)
   | _ => None
   end.
+
+Definition assign_copy_ok (ty: type) (b: block) (ofs: int) (b': block) (ofs': int) : Prop :=
+  (alignof ty | Int.unsigned ofs') /\ (alignof ty | Int.unsigned ofs) /\
+  (b' <> b \/ Int.unsigned ofs' = Int.unsigned ofs
+           \/ Int.unsigned ofs' + sizeof ty <= Int.unsigned ofs
+           \/ Int.unsigned ofs + sizeof ty <= Int.unsigned ofs').
+
+Remark check_assign_copy:
+  forall (ty: type) (b: block) (ofs: int) (b': block) (ofs': int),
+  { assign_copy_ok ty b ofs b' ofs' } + {~ assign_copy_ok ty b ofs b' ofs' }.
+Proof with try (right; intuition omega).
+  intros. unfold assign_copy_ok. 
+  assert (alignof ty > 0). apply alignof_pos; auto.
+  destruct (Zdivide_dec (alignof ty) (Int.unsigned ofs')); auto...
+  destruct (Zdivide_dec (alignof ty) (Int.unsigned ofs)); auto...
+  assert (Y: {b' <> b \/
+              Int.unsigned ofs' = Int.unsigned ofs \/
+              Int.unsigned ofs' + sizeof ty <= Int.unsigned ofs \/
+              Int.unsigned ofs + sizeof ty <= Int.unsigned ofs'} +
+           {~(b' <> b \/
+              Int.unsigned ofs' = Int.unsigned ofs \/
+              Int.unsigned ofs' + sizeof ty <= Int.unsigned ofs \/
+              Int.unsigned ofs + sizeof ty <= Int.unsigned ofs')}).
+  destruct (eq_block b' b); auto.
+  destruct (zeq (Int.unsigned ofs') (Int.unsigned ofs)); auto.
+  destruct (zle (Int.unsigned ofs' + sizeof ty) (Int.unsigned ofs)); auto.
+  destruct (zle (Int.unsigned ofs + sizeof ty) (Int.unsigned ofs')); auto.
+  right; intuition omega.
+  destruct Y... left; intuition omega. 
+Qed.
 
 Definition do_assign_loc (w: world) (ty: type) (m: mem) (b: block) (ofs: int) (v: val): option (world * trace * mem) :=
   match access_mode ty with
@@ -295,6 +309,16 @@ Definition do_assign_loc (w: world) (ty: type) (m: mem) (b: block) (ofs: int) (v
       match type_is_volatile ty with
       | false => do m' <- Mem.storev chunk m (Vptr b ofs) v; Some(w, E0, m')
       | true => do_volatile_store w chunk m b ofs v
+      end
+  | By_copy =>
+      match v with
+      | Vptr b' ofs' =>
+          if check_assign_copy ty b ofs b' ofs' then
+            do bytes <- Mem.loadbytes m b' (Int.unsigned ofs') (sizeof ty);
+            do m' <- Mem.storebytes m b (Int.unsigned ofs) bytes;
+            Some(w, E0, m')
+          else None
+      | _ => None
       end
   | _ => None
   end.
@@ -309,6 +333,7 @@ Proof.
   intros. exploit do_volatile_load_sound; eauto. intuition. eapply deref_loc_volatile; eauto. 
   split. eapply deref_loc_value; eauto. constructor.
   split. eapply deref_loc_reference; eauto. constructor.
+  split. eapply deref_loc_copy; eauto. constructor.
 Qed.
 
 Lemma do_deref_loc_complete:
@@ -319,6 +344,7 @@ Proof.
   unfold do_deref_loc; intros. inv H.
   inv H0. rewrite H1; rewrite H2; rewrite H3; auto.
   rewrite H1; rewrite H2. apply do_volatile_load_complete; auto.
+  inv H0. rewrite H1. auto.
   inv H0. rewrite H1. auto.
 Qed.
 
@@ -331,6 +357,8 @@ Proof.
   destruct (access_mode ty) as []_eqn; mydestr. 
   intros. exploit do_volatile_store_sound; eauto. intuition. eapply assign_loc_volatile; eauto. 
   split. eapply assign_loc_value; eauto. constructor.
+  destruct v; mydestr. destruct a as [P [Q R]]. 
+  split. eapply assign_loc_copy; eauto. constructor.
 Qed.
 
 Lemma do_assign_loc_complete:
@@ -341,6 +369,9 @@ Proof.
   unfold do_assign_loc; intros. inv H.
   inv H0. rewrite H1; rewrite H2; rewrite H3; auto.
   rewrite H1; rewrite H2. apply do_volatile_store_complete; auto.
+  rewrite H1. destruct (check_assign_copy ty b ofs b' ofs').
+  inv H0. rewrite H5; rewrite H6; auto.
+  elim n. red; tauto. 
 Qed.
 
 (** System calls and library functions *)
@@ -687,9 +718,9 @@ Fixpoint step_expr (k: kind) (a: expr) (m: mem): reducts expr :=
       | None =>
           incontext (fun x => Ederef x ty) (step_expr RV r m)
       end
-  | LV, Efield l f ty =>
-      match is_loc l with
-      | Some(b, ofs, ty') =>
+  | LV, Efield r f ty =>
+      match is_val r with
+      | Some(Vptr b ofs, ty') =>
           match ty' with
           | Tstruct id fList _ =>
               match field_offset f fList with
@@ -700,8 +731,10 @@ Fixpoint step_expr (k: kind) (a: expr) (m: mem): reducts expr :=
               topred (Lred (Eloc b ofs ty) m)
           | _ => stuck
           end
+      | Some _ =>
+          stuck
       | None =>
-          incontext (fun x => Efield x f ty) (step_expr LV l m)
+          incontext (fun x => Efield x f ty) (step_expr RV r m)
       end
   | RV, Eval v ty =>
       nil
@@ -897,7 +930,8 @@ Definition invert_expr_prop (a: expr) (m: mem) : Prop :=
       \/ (e!x = None /\ Genv.find_symbol ge x = Some b /\ type_of_global ge b = Some ty)
   | Ederef (Eval v ty1) ty =>
       exists b, exists ofs, v = Vptr b ofs
-  | Efield (Eloc b ofs ty1) f ty =>
+  | Efield (Eval v ty1) f ty =>
+      exists b, exists ofs, v = Vptr b ofs /\
       match ty1 with
       | Tstruct _ fList _ => exists delta, field_offset f fList = Errors.OK delta
       | Tunion _ _ _ => True
@@ -944,7 +978,8 @@ Proof.
   exists b; auto.
   exists b; auto.
   exists b; exists ofs; auto.
-  exists delta; auto.
+  exists b; exists ofs; split; auto. exists delta; auto.
+  exists b; exists ofs; auto.
 Qed.
 
 Lemma rred_invert:
@@ -1262,8 +1297,9 @@ Proof with (try (apply not_invert_ok; simpl; intro; myinv; intuition congruence;
   destruct (type_eq ty ty')...
   subst. apply topred_ok; auto. apply red_var_global; auto.
 (* Efield *)
-  destruct (is_loc a) as [[[b ofs] ty'] | ]_eqn.
-  rewrite (is_loc_inv _ _ _ _ Heqo).
+  destruct (is_val a) as [[v ty'] | ]_eqn.
+  rewrite (is_val_inv _ _ _ Heqo).
+  destruct v...
   destruct ty'... 
   (* top struct *)
   destruct (field_offset f f0) as [delta|]_eqn...
@@ -1568,7 +1604,7 @@ Proof.
   destruct (is_val (C a)) as [[v ty']|]_eqn; eauto.
 (* field *)
   eapply reducts_incl_trans with (C' := fun x => Efield x f ty); eauto.
-  destruct (is_loc (C a)) as [[[b ofs] ty']|]_eqn; eauto.
+  destruct (is_val (C a)) as [[v ty']|]_eqn; eauto.
 (* valof *)
   eapply reducts_incl_trans with (C' := fun x => Evalof x ty); eauto.
   destruct (is_loc (C a)) as [[[b ofs] ty']|]_eqn; eauto.

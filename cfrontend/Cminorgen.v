@@ -62,11 +62,11 @@ Definition for_temp (id: ident) : ident := xI id.
   global variables, stored in the global symbols with the same names. *)
 
 Inductive var_info: Type :=
-  | Var_local: memory_chunk -> var_info
-  | Var_stack_scalar: memory_chunk -> Z -> var_info
-  | Var_stack_array: Z -> var_info
-  | Var_global_scalar: memory_chunk -> var_info
-  | Var_global_array: var_info.
+  | Var_local (chunk: memory_chunk)
+  | Var_stack_scalar (chunk: memory_chunk) (ofs: Z)
+  | Var_stack_array (ofs sz al: Z)
+  | Var_global_scalar (chunk: memory_chunk)
+  | Var_global_array.
 
 Definition compilenv := PMap.t var_info.
 
@@ -275,7 +275,7 @@ Definition var_addr (cenv: compilenv) (id: ident): res (expr * approx) :=
   match PMap.get id cenv with
   | Var_local chunk => Error(msg "Cminorgen.var_addr")
   | Var_stack_scalar chunk ofs => OK (make_stackaddr ofs, Any)
-  | Var_stack_array ofs => OK (make_stackaddr ofs, Any)
+  | Var_stack_array ofs sz al => OK (make_stackaddr ofs, Any)
   | _ => OK (make_globaladdr id, Any)
   end.
 
@@ -299,16 +299,17 @@ Definition var_set (cenv: compilenv)
 (** A variant of [var_set] used for initializing function parameters.
   The value to be stored already resides in the Cminor variable called [id]. *)
 
-Definition var_set_self (cenv: compilenv) (id: ident) (ty: typ) (k: stmt): res stmt :=
+Definition var_set_self (cenv: compilenv) (id: ident) (k: stmt): res stmt :=
   match PMap.get id cenv with
   | Var_local chunk =>
       OK k
   | Var_stack_scalar chunk ofs =>
       OK (Sseq (make_store chunk (make_stackaddr ofs) (Evar (for_var id))) k)
-  | Var_global_scalar chunk =>
-      OK (Sseq (make_store chunk (make_globaladdr id) (Evar (for_var id))) k)
+  | Var_stack_array ofs sz al =>
+      OK (Sseq (Sbuiltin None (EF_memcpy sz al)
+                         (make_stackaddr ofs :: Evar (for_var id) :: nil)) k)
   | _ =>
-      Error(msg "Cminorgen.var_set_self.2")
+      Error(msg "Cminorgen.var_set_self")
   end.
 
 (** Translation of constants. *)
@@ -559,9 +560,9 @@ Definition assign_variable
     (cenv_stacksize: compilenv * Z) : compilenv * Z :=
   let (cenv, stacksize) := cenv_stacksize in
   match id_lv with
-  | (id, Varray sz) =>
+  | (id, Varray sz al) =>
       let ofs := align stacksize (array_alignment sz) in
-      (PMap.set id (Var_stack_array ofs) cenv, ofs + Zmax 0 sz)
+      (PMap.set id (Var_stack_array ofs sz al) cenv, ofs + Zmax 0 sz)
   | (id, Vscalar chunk) =>
       if Identset.mem id atk then
         let sz := size_chunk chunk in
@@ -594,7 +595,7 @@ Definition assign_global_variable
   match info with
   | (id, mkglobvar vk _ _ _) =>
       PMap.set id (match vk with Vscalar chunk => Var_global_scalar chunk
-                               | Varray _ => Var_global_array
+                               | Varray _ _ => Var_global_array
                    end)
                ce
   end.
@@ -610,13 +611,13 @@ Definition build_global_compilenv (p: Csharpminor.program) : compilenv :=
   local variables.) *)
 
 Fixpoint store_parameters
-       (cenv: compilenv) (params: list (ident * memory_chunk))
+       (cenv: compilenv) (params: list (ident * var_kind))
        {struct params} : res stmt :=
   match params with
   | nil => OK Sskip
-  | (id, chunk) :: rem =>
+  | (id, vk) :: rem =>
       do s <- store_parameters cenv rem;
-      var_set_self cenv id (type_of_chunk chunk) s
+      var_set_self cenv id s
   end.
 
 (** Translation of a Csharpminor function.  We must check that the

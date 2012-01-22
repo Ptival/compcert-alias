@@ -111,6 +111,23 @@ with fieldlist : Type :=
   | Fnil: fieldlist
   | Fcons: ident -> type -> fieldlist -> fieldlist.
 
+Lemma type_eq: forall (ty1 ty2: type), {ty1=ty2} + {ty1<>ty2}
+with typelist_eq: forall (tyl1 tyl2: typelist), {tyl1=tyl2} + {tyl1<>tyl2}
+with fieldlist_eq: forall (fld1 fld2: fieldlist), {fld1=fld2} + {fld1<>fld2}.
+Proof.
+  assert (forall (x y: intsize), {x=y} + {x<>y}). decide equality.
+  assert (forall (x y: signedness), {x=y} + {x<>y}). decide equality.
+  assert (forall (x y: floatsize), {x=y} + {x<>y}). decide equality.
+  assert (forall (x y: attr), {x=y} + {x<>y}). decide equality. apply bool_dec.
+  generalize ident_eq zeq. intros E1 E2. 
+  decide equality.
+  decide equality.
+  generalize ident_eq. intros E1.
+  decide equality.
+Defined.
+
+Opaque type_eq typelist_eq fieldlist_eq.
+
 (** Extract the attributes of a type. *)
 
 Definition attr_of_type (ty: type) :=
@@ -628,13 +645,16 @@ type must be accessed:
 - [By_value ch]: access by value, i.e. by loading from the address
   of the l-value using the memory chunk [ch];
 - [By_reference]: access by reference, i.e. by just returning
-  the address of the l-value;
+  the address of the l-value (used for arrays and functions);
+- [By_copy]: access is by reference, assignment is by copy
+  (used for [struct] and [union] types)
 - [By_nothing]: no access is possible, e.g. for the [void] type.
 *)
 
 Inductive mode: Type :=
   | By_value: memory_chunk -> mode
   | By_reference: mode
+  | By_copy: mode
   | By_nothing: mode.
 
 Definition access_mode (ty: type) : mode :=
@@ -650,8 +670,8 @@ Definition access_mode (ty: type) : mode :=
   | Tpointer _ _ => By_value Mint32
   | Tarray _ _ _ => By_reference
   | Tfunction _ _ => By_reference
-  | Tstruct _ fList _ => By_nothing
-  | Tunion _ fList _ => By_nothing
+  | Tstruct _ _ _ => By_copy
+  | Tunion _ _ _ => By_copy
   | Tcomp_ptr _ _ => By_nothing
 end.
 
@@ -931,6 +951,8 @@ Inductive classify_cast_cases : Type :=
   | cast_case_f2f (sz2:floatsize)                  (**r float -> float *)
   | cast_case_i2f (si1:signedness) (sz2:floatsize) (**r int -> float *)
   | cast_case_f2i (sz2:intsize) (si2:signedness)   (**r float -> int *)
+  | cast_case_struct (id1: ident) (fld1: fieldlist) (id2: ident) (fld2: fieldlist) (**r struct -> struct *)
+  | cast_case_union (id1: ident) (fld1: fieldlist) (id2: ident) (fld2: fieldlist) (**r union -> union *)
   | cast_case_void                                 (**r any -> void *)
   | cast_case_default.
 
@@ -942,6 +964,8 @@ Function classify_cast (tfrom tto: type) : classify_cast_cases :=
   | Tfloat sz2 _, Tfloat sz1 _ => cast_case_f2f sz2
   | Tfloat sz2 _, Tint sz1 si1 _ => cast_case_i2f si1 sz2
   | Tpointer _ _, (Tint _ _ _ | Tpointer _ _ | Tarray _ _ _ | Tfunction _ _) => cast_case_neutral
+  | Tstruct id2 fld2 _, Tstruct id1 fld1 _ => cast_case_struct id1 fld1 id2 fld2
+  | Tunion id2 fld2 _, Tunion id1 fld1 _ => cast_case_union id1 fld1 id2 fld2
   | Tvoid, _ => cast_case_void
   | _, _ => cast_case_default
   end.

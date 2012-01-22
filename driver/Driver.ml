@@ -69,6 +69,7 @@ let parse_c_file sourcename ifile =
   (* Simplification options *)
   let simplifs =
     "b" (* blocks: mandatory *)
+  ^ (if !option_fstruct_return then "r" else "")
   ^ (if !option_fstruct_passing then "s" else "")
   ^ (if !option_fstruct_assign then "S" else "")
   ^ (if !option_fbitfields then "f" else "")
@@ -332,8 +333,7 @@ Language support options (use -fno-<opt> to turn off -f<opt>) :
   -fbitfields    Emulate bit fields in structs [off]
   -flonglong     Partial emulation of 'long long' types [on]
   -flongdouble   Treat 'long double' as 'double' [off]
-  -fstruct-passing  Emulate passing structs and unions by value [off]
-  -fstruct-assign   Emulate assignment between structs or unions [off]
+  -fstruct-return  Emulate returning structs and unions by value [off]
   -fvararg-calls Emulate calls to variable-argument functions [on]
   -fpacked-structs  Emulate packed structs [off]
   -fall          Activate all language support options above
@@ -372,8 +372,8 @@ Interpreter mode:
 "
 
 let language_support_options = [
-  option_fbitfields; option_flonglong; option_flongdouble; option_fstruct_passing;
-  option_fstruct_assign; option_fvararg_calls; option_fpacked_structs
+  option_fbitfields; option_flonglong; option_flongdouble;
+  option_fstruct_return; option_fvararg_calls; option_fpacked_structs
 ]
 
 let cmdline_actions =
@@ -431,8 +431,7 @@ let cmdline_actions =
   ]
   @ f_opt "longlong" option_flonglong
   @ f_opt "longdouble" option_flongdouble
-  @ f_opt "struct-passing" option_fstruct_passing
-  @ f_opt "struct-assign" option_fstruct_assign
+  @ f_opt "struct-return" option_fstruct_return
   @ f_opt "bitfields" option_fbitfields
   @ f_opt "vararg-calls" option_fvararg_calls
   @ f_opt "madd" option_fmadd

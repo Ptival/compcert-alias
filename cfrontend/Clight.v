@@ -180,51 +180,6 @@ Definition empty_env: env := (PTree.empty (block * type)).
 
 Definition temp_env := PTree.t val.
 
-(*********************************
-(** [load_value_of_type ty m b ofs] computes the value of a datum
-  of type [ty] residing in memory [m] at block [b], offset [ofs].
-  If the type [ty] indicates an access by value, the corresponding
-  memory load is performed.  If the type [ty] indicates an access by
-  reference, the pointer [Vptr b ofs] is returned. *)
-
-Definition load_value_of_type (ty: type) (m: mem) (b: block) (ofs: int) : option val :=
-  match access_mode ty with
-  | By_value chunk => Mem.loadv chunk m (Vptr b ofs)
-  | By_reference => Some (Vptr b ofs)
-  | By_nothing => None
-  end.
-
-(** Symmetrically, [store_value_of_type ty m b ofs v] returns the
-  memory state after storing the value [v] in the datum
-  of type [ty] residing in memory [m] at block [b], offset [ofs].
-  This is allowed only if [ty] indicates an access by value. *)
-
-Definition store_value_of_type (ty_dest: type) (m: mem) (loc: block) (ofs: int) (v: val) : option mem :=
-  match access_mode ty_dest with
-  | By_value chunk => Mem.storev chunk m (Vptr loc ofs) v
-  | By_reference => None
-  | By_nothing => None
-  end.
-
-(** Initialization of local variables that are parameters to a function.
-  [bind_parameters e m1 params args m2] stores the values [args]
-  in the memory blocks corresponding to the variables [params].
-  [m1] is the initial memory state and [m2] the final memory state. *)
-
-Inductive bind_parameters: env ->
-                           mem -> list (ident * type) -> list val ->
-                           mem -> Prop :=
-  | bind_parameters_nil:
-      forall e m,
-      bind_parameters e m nil nil m
-  | bind_parameters_cons:
-      forall e m id ty params v1 vl b m1 m2,
-      PTree.get id e = Some(b, ty) ->
-      store_value_of_type ty m b Int.zero v1 = Some m1 ->
-      bind_parameters e m1 params vl m2 ->
-      bind_parameters e m ((id, ty) :: params) (v1 :: vl) m2.
-************************************)
-
 (** Selection of the appropriate case of a [switch], given the value [n]
   of the selector expression. *)
 
@@ -326,12 +281,12 @@ with eval_lvalue: expr -> block -> int -> Prop :=
       eval_expr a (Vptr l ofs) ->
       eval_lvalue (Ederef a ty) l ofs
  | eval_Efield_struct:   forall a i ty l ofs id fList att delta,
-      eval_lvalue a l ofs ->
+      eval_expr a (Vptr l ofs) ->
       typeof a = Tstruct id fList att ->
       field_offset i fList = OK delta ->
       eval_lvalue (Efield a i ty) l (Int.add ofs (Int.repr delta))
  | eval_Efield_union:   forall a i ty l ofs id fList att,
-      eval_lvalue a l ofs ->
+      eval_expr a (Vptr l ofs) ->
       typeof a = Tunion id fList att ->
       eval_lvalue (Efield a i ty) l ofs.
 

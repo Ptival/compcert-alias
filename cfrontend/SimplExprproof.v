@@ -150,6 +150,7 @@ Proof.
   eapply volatile_load_preserved with (ge1 := ge); auto.
   exact symbols_preserved. exact block_is_volatile_preserved.
   eapply deref_loc_reference; eauto.
+  eapply deref_loc_copy; eauto.
 Qed.
 
 Remark assign_loc_preserved:
@@ -161,6 +162,7 @@ Proof.
   eapply assign_loc_volatile; eauto.
   eapply volatile_store_preserved with (ge1 := ge); auto.
   exact symbols_preserved. exact block_is_volatile_preserved.
+  eapply assign_loc_copy; eauto.
 Qed.
 
 Lemma tr_simple:

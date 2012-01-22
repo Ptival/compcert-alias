@@ -86,14 +86,14 @@ Inductive eval_simple_lvalue: expr -> block -> int -> Prop :=
   | esl_deref: forall r ty b ofs,
       eval_simple_rvalue r (Vptr b ofs) ->
       eval_simple_lvalue (Ederef r ty) b ofs
-  | esl_field_struct: forall l f ty b ofs id fList a delta,
-      eval_simple_lvalue l b ofs ->
-      typeof l = Tstruct id fList a -> field_offset f fList = OK delta ->
-      eval_simple_lvalue (Efield l f ty) b (Int.add ofs (Int.repr delta))
-  | esl_field_union: forall l f ty b ofs id fList a,
-      eval_simple_lvalue l b ofs ->
-      typeof l = Tunion id fList a ->
-      eval_simple_lvalue (Efield l f ty) b ofs
+  | esl_field_struct: forall r f ty b ofs id fList a delta,
+      eval_simple_rvalue r (Vptr b ofs) ->
+      typeof r = Tstruct id fList a -> field_offset f fList = OK delta ->
+      eval_simple_lvalue (Efield r f ty) b (Int.add ofs (Int.repr delta))
+  | esl_field_union: forall r f ty b ofs id fList a,
+      eval_simple_rvalue r (Vptr b ofs) ->
+      typeof r = Tunion id fList a ->
+      eval_simple_lvalue (Efield r f ty) b ofs
 
 with eval_simple_rvalue: expr -> val -> Prop :=
   | esr_val: forall v ty,
@@ -408,6 +408,8 @@ Proof.
   rewrite H2 in H. inv H0. inv H. constructor.
   rewrite H2 in H. inv H0. inv H. constructor.
   rewrite H2 in H. inv H0. destruct (cast_float_int si2 f); inv H. inv H7. constructor.
+  rewrite H2 in H. destruct (ident_eq id1 id2 && fieldlist_eq fld1 fld2); inv H. auto.
+  rewrite H2 in H. destruct (ident_eq id1 id2 && fieldlist_eq fld1 fld2); inv H. auto.
   rewrite H5 in H. inv H. auto.
 Qed.
 
@@ -469,10 +471,10 @@ Proof.
   (* deref *)
   eauto.
   (* field struct *)
-  rewrite H0 in CV. monadInv CV. exploit IHeval_simple_lvalue; eauto. intro MV. inv MV.
+  rewrite H0 in CV. monadInv CV. exploit constval_rvalue; eauto. intro MV. inv MV.
   simpl. replace x with delta by congruence. constructor. auto.
   (* field union *)
-  rewrite H0 in CV. auto.
+  rewrite H0 in CV. eauto.
 Qed.
 
 Lemma constval_simple:

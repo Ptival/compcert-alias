@@ -329,8 +329,6 @@ let convertTyp env t =
   and convertParams seen = function
     | [] -> Tnil
     | (id, ty) :: rem ->
-        if Cutil.is_composite_type env ty then
-          unsupported "function parameter of struct or union type";
         Tcons(convertTyp seen ty, convertParams seen rem)
 
   and convertFields seen ci =
@@ -366,8 +364,6 @@ let string_of_type ty =
 let first_class_value env ty =
   match Cutil.unroll env ty with
   | C.TInt((C.ILongLong|C.IULongLong), _) -> false
-  | C.TStruct _ -> false
-  | C.TUnion _ -> false
   | _ -> true
 
 (************ REMOVED
@@ -721,8 +717,6 @@ let convertFundef env fd =
   let params =
     List.map
       (fun (id, ty) ->
-        if Cutil.is_composite_type env ty then
-          unsupported "function parameter of struct or union type";
         (intern_string id.name, convertTyp env ty))
       fd.fd_params in
   let vars =
