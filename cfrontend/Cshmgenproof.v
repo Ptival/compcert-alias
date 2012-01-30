@@ -127,6 +127,7 @@ Proof.
   rewrite Int.sign_ext_idem; auto. compute; auto.
   rewrite Int.zero_ext_idem; auto. compute; auto.
   inv H. auto.
+  inv H. destruct (Int.eq n Int.zero); auto.
 Qed.
 
 Remark cast_float_float_normalized:
@@ -162,6 +163,14 @@ Proof.
   functional inversion H2; subst. eapply cast_float_float_normalized; eauto.
   functional inversion H2; subst. eapply cast_float_float_normalized; eauto.
   functional inversion H2; subst. eapply cast_int_int_normalized; eauto.
+  assert (chunk = Mint8unsigned). 
+    functional inversion H2; subst; simpl in H0; try congruence.
+  subst chunk. destruct (Int.eq i Int.zero); red; auto.
+  assert (chunk = Mint8unsigned). 
+    functional inversion H2; subst; simpl in H0; try congruence.
+  subst chunk. red; auto.
+  functional inversion H2; subst. simpl in H0. inv H0. red; auto.
+  functional inversion H2; subst. simpl in H0. inv H0. red; auto.
   functional inversion H2; subst. simpl in H0. congruence.
   functional inversion H2; subst. simpl in H0. congruence.
   functional inversion H5; subst. simpl in H0. congruence.
@@ -377,6 +386,7 @@ Proof.
   destruct si; eauto with cshm.
   destruct si; eauto with cshm.
   auto.
+  econstructor. eauto. simpl. destruct (Int.eq n Int.zero); auto.
 Qed.
 
 Lemma make_cast_float_correct:
@@ -408,6 +418,14 @@ Proof.
   rewrite H2. auto with cshm. 
   (* float -> int *)
   rewrite H2. eauto with cshm.
+  (* int/pointer -> bool *)
+  rewrite H2. econstructor; eauto. simpl. destruct (Int.eq i Int.zero); auto.
+  rewrite H2. econstructor; eauto. 
+  (* float -> bool *)
+  rewrite H2. econstructor; eauto with cshm.
+  simpl. unfold Val.cmpf, Val.cmpf_bool. rewrite Float.cmp_ne_eq. rewrite H7; auto.
+  rewrite H2. econstructor; eauto with cshm.
+  simpl. unfold Val.cmpf, Val.cmpf_bool. rewrite Float.cmp_ne_eq. rewrite H7; auto.
   (* struct -> struct *)
   rewrite H2. auto.
   (* union -> union *)
@@ -705,6 +723,23 @@ Proof.
   rewrite H in MKLOAD. inv MKLOAD. constructor; auto. 
 Qed.
 
+Remark capped_alignof_divides:
+  forall ty n, 
+  (alignof ty | n) -> (Zmin (alignof ty) 4 | n).
+Proof.
+  intros. generalize (alignof_1248 ty). 
+  intros [A|[A|[A|A]]]; rewrite A in *; auto. 
+  apply Zdivides_trans with 8; auto. exists 2; auto.
+Qed.
+
+Remark capped_alignof_124:
+  forall ty,
+  Zmin (alignof ty) 4 = 1 \/ Zmin (alignof ty) 4 = 2 \/ Zmin (alignof ty) 4 = 4.
+Proof.
+  intros. generalize (alignof_1248 ty). 
+  intros [A|[A|[A|A]]]; rewrite A; auto.
+Qed.
+
 Lemma make_memcpy_correct:
   forall f dst src ty k e le m b ofs v t m',
   eval_expr ge e le m dst (Vptr b ofs) ->
@@ -718,8 +753,11 @@ Proof.
   econstructor.
   econstructor. eauto. econstructor. eauto. constructor. 
   econstructor; eauto. 
-  admit.  (* FIXME: alignment = 1,2,4 *)
-  apply sizeof_pos. apply sizeof_alignof_compat.
+  apply capped_alignof_124.
+  apply sizeof_pos. 
+  apply capped_alignof_divides. apply sizeof_alignof_compat.
+  apply capped_alignof_divides; auto.
+  apply capped_alignof_divides; auto.
 Qed.
  
 Lemma make_store_correct:
@@ -1004,8 +1042,11 @@ Proof.
   apply bind_parameters_array with b m1. 
   exploit me_local; eauto. intros [vk [A B]]. congruence. 
   econstructor; eauto. 
-  admit. (* FIXME: al = 1 \/ ... *)
-  apply sizeof_pos. apply sizeof_alignof_compat. 
+  apply capped_alignof_124.
+  apply sizeof_pos. 
+  apply capped_alignof_divides. apply sizeof_alignof_compat. 
+  apply capped_alignof_divides; auto.
+  apply capped_alignof_divides; auto.
   apply IHbind_parameters; auto.
 Qed.
 

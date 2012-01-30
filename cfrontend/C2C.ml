@@ -243,7 +243,7 @@ let convertAttr a = List.mem AVolatile a
 (** Types *)
 
 let convertIkind = function
-  | C.IBool -> unsupported "'_Bool' type"; (Unsigned, I8)
+  | C.IBool -> (Unsigned, IBool)
   | C.IChar -> ((if (!Cparser.Machine.config).Cparser.Machine.char_signed
                  then Signed else Unsigned), I8)
   | C.ISChar -> (Signed, I8)

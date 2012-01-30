@@ -54,6 +54,7 @@ let name_inttype sz sg =
   | I16, Unsigned -> "unsigned short"
   | I32, Signed -> "int"
   | I32, Unsigned -> "unsigned int"
+  | IBool, _ -> "_Bool"
 
 let name_floattype sz =
   match sz with

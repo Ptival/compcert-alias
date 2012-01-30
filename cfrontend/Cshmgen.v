@@ -51,6 +51,7 @@ Definition var_kind_of_type (ty: type): res var_kind :=
   | Tint I16 Signed _ => OK(Vscalar Mint16signed)
   | Tint I16 Unsigned _ => OK(Vscalar Mint16unsigned)
   | Tint I32 _ _ => OK(Vscalar Mint32)
+  | Tint IBool _ _ => OK(Vscalar Mint8unsigned)
   | Tfloat F32 _ => OK(Vscalar Mfloat32)
   | Tfloat F64 _ => OK(Vscalar Mfloat64)
   | Tvoid => Error (msg "Cshmgen.var_kind_of_type(void)")
@@ -218,6 +219,7 @@ Definition make_cast_int (e: expr) (sz: intsize) (si: signedness) :=
   | I16, Signed => Eunop Ocast16signed e  
   | I16, Unsigned => Eunop Ocast16unsigned e  
   | I32, _ => e
+  | IBool, _ => Eunop Oboolval e
   end.
 
 Definition make_cast_float (e: expr) (sz: floatsize) :=
@@ -233,6 +235,8 @@ Definition make_cast (from to: type) (e: expr) :=
   | cast_case_f2f sz2 => make_cast_float e sz2
   | cast_case_i2f si1 sz2 => make_cast_float (make_floatofint e si1) sz2
   | cast_case_f2i sz2 si2 => make_cast_int (make_intoffloat e si2) sz2 si2
+  | cast_case_ip2bool => Eunop Oboolval e
+  | cast_case_f2bool => Ebinop (Ocmpf Cne) e (make_floatconst Float.zero)
   | cast_case_struct id1 fld1 id2 fld2 => e
   | cast_case_union id1 fld1 id2 fld2 => e
   | cast_case_void => e
@@ -269,7 +273,8 @@ Definition make_vol_load (dst: ident) (addr: expr) (ty: type) :=
   by-copy assignment of a value of Clight type [ty]. *)
 
 Definition make_memcpy (dst src: expr) (ty: type) :=
-  Sbuiltin None (EF_memcpy (Csyntax.sizeof ty) (Csyntax.alignof ty)) (dst :: src :: nil).
+  Sbuiltin None (EF_memcpy (Csyntax.sizeof ty) (Zmin (Csyntax.alignof ty) 4))
+                (dst :: src :: nil).
 
 (** [make_store addr ty rhs] stores the value of the
    Csharpminor expression [rhs] into the memory location denoted by the

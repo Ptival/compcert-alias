@@ -663,8 +663,8 @@ let print_instruction oc = function
   | Plwzx(r1, r2, r3) ->
       fprintf oc "	lwzx	%a, %a, %a\n" ireg r1 ireg r2 ireg r3
   | Pmfcrbit(r1, bit) ->
-      fprintf oc "	mfcr	%a\n" ireg GPR12;
-      fprintf oc "	rlwinm	%a, %a, %d, 31, 31\n" ireg r1  ireg GPR12  (1 + num_crbit bit)
+      fprintf oc "	mfcr	%a\n" ireg r1;
+      fprintf oc "	rlwinm	%a, %a, %d, 31, 31\n" ireg r1  ireg r1 (1 + num_crbit bit)
   | Pmflr(r1) ->
       fprintf oc "	mflr	%a\n" ireg r1
   | Pmr(r1, r2) ->

@@ -212,6 +212,7 @@ Proof.
   apply eval_cast8signed; auto.
   apply eval_cast16unsigned; auto.
   apply eval_cast16signed; auto.
+  apply eval_boolval; auto.
   apply eval_negint; auto.
   apply eval_notbool; auto.
   apply eval_notint; auto.

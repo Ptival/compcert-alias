@@ -112,6 +112,7 @@ Definition sel_unop (op: Cminor.unary_operation) (arg: expr) : expr :=
   | Cminor.Ocast16unsigned => cast16unsigned arg 
   | Cminor.Ocast16signed => cast16signed arg 
   | Cminor.Onegint => negint arg
+  | Cminor.Oboolval => boolval arg
   | Cminor.Onotbool => notbool arg
   | Cminor.Onotint => notint arg
   | Cminor.Onegf => negf arg

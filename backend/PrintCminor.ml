@@ -58,6 +58,7 @@ let name_of_unop = function
   | Ocast16unsigned -> "int16u"
   | Ocast16signed -> "int16s"
   | Onegint -> "-"
+  | Oboolval -> "(_Bool)"
   | Onotbool -> "!"
   | Onotint -> "~"
   | Onegf -> "-f"

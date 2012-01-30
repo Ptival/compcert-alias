@@ -140,6 +140,7 @@ Definition make_unop (op: unary_operation) (e: expr): expr :=
 
 Inductive approx : Type :=
   | Any                   (**r any value *)
+  | Int1                  (**r [0] or [1] *)
   | Int7                  (**r [[0,127]] *)
   | Int8s                 (**r [[-128,127]] *)
   | Int8u                 (**r [[0,255]] *)
@@ -153,41 +154,51 @@ Module Approx.
 Definition bge (x y: approx) : bool :=
   match x, y with
   | Any, _ => true
-  | Int7, Int7 => true
-  | Int8s, (Int7 | Int8s) => true
-  | Int8u, (Int7 | Int8u) => true
-  | Int15, (Int7 | Int8u | Int15) => true
-  | Int16s, (Int7 | Int8s | Int8u | Int15 | Int16s) => true
-  | Int16u, (Int7 | Int8u | Int15 | Int16u) => true
+  | Int1, Int1 => true
+  | Int7, (Int1 | Int7) => true
+  | Int8s, (Int1 | Int7 | Int8s) => true
+  | Int8u, (Int1 | Int7 | Int8u) => true
+  | Int15, (Int1 | Int7 | Int8u | Int15) => true
+  | Int16s, (Int1 | Int7 | Int8s | Int8u | Int15 | Int16s) => true
+  | Int16u, (Int1 | Int7 | Int8u | Int15 | Int16u) => true
   | Float32, Float32 => true
   | _, _ => false
   end.
 
 Definition lub (x y: approx) : approx :=
   match x, y with
+  | Int1, Int1 => Int1
+  | Int1, Int7 => Int7
+  | Int1, Int8u => Int8u
+  | Int1, Int8s => Int8s
+  | Int1, Int15 => Int15
+  | Int1, Int16u => Int16u
+  | Int1, Int16s => Int16s
+  | Int7, Int1 => Int7
   | Int7, Int7 => Int7
   | Int7, Int8u => Int8u
   | Int7, Int8s => Int8s
   | Int7, Int15 => Int15
   | Int7, Int16u => Int16u
   | Int7, Int16s => Int16s
-  | Int8u, (Int7|Int8u) => Int8u
+  | Int8u, (Int1|Int7|Int8u) => Int8u
   | Int8u, Int15 => Int15
   | Int8u, Int16u => Int16u
   | Int8u, Int16s => Int16s
-  | Int8s, (Int7|Int8s) => Int8s
+  | Int8s, (Int1|Int7|Int8s) => Int8s
   | Int8s, (Int15|Int16s) => Int16s
-  | Int15, (Int7|Int8u|Int15) => Int15
+  | Int15, (Int1|Int7|Int8u|Int15) => Int15
   | Int15, Int16u => Int16u
   | Int15, (Int8s|Int16s) => Int16s
-  | Int16u, (Int7|Int8u|Int15|Int16u) => Int16u
-  | Int16s, (Int7|Int8u|Int8s|Int15|Int16s) => Int16s
+  | Int16u, (Int1|Int7|Int8u|Int15|Int16u) => Int16u
+  | Int16s, (Int1|Int7|Int8u|Int8s|Int15|Int16s) => Int16s
   | Float32, Float32 => Float32
   | _, _ => Any
   end.
 
 Definition of_int (n: int) :=
-  if Int.eq_dec n (Int.zero_ext 7 n) then Int7
+  if Int.eq_dec n Int.zero || Int.eq_dec n Int.one then Int1
+  else if Int.eq_dec n (Int.zero_ext 7 n) then Int7
   else if Int.eq_dec n (Int.zero_ext 8 n) then Int8u
   else if Int.eq_dec n (Int.sign_ext 8 n) then Int8s
   else if Int.eq_dec n (Int.zero_ext 15 n) then Int15
@@ -216,7 +227,8 @@ Definition unop (op: unary_operation) (a: approx) :=
   | Ocast16unsigned => Int16u
   | Ocast16signed => Int16s
   | Osingleoffloat => Float32
-  | Onotbool => Int7
+  | Oboolval => Int1
+  | Onotbool => Int1
   | _ => Any
   end.
 
@@ -226,17 +238,20 @@ Definition unop_is_redundant (op: unary_operation) (a: approx) :=
   | Ocast8signed => bge Int8s a
   | Ocast16unsigned => bge Int16u a
   | Ocast16signed => bge Int16s a
+  | Oboolval => bge Int1 a
   | Osingleoffloat => bge Float32 a
   | _ => false
   end.
 
 Definition bitwise_and (a1 a2: approx) :=
-  if bge Int8u a1 || bge Int8u a2 then Int8u
+  if bge Int1 a1 || bge Int1 a2 then Int1
+  else if bge Int8u a1 || bge Int8u a2 then Int8u
   else if bge Int16u a1 || bge Int16u a2 then Int16u
   else Any.
 
 Definition bitwise_or (a1 a2: approx) :=
-  if bge Int8u a1 && bge Int8u a2 then Int8u
+  if bge Int1 a1 && bge Int1 a2 then Int1
+  else if bge Int8u a1 && bge Int8u a2 then Int8u
   else if bge Int16u a1 && bge Int16u a2 then Int16u
   else Any.
 
@@ -244,9 +259,9 @@ Definition binop (op: binary_operation) (a1 a2: approx) :=
   match op with
   | Oand => bitwise_and a1 a2
   | Oor | Oxor => bitwise_or a1 a2
-  | Ocmp _ => Int7
-  | Ocmpu _ => Int7
-  | Ocmpf _ => Int7
+  | Ocmp _ => Int1
+  | Ocmpu _ => Int1
+  | Ocmpf _ => Int1
   | _ => Any
   end.
 
@@ -306,7 +321,7 @@ Definition var_set_self (cenv: compilenv) (id: ident) (k: stmt): res stmt :=
   | Var_stack_scalar chunk ofs =>
       OK (Sseq (make_store chunk (make_stackaddr ofs) (Evar (for_var id))) k)
   | Var_stack_array ofs sz al =>
-      OK (Sseq (Sbuiltin None (EF_memcpy sz al)
+      OK (Sseq (Sbuiltin None (EF_memcpy sz (Zmin al 4))
                          (make_stackaddr ofs :: Evar (for_var id) :: nil)) k)
   | _ =>
       Error(msg "Cminorgen.var_set_self")

@@ -30,7 +30,8 @@ Require Import AST.
   pointers, arrays, function types, and composite types (struct and 
   union).  Numeric types (integers and floats) fully specify the
   bit size of the type.  An integer type is a pair of a signed/unsigned
-  flag and a bit size: 8, 16 or 32 bits. *)
+  flag and a bit size: 8, 16, or 32 bits, or the special [IBool] size
+  standing for the C99 [_Bool] type. *)
 
 Inductive signedness : Type :=
   | Signed: signedness
@@ -39,7 +40,8 @@ Inductive signedness : Type :=
 Inductive intsize : Type :=
   | I8: intsize
   | I16: intsize
-  | I32: intsize.
+  | I32: intsize
+  | IBool: intsize.
 
 (** Float types come in two sizes: 32 bits (single precision)
   and 64-bit (double precision). *)
@@ -399,6 +401,7 @@ Fixpoint alignof (t: type) : Z :=
   | Tint I8 _ _ => 1
   | Tint I16 _ _ => 2
   | Tint I32 _ _ => 4
+  | Tint IBool _ _ => 1
   | Tfloat F32 _ => 4
   | Tfloat F64 _ => 8
   | Tpointer _ _ => 4
@@ -418,36 +421,28 @@ with alignof_fields (f: fieldlist) : Z :=
 Scheme type_ind2 := Induction for type Sort Prop
   with fieldlist_ind2 := Induction for fieldlist Sort Prop.
 
-Lemma alignof_power_of_2:
-  forall t, exists n, alignof t = two_power_nat n
-with alignof_fields_power_of_2:
-  forall f, exists n, alignof_fields f = two_power_nat n.
+Lemma alignof_1248:
+  forall t, alignof t = 1 \/ alignof t = 2 \/ alignof t = 4 \/ alignof t = 8
+with alignof_fields_1248:
+  forall f, alignof_fields f = 1 \/ alignof_fields f = 2 \/ alignof_fields f = 4 \/ alignof_fields f = 8.
 Proof.
-  induction t; simpl.
-  exists 0%nat; auto.
-  destruct i. exists 0%nat; auto. exists 1%nat; auto. exists 2%nat; auto.
-  destruct f. exists 2%nat; auto. exists 3%nat; auto.
-  exists 2%nat; auto.
-  auto.
-  exists 0%nat; auto.
-  apply alignof_fields_power_of_2.
-  apply alignof_fields_power_of_2.
-  exists 2%nat; auto.
-  induction f; simpl.
-  exists 0%nat; auto.
+  induction t; simpl; auto.
+  destruct i; auto.
+  destruct f; auto.
+  induction f; simpl; auto.
   rewrite Zmax_spec. destruct (zlt (alignof_fields f) (alignof t)); auto.
 Qed.
 
 Lemma alignof_pos:
   forall t, alignof t > 0.
 Proof.
-  intros. destruct (alignof_power_of_2 t) as [p EQ]. rewrite EQ. apply two_power_nat_pos. 
+  intros. generalize (alignof_1248 t). omega.
 Qed.
 
 Lemma alignof_fields_pos:
   forall f, alignof_fields f > 0.
 Proof.
-  intros. destruct (alignof_fields_power_of_2 f) as [p EQ]. rewrite EQ. apply two_power_nat_pos. 
+  intros. generalize (alignof_fields_1248 f). omega.
 Qed.
 
 (** Size of a type, in bytes. *)
@@ -458,6 +453,7 @@ Fixpoint sizeof (t: type) : Z :=
   | Tint I8 _ _ => 1
   | Tint I16 _ _ => 2
   | Tint I32 _ _ => 4
+  | Tint IBool _ _ => 1
   | Tfloat F32 _ => 4
   | Tfloat F64 _ => 8
   | Tpointer _ _ => 4
@@ -664,6 +660,7 @@ Definition access_mode (ty: type) : mode :=
   | Tint I16 Signed _ => By_value Mint16signed
   | Tint I16 Unsigned _ => By_value Mint16unsigned
   | Tint I32 _ _ => By_value Mint32
+  | Tint IBool _ _ => By_value Mint8unsigned
   | Tfloat F32 _ => By_value Mfloat32
   | Tfloat F64 _ => By_value Mfloat64
   | Tvoid => By_nothing
@@ -951,6 +948,8 @@ Inductive classify_cast_cases : Type :=
   | cast_case_f2f (sz2:floatsize)                  (**r float -> float *)
   | cast_case_i2f (si1:signedness) (sz2:floatsize) (**r int -> float *)
   | cast_case_f2i (sz2:intsize) (si2:signedness)   (**r float -> int *)
+  | cast_case_ip2bool                   (**r int|pointer -> bool *)
+  | cast_case_f2bool                    (**r float -> bool *)
   | cast_case_struct (id1: ident) (fld1: fieldlist) (id2: ident) (fld2: fieldlist) (**r struct -> struct *)
   | cast_case_union (id1: ident) (fld1: fieldlist) (id2: ident) (fld2: fieldlist) (**r union -> union *)
   | cast_case_void                                 (**r any -> void *)
@@ -959,6 +958,8 @@ Inductive classify_cast_cases : Type :=
 Function classify_cast (tfrom tto: type) : classify_cast_cases :=
   match tto, tfrom with
   | Tint I32 si2 _, (Tint _ _ _ | Tpointer _ _ | Tarray _ _ _ | Tfunction _ _) => cast_case_neutral
+  | Tint IBool _ _, (Tint _ _ _ | Tpointer _ _ | Tarray _ _ _ | Tfunction _ _) => cast_case_ip2bool
+  | Tint IBool _ _, Tfloat _ _ => cast_case_f2bool
   | Tint sz2 si2 _, Tint sz1 si1 _ => cast_case_i2i sz2 si2
   | Tint sz2 si2 _, Tfloat sz1 _ => cast_case_f2i sz2 si2
   | Tfloat sz2 _, Tfloat sz1 _ => cast_case_f2f sz2

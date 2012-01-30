@@ -90,7 +90,7 @@ let rec transf_expr env ctx e =
          etyp = newty}
 
 (* Function calls returning a composite: add first argument.
-    ctx = Effects:   lv = f(...)     -> f(&lv, ...)
+    ctx = Effects:   lv = f(...)     -> f(&lv, ...)      [copy optimization]
                      f(...)          -> f(&newtemp, ...)
     ctx = Val:       lv = f(...)     -> f(&newtemp, ...), lv = newtemp
                      f(...)          -> f(&newtemp, ...), newtemp

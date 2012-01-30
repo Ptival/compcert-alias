@@ -41,6 +41,7 @@ Definition cast_int_int (sz: intsize) (sg: signedness) (i: int) : int :=
   | I16, Signed => Int.sign_ext 16 i
   | I16, Unsigned => Int.zero_ext 16 i 
   | I32, _ => i
+  | IBool, _ => if Int.eq i Int.zero then Int.zero else Int.one
   end.
 
 Definition cast_int_float (si : signedness) (i: int) : float :=
@@ -90,6 +91,18 @@ Function sem_cast (v: val) (t1 t2: type) : option val :=
           | Some i => Some (Vint (cast_int_int sz2 si2 i))
           | None => None
           end
+      | _ => None
+      end
+  | cast_case_ip2bool =>
+      match v with
+      | Vint i => Some (Vint (cast_int_int IBool Signed i))
+      | Vptr _ _ => Some (Vint Int.one)
+      | _ => None
+      end
+  | cast_case_f2bool =>
+      match v with
+      | Vfloat f =>
+          Some(Vint(if Float.cmp Ceq f Float.zero then Int.zero else Int.one))
       | _ => None
       end
   | cast_case_struct id1 fld1 id2 fld2 =>

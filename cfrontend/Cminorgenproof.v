@@ -1168,6 +1168,7 @@ Qed.
 
 Definition val_match_approx (a: approx) (v: val) : Prop :=
   match a with
+  | Int1 => v = Val.zero_ext 1 v
   | Int7 => v = Val.zero_ext 8 v /\ v = Val.sign_ext 8 v
   | Int8u => v = Val.zero_ext 8 v
   | Int8s => v = Val.sign_ext 8 v
@@ -1199,8 +1200,16 @@ Proof.
     intros. rewrite H.
     destruct v; simpl; auto. decEq. symmetry. 
     apply Int.sign_zero_ext_widen. compute; auto. split. omega. compute; auto.
+  assert (D: forall v, v = Val.zero_ext 1 v -> v = Val.zero_ext 8 v).
+    intros. rewrite H.
+    destruct v; simpl; auto. decEq. symmetry. 
+    apply Int.zero_ext_widen. compute; auto. split. omega. compute; auto.
+  assert (E: forall v, v = Val.zero_ext 1 v -> v = Val.sign_ext 8 v).
+    intros. rewrite H.
+    destruct v; simpl; auto. decEq. symmetry. 
+    apply Int.sign_zero_ext_widen. compute; auto. split. omega. compute; auto.
   intros. 
-  unfold Approx.bge in H; destruct a1; try discriminate; destruct a2; simpl in *; try discriminate; intuition; auto.
+  unfold Approx.bge in H; destruct a1; try discriminate; destruct a2; simpl in *; try discriminate; intuition.
 Qed.
 
 Lemma approx_lub_ge_left:
@@ -1218,7 +1227,9 @@ Qed.
 Lemma approx_of_int_sound:
   forall n, val_match_approx (Approx.of_int n) (Vint n).
 Proof.
-  unfold Approx.of_int; intros. 
+  unfold Approx.of_int; intros.
+  destruct (Int.eq_dec n Int.zero); simpl. subst; auto. 
+  destruct (Int.eq_dec n Int.one); simpl. subst; auto. 
   destruct (Int.eq_dec n (Int.zero_ext 7 n)). simpl.
     split.
     decEq. rewrite e. symmetry. apply Int.zero_ext_widen. compute; auto. split. omega. compute; auto.
@@ -1261,7 +1272,8 @@ Proof.
   destruct v1; simpl; auto. rewrite Int.sign_ext_idem; auto. compute; auto.
   destruct v1; simpl; auto. rewrite Int.zero_ext_idem; auto. compute; auto.
   destruct v1; simpl; auto. rewrite Int.sign_ext_idem; auto. compute; auto.
-  destruct v1; simpl; auto. destruct (Int.eq i Int.zero); auto.
+  destruct v1; simpl; auto. destruct (Int.eq i Int.zero); simpl; auto.
+  destruct v1; simpl; auto. destruct (Int.eq i Int.zero); simpl; auto.
   destruct v1; simpl; auto. rewrite Float.singleoffloat_idem; auto.
 Qed.
 
@@ -1285,7 +1297,13 @@ Proof.
   assert (Q: forall a v, val_match_approx a v -> Approx.bge Int16u a = true ->
                v = Val.zero_ext 16 v).
     intros. apply (val_match_approx_increasing Int16u a v); auto.
+  assert (R: forall a v, val_match_approx a v -> Approx.bge Int1 a = true ->
+               v = Val.zero_ext 1 v).
+    intros. apply (val_match_approx_increasing Int1 a v); auto.
+
   intros; unfold Approx.bitwise_and. 
+  destruct (Approx.bge Int1 a1) as []_eqn. simpl. apply Y; eauto. compute; auto.
+  destruct (Approx.bge Int1 a2) as []_eqn. simpl. apply X; eauto. compute; auto.
   destruct (Approx.bge Int8u a1) as []_eqn. simpl. apply Y; eauto. compute; auto.
   destruct (Approx.bge Int8u a2) as []_eqn. simpl. apply X; eauto. compute; auto.
   destruct (Approx.bge Int16u a1) as []_eqn. simpl. apply Y; eauto. compute; auto.
@@ -1310,14 +1328,21 @@ Proof.
     simpl. rewrite Int.and_idem. auto.
 
   unfold Approx.bitwise_or. 
-  destruct (Approx.bge Int8u a1 && Approx.bge Int8u a2) as []_eqn.
+
+  destruct (Approx.bge Int1 a1 && Approx.bge Int1 a2) as []_eqn.
   destruct (andb_prop _ _ Heqb).
+  simpl. apply X. compute; auto. 
+  apply (val_match_approx_increasing Int1 a1 v1); auto.
+  apply (val_match_approx_increasing Int1 a2 v2); auto.
+
+  destruct (Approx.bge Int8u a1 && Approx.bge Int8u a2) as []_eqn.
+  destruct (andb_prop _ _ Heqb0).
   simpl. apply X. compute; auto. 
   apply (val_match_approx_increasing Int8u a1 v1); auto.
   apply (val_match_approx_increasing Int8u a2 v2); auto.
 
   destruct (Approx.bge Int16u a1 && Approx.bge Int16u a2) as []_eqn.
-  destruct (andb_prop _ _ Heqb0).
+  destruct (andb_prop _ _ Heqb1).
   simpl. apply X. compute; auto. 
   apply (val_match_approx_increasing Int16u a1 v1); auto.
   apply (val_match_approx_increasing Int16u a2 v2); auto.
@@ -1331,7 +1356,7 @@ Lemma approx_of_binop_sound:
   val_match_approx a1 v1 -> val_match_approx a2 v2 ->
   val_match_approx (Approx.binop op a1 a2) v.
 Proof.
-  assert (OB: forall ob, val_match_approx Int7 (Val.of_optbool ob)).
+  assert (OB: forall ob, val_match_approx Int1 (Val.of_optbool ob)).
     destruct ob; simpl. destruct b; auto. auto.
   
   destruct op; intros; simpl Approx.binop; simpl in H; try (exact I); inv H.
@@ -1368,6 +1393,20 @@ Proof.
 (* cast16signed *)
   assert (V: val_match_approx Int16s v) by (eapply val_match_approx_increasing; eauto).
   simpl in *. congruence.
+(* boolval *)
+  assert (V: val_match_approx Int1 v) by (eapply val_match_approx_increasing; eauto).
+  simpl in *.
+  assert (v = Vundef \/ v = Vzero \/ v = Vone).
+    rewrite V. destruct v; simpl; auto. 
+    assert (0 <= Int.unsigned (Int.zero_ext 1 i) < 2).
+      apply Int.zero_ext_range. compute; auto.
+    assert (Int.unsigned(Int.zero_ext 1 i) = 0 \/ Int.unsigned(Int.zero_ext 1 i) = 1) by omega.
+    destruct H2.
+    assert (Int.repr (Int.unsigned (Int.zero_ext 1 i)) = Int.repr 0) by congruence.
+    rewrite Int.repr_unsigned in H3. rewrite H3; auto. 
+    assert (Int.repr (Int.unsigned (Int.zero_ext 1 i)) = Int.repr 1) by congruence.
+    rewrite Int.repr_unsigned in H3. rewrite H3; auto. 
+  intuition; subst v; auto.
 (* singleoffloat *)
   assert (V: val_match_approx Float32 v) by (eapply val_match_approx_increasing; eauto).
   simpl in *. congruence.
@@ -1413,6 +1452,7 @@ Proof.
   inv H; inv H0; simpl; TrivialExists.
   inv H; inv H0; simpl; TrivialExists.
   inv H; inv H0; simpl; TrivialExists.
+  inv H; inv H0; simpl; TrivialExists. apply val_inject_val_of_bool.
   inv H; inv H0; simpl; TrivialExists.
   inv H; inv H0; simpl; TrivialExists. apply val_inject_val_of_bool.
   inv H; inv H0; simpl; TrivialExists.
@@ -2016,7 +2056,8 @@ Lemma var_set_self_correct_array:
   val_inject f v tv ->
   Mem.inject f m tm ->
   PTree.get id e = Some(b, Varray sz al) ->
-  extcall_memcpy_sem sz al ge (Vptr b Int.zero :: v :: nil) m E0 Vundef m' ->
+  extcall_memcpy_sem sz (Zmin al 4) ge
+                             (Vptr b Int.zero :: v :: nil) m E0 Vundef m' ->
   te!(for_var id) = Some tv ->
   exists f', exists tm',
     star step tge (State fn a k (Vptr sp Int.zero) te tm)
@@ -2033,7 +2074,7 @@ Proof.
   (* var_stack_array *)
   unfold var_set_self in VS. rewrite <- H in VS. inv VS.
   exploit match_callstack_match_globalenvs; eauto. intros [hi' MG].
-  assert (external_call (EF_memcpy sz0 al0) ge (Vptr b0 Int.zero :: v :: nil) m E0 Vundef m').
+  assert (external_call (EF_memcpy sz0 (Zmin al0 4)) ge (Vptr b0 Int.zero :: v :: nil) m E0 Vundef m').
     assumption.
   exploit external_call_mem_inject; eauto. 
   eapply inj_preserves_globals; eauto.

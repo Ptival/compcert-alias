@@ -408,6 +408,10 @@ Proof.
   rewrite H2 in H. inv H0. inv H. constructor.
   rewrite H2 in H. inv H0. inv H. constructor.
   rewrite H2 in H. inv H0. destruct (cast_float_int si2 f); inv H. inv H7. constructor.
+  rewrite H2 in H. inv H0. inv H. constructor.
+  rewrite H2 in H. inv H0. inv H. constructor.
+  rewrite H2 in H. inv H0. inv H. rewrite H7. constructor.
+  rewrite H2 in H. inv H0. inv H. rewrite H7. constructor.
   rewrite H2 in H. destruct (ident_eq id1 id2 && fieldlist_eq fld1 fld2); inv H. auto.
   rewrite H2 in H. destruct (ident_eq id1 id2 && fieldlist_eq fld1 fld2); inv H. auto.
   rewrite H5 in H. inv H. auto.
