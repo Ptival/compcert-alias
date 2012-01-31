@@ -69,9 +69,7 @@ let parse_c_file sourcename ifile =
   (* Simplification options *)
   let simplifs =
     "b" (* blocks: mandatory *)
-  ^ (if !option_fstruct_return then "r" else "")
-  ^ (if !option_fstruct_passing then "s" else "")
-  ^ (if !option_fstruct_assign then "S" else "")
+  ^ (if !option_fstruct_return then "s" else "")
   ^ (if !option_fbitfields then "f" else "")
   ^ (if !option_fpacked_structs then "p" else "")
   in
