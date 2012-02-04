@@ -449,6 +449,10 @@ Proof.
   intros. functional inversion H0; subst; simpl.
   exists (Vint n); split; auto.
   exists (Vint n); split; auto.
+  exists (Vint n); split; auto.
+  exists (Vint n); split; auto.
+  exists (Vptr b0 ofs); split; auto. constructor.
+  exists (Vptr b0 ofs); split; auto. constructor.
   exists (Vptr b0 ofs); split; auto. constructor.
   exists (Vptr b0 ofs); split; auto. constructor.
   rewrite <- Float.cmp_ne_eq.

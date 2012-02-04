@@ -146,6 +146,7 @@ Definition attr_of_type (ty: type) :=
   end.
 
 Definition type_int32s := Tint I32 Signed noattr.
+Definition type_bool := Tint IBool Signed noattr.
 
 (** The usual unary conversion.  Promotes small integer types to [signed int32]
   and degrades array types and function types to pointer types. *)
@@ -261,24 +262,22 @@ Definition Epreincr (id: incr_or_decr) (l: expr) (ty: type) :=
   Eassignop (match id with Incr => Oadd | Decr => Osub end) 
             l (Eval (Vint Int.one) type_int32s) (typeconv ty) ty.
 
-(** Sequential ``and'' [r1 && r2] is viewed as two conditionals
-    [r1 ? (r2 ? 1 : 0) : 0]. *)
+(** Sequential ``and'' [r1 && r2] is viewed as a conditional and a cast:
+  [r1 ? (_Bool) r2 : 0]. *)
 
 Definition Eseqand (r1 r2: expr) (ty: type) :=
   Econdition r1 
-    (Econdition r2 (Eval (Vint Int.one) type_int32s)
-                   (Eval (Vint Int.zero) type_int32s) ty)
+    (Ecast r2 type_bool)
     (Eval (Vint Int.zero) type_int32s)
     ty.
                   
-(** Sequential ``or'' [r1 || r2] is viewed as two conditionals
-    [r1 ? 1 : (r2 ? 1 : 0)]. *)
+(** Sequential ``or'' [r1 || r2] is viewed as a conditional and a cast:
+    [r1 ? 1 : (_Bool) r2]. *)
 
 Definition Eseqor (r1 r2: expr) (ty: type) :=
   Econdition r1 
     (Eval (Vint Int.one) type_int32s)
-    (Econdition r2 (Eval (Vint Int.one) type_int32s)
-                   (Eval (Vint Int.zero) type_int32s) ty)
+    (Ecast r2 type_bool)
     ty.
 
 (** Extract the type part of a type-annotated expression. *)

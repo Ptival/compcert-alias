@@ -122,10 +122,8 @@ Function sem_cast (v: val) (t1 t2: type) : option val :=
 
 Function bool_val (v: val) (t: type) : option bool :=
   match v, t with
-  | Vint n, Tint sz sg _ => Some (negb (Int.eq n Int.zero))
-  | Vint n, Tpointer t' _ => Some (negb (Int.eq n Int.zero))
-  | Vptr b ofs, Tint sz sg _ => Some true
-  | Vptr b ofs, Tpointer t' _ => Some true
+  | Vint n, (Tint _ _ _ | Tpointer _ _ | Tarray _ _ _ | Tfunction _ _) => Some (negb (Int.eq n Int.zero))
+  | Vptr b ofs, (Tint _ _ _ | Tpointer _ _ | Tarray _ _ _ | Tfunction _ _) => Some true
   | Vfloat f, Tfloat sz _ => Some (negb(Float.cmp Ceq f Float.zero))
   | _, _ => None
   end.
@@ -492,6 +490,36 @@ Definition sem_incrdecr (id: incr_or_decr) (v: val) (ty: type) :=
   | Incr => sem_add v ty (Vint Int.one) type_int32s
   | Decr => sem_sub v ty (Vint Int.one) type_int32s
   end.
+
+(** Common-sense relations between boolean operators *)
+
+Lemma cast_bool_bool_val:
+  forall v t,
+  sem_cast v t (Tint IBool Signed noattr) =
+  match bool_val v t with None => None | Some b => Some(Val.of_bool b) end.
+Proof.
+  intros. unfold sem_cast, bool_val. destruct t; simpl; destruct v; auto.
+  destruct (Int.eq i0 Int.zero); auto. 
+  destruct (Float.cmp Ceq f0 Float.zero); auto.
+  destruct (Int.eq i Int.zero); auto. 
+  destruct (Int.eq i Int.zero); auto. 
+  destruct (Int.eq i Int.zero); auto. 
+Qed.
+
+Lemma notbool_bool_val:
+  forall v t,
+  sem_notbool v t =
+  match bool_val v t with None => None | Some b => Some(Val.of_bool (negb b)) end.
+Proof.
+  assert (CB: forall i s a, classify_bool (Tint i s a) = bool_case_ip).
+    intros. destruct i; auto. destruct s; auto. 
+  intros. unfold sem_notbool, bool_val. destruct t; try rewrite CB; simpl; destruct v; auto.
+  destruct (Int.eq i0 Int.zero); auto. 
+  destruct (Float.cmp Ceq f0 Float.zero); auto.
+  destruct (Int.eq i Int.zero); auto. 
+  destruct (Int.eq i Int.zero); auto. 
+  destruct (Int.eq i Int.zero); auto. 
+Qed.
 
 (** * Operational semantics *)
 
