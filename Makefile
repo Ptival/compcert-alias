@@ -71,7 +71,8 @@ BACKEND=\
   Mach.v Machtyping.v \
   Bounds.v Stacklayout.v Stacking.v Stackingproof.v Stackingtyping.v \
   Machsem.v \
-  Asm.v Asmgen.v Asmgenretaddr.v Asmgenproof1.v Asmgenproof.v
+  Asm.v Asmgen.v Asmgenretaddr.v Asmgenproof1.v Asmgenproof.v \
+  AliasAnalysis.v
 
 # C front-end modules (in cfrontend/)
 

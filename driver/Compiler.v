@@ -54,6 +54,7 @@ Require Reload.
 Require RRE.
 Require Stacking.
 Require Asmgen.
+Require AliasAnalysis.
 (** Type systems. *)
 Require RTLtyping.
 Require LTLtyping.
@@ -94,6 +95,7 @@ Parameter print_RTL_constprop: RTL.fundef -> unit.
 Parameter print_RTL_cse: RTL.fundef -> unit.
 Parameter print_LTLin: LTLin.fundef -> unit.
 Parameter print_Mach: Mach.fundef -> unit.
+Parameter alias_analysis: RTL.fundef -> unit.
 
 Open Local Scope string_scope.
 
@@ -142,6 +144,7 @@ Definition transf_rtl_fundef (f: RTL.fundef) : res Asm.fundef :=
    @@ print print_RTL_constprop
   @@@ CSE.transf_fundef
    @@ print print_RTL_cse
+   @@ print alias_analysis
   @@@ Allocation.transf_fundef
    @@ Tunneling.tunnel_fundef
   @@@ Linearize.transf_fundef
@@ -187,6 +190,7 @@ Definition transf_c_program (p: Csyntax.program) : res Asm.program :=
 
 Definition transl_init := Initializers.transl_init.
 Definition cexec_do_step := Cexec.do_step.
+Definition safe_funanalysis := AliasAnalysis.safe_funanalysis.
 
 (** The following lemmas help reason over compositions of passes. *)
 
@@ -326,7 +330,7 @@ Proof.
   unfold transf_rtl_program, transf_rtl_fundef in H.
   repeat TransfProgInv. 
   repeat rewrite transform_program_print_identity in *. subst. 
-  generalize (transform_partial_program_identity _ _ _ _ X). intro EQ. subst.
+  generalize (transform_partial_program_identity _ _ _ _ X0). intro EQ. subst.
 
   generalize Alloctyping.program_typing_preserved
              Tunnelingtyping.program_typing_preserved
