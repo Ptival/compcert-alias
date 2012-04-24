@@ -8,13 +8,11 @@ open AliasAnalysis
 open AliasAnalysisPrinters
 open RTL
 
+let print = false
+
 let cmp_keys x y =
   match x, y with
   | (a, _), (b, _) -> compare (int_of_pos b) (int_of_pos a)
-
-(*let printer (k, v) =
-  print_endline (string_of_pos k ^ ": " ^
-                   (string_of_ptmap (coerce_solver v) ^ "\n"))*)
 
 let sorted_map f t =
   let nodes = PTree.elements t in
@@ -24,13 +22,16 @@ let sorted_map f t =
 let biprint tnode tres key =
   match PTree.get key tnode, PTree.get key tres with
   | None, None   -> assert false
-  | Some n, None -> print_endline ("NO RESULT FOR NODE: " ^ string_of_instr n)
+  | Some n, None ->
+      if print
+      then print_endline ("Unreachable node: " ^ string_of_instr n)
   | None, Some _ -> assert false
   | Some node, Some res ->
       let (rmap, mmap) = coerce_solver res in
-      print_endline (
-        "RMAP: " ^ string_of_rmap rmap ^ "\n"
-               ^ "MMAP: " ^ string_of_mmap mmap ^ "\n"
+      if print
+      then print_endline (
+        "  RMAP: " ^ string_of_rmap rmap ^ "\n"
+               ^ "  MMAP: " ^ string_of_mmap mmap ^ "\n"
                ^ string_of_pos key ^ ": " ^ string_of_instr node
       )
 
@@ -44,7 +45,7 @@ let sorted_biprint tnode tres =
 let alias_analysis fd =
   match fd with
   | Internal f ->
-      print_endline ("--------------------");
+      if print then print_endline ("--------------------");
       let res = funanalysis f in
       begin match res with
       | None            -> print_endline "KILDALL FAILED"

@@ -844,13 +844,47 @@ Module PTSet
     destruct H. inv H. apply In_equiv. right. exists px. auto.
     inv H.
   Qed.
-  Definition lub (s: t) (s': t): t :=
-    let s'' := AbsPSet.union s s' in
-    AbsPSet.filter
+  Definition lub' (old: t) (new: t): t :=
+    let out := AbsPSet.union old new in
+      AbsPSet.filter
       (fun x =>
-        negb (AbsPSet.exists_ (AbsPH.hierarchy_dec x) s'')
+        AbsPSet.for_all
+        (fun y => negb (AbsPH.hierarchy_dec y x))
+        out
       )
-      s''.
+      out.
+  (* [widen s t] widens s according to t, that is, it returns a set greater
+     than s, according to some criterion on [s] and [t]. *)
+  Definition widen (widened: t) (widener: t): t :=
+    AbsPSet.fold
+      (fun x res =>
+        AbsPSet.add
+        (
+          match x with
+            | Blk b => Blk b
+            | Loc b o =>
+              if AbsPSet.exists_
+                (fun y =>
+                  match y with
+                    | Loc b' o' =>
+                      andb (AbsBOT.eq_dec b b') (negb (Int.eq o o'))
+                    | _ => false
+                  end
+                )
+                widener
+                then Blk b (* widening *)
+                else Loc b o
+          end
+        )
+        res
+      )
+      widened
+      AbsPSet.empty.
+  (* lub takes into account its use in the Kildall algorithm. Therefore, it
+     performs widening if its 2nd parameter grows in a possibly-infinite
+     fashion, and thus it is not commutative. *)
+  Definition lub (old: t) (new: t): t :=
+    lub' old (widen new old).
   Hypothesis ge_lub_left: forall x y, ge (lub x y) x.
   Hypothesis ge_lub_right: forall x y, ge (lub x y) y.
   Definition top := add AbsPH.top AbsPSet.empty.
@@ -871,28 +905,7 @@ End PTSet.
 
 (* Registers *)
 
-Module ROT <: OrderedType.
-  Definition t := reg.
-  Definition eq := @eq t.
-  Definition eq_refl := @refl_equal t.
-  Definition eq_sym := @sym_eq t.
-  Definition eq_trans := @trans_eq t.
-  Definition eq_dec := peq.
-  Definition lt := Plt.
-  Definition lt_trans := Plt_trans.
-  Theorem lt_not_eq : forall x y : t, lt x y -> ~ eq x y.
-  Proof.
-    repeat intro. inv H0. eapply Plt_strict. apply H.
-  Qed.
-  Definition compare : forall x y : t, Compare lt eq x y.
-  Proof.
-    intros. destruct (peq x y).
-    apply EQ. auto.
-    destruct (plt x y).
-    apply LT. auto. apply GT. destruct (plt y x). auto.
-    exfalso. unfold Plt in *. zify. omega.
-  Defined.
-End ROT.
+Module ROT <: OrderedType := OrderedTypeEx.Positive_as_OT.
 
 Module NaiveMergeStrategy (KEY: OrderedType) (VAL: SEMILATTICE)
   <: MergeStrategy(KEY)(VAL).
@@ -1020,6 +1033,8 @@ Module AbsPOMap (L: SEMILATTICE_WITH_TOP)
   Axiom get_eq_top: forall mmap,
     eq mmap top ->
     (forall k, L.ge (get k mmap) L.top).
+  Axiom ge_add: forall k v m,
+    ge (add k v m) m.
   Global Opaque eq ge bot get add (*set*) top.
 End AbsPOMap.
 
@@ -1215,24 +1230,35 @@ Definition transf_op op args dst rmap :=
 Definition transf_builtin ef args dst n (result: Result.t) :=
   let (rmap, mmap) := result in
   match ef with
-  | EF_external _ sg =>
+  | EF_external _ _ =>
     (RMap.add dst (PTSet.singleton (Blk (Just (Globals All)))) rmap, mmap)
-  | EF_builtin _ sg  =>
+  | EF_builtin _ _  =>
     (RMap.add dst (PTSet.singleton (Blk (Just (Globals All)))) rmap, mmap)
-  | EF_vload chunk   => (RMap.add dst PTSet.top rmap, mmap)
-  | EF_vstore chunk  =>
+    (*TODO: to do better things on vload/vstore global, we would first need
+       to have strong updates, since Globals start at top anyway. *)
+  | EF_vload _ | EF_vload_global _ _ _ => (RMap.add dst PTSet.top rmap, mmap)
+  | EF_vstore _ =>
     match args with
     | r1 :: r2 :: nil =>
       (rmap, add_ptset_to_image (RMap.get r2 rmap) (RMap.get r1 rmap) mmap)
     | _               => result
     end
+  | EF_vstore_global _ i o =>
+    match args with
+    | r :: nil =>
+      (rmap, MMap.add (Loc (Just (Globals (Just i))) o) (RMap.get r rmap) mmap)
+    | _               => result
+    end
   | EF_malloc        =>
-    (RMap.add dst (PTSet.singleton (Loc (Just (Allocs (Just n))) Int.zero)) rmap, mmap)
+    (RMap.add dst
+      (PTSet.singleton (Loc (Just (Allocs (Just n))) Int.zero)) rmap,
+      mmap)
   | EF_free          => result
   | EF_memcpy _ _    =>
     match args with
     | rdst :: rsrc :: nil =>
-      (rmap, add_ptset_to_image PTSet.top (unknown_offset (RMap.get rdst rmap)) mmap)
+      (rmap,
+        add_ptset_to_image PTSet.top (unknown_offset (RMap.get rdst rmap)) mmap)
     | _                   => result (*!*)
     end
   | EF_annot _ _     => result
@@ -1241,8 +1267,6 @@ Definition transf_builtin ef args dst n (result: Result.t) :=
     | r1 :: nil => (RMap.add dst (RMap.get r1 rmap) rmap, mmap)
     | _       => result (*!*)
     end
-  | EF_vload_global _ _ _ => result (* TODO *)
-  | EF_vstore_global _ _ _ => result (* TODO *)
   end.
 
 Definition transf c n (result: Result.t) :=
@@ -1407,14 +1431,15 @@ Inductive satisfy (ge: genv) (abs: abstracter): state -> Prop :=
 
 (* Lemmas *)
 
-Ltac regsat_intro rs r :=
+Ltac regsat_intro_unsafe rs r :=
   match goal with
-  | H: Vptr _ _ = rs#r |- _ => apply symmetry in H; regsat_intro rs r
+  | H: Vptr _ _ = rs#r |- _ => apply symmetry in H; regsat_intro_unsafe rs r
   | R: (forall r, regsat r rs _ _),
     H: rs#r = Vptr _ _ |- _ =>
       let IN := fresh "IN" in
       pose proof (R r) as IN; unfold regsat, valsat in IN; rewrite H in IN
   end.
+Tactic Notation "regsat_intro" constr(rs) constr(r) := regsat_intro_unsafe rs r.
 
 Ltac crunch_eval :=
   match goal with
@@ -1803,7 +1828,7 @@ Proof.
   eapply Genv.find_invert_symbol in FIND. unfold ge. rewrite FIND. auto.
   eapply Genv.find_symbol_not_fresh in FIND; eauto. contradiction.
 Qed.
-
+Set Undo 9000.
 Theorem satisfy_step:
   forall ge st t st' abs
     (SAT:  satisfy ge abs st)
@@ -2069,11 +2094,12 @@ Proof.
     try solve [inv H0; apply RMap.ge_add];
     try solve [inv H0; apply RMap.ge_refl; apply RMap.eq_refl];
     destruct args)).
-  assert (MGE': MMap.ge mmap' mmap) by (
+  assert (MGE': MMap.ge mmap' mmap).
   destruct ef; repeat (
     try solve [inv H0; apply ge_add_ptset_to_image];
     try solve [inv H0; apply MMap.ge_refl; apply MMap.eq_refl];
-    destruct args)).
+    try solve [inv H0; apply MMap.ge_add];
+    destruct args).
   destruct ef; inv H13; merge.
   SSSCase "EF_external".
   exists abs. constructor; auto.
@@ -2212,20 +2238,92 @@ Proof.
   intros; destruct (peq res r); [subst | eapply regsat_assign_other; eauto;
     eapply regsat_ge; [eauto | eapply RMap.ge_trans; eauto]].
   unfold regsat, valsat. rewrite Regmap.gss. destruct v; auto.
-  pose proof load_vptr_Mint32 as LV. specialize (LV chunk m0 (Vptr b ofs) b0 i).
-  feed LV. simpl. auto. subst. destruct (abs b0).
-  admit. admit. admit.
-  (*
-  SSSSSSCase "abs b0 = Some".
-  eapply PTSet.ge_trans. apply RMap.get_ge. eauto.
-  apply RMap.get_add_same. apply PTSet.In_top.
-  SSSSSSCase "abs b0 = None".
+  regsat_tac.
+  eapply RMap.get_ge. eauto. apply RMap.get_add_same. apply PTSet.In_top.
   eapply PTSet.ge_trans. apply RMap.get_ge. eauto. apply RMap.get_add_same.
-  *)
   SSSSSCase "memsat".
   eapply memsat_ge; eauto.
-  SSSCase "EF_vstore_global".
-  admit.
+  inv H2. (* Check whether the store is volatile *)
+  SSSCase "EF_vstore_global (volatile)".
+  exists abs. constructor; auto.
+  SSSSCase "ok_abs_result".
+  econstructor.
+  SSSSSCase "result".
+  unfold safe_funanalysis. rewrite Heqo. eauto.
+  SSSSSCase "regsat".
+  intros; destruct (peq res r); [subst | eapply regsat_assign_other; eauto;
+    eapply regsat_ge; [eauto | eapply RMap.ge_trans; eauto]].
+  unfold regsat, valsat. rewrite Regmap.gss. auto.
+  SSSSSCase "memsat".
+  eapply memsat_ge; eauto. eapply MMap.ge_trans; eauto.
+  SSSCase "EF_vstore (not volatile)".
+  exists abs. constructor; auto.
+  SSSSCase "ok_stack".
+  erewrite Mem.nextblock_store; eauto.
+  SSSSCase "ok_abs_mem".
+  eapply ok_abs_mem_store; eauto.
+  SSSSCase "ok_abs_result".
+  econstructor.
+  SSSSSCase "result".
+  unfold safe_funanalysis. rewrite Heqo. eauto.
+  SSSSSCase "regsat".
+  intros; destruct (peq res r); [subst | eapply regsat_assign_other; eauto;
+    eapply regsat_ge; [eauto | eapply RMap.ge_trans; eauto]].
+  unfold regsat, valsat. rewrite Regmap.gss. auto.
+  SSSSSCase "memsat".
+  specialize (GENV _ _ H1).
+  eapply memsat_ge; eauto.
+  repeat (destruct args; try solve [inv H]). inv H. inv H0.
+  intros b0 o. specialize (MSAT b0 o). unfold memsat, valsat in *.
+  intros v LOAD.
+  pose proof (Mem.valid_access_load m Mint32 b0 (Int.unsigned o)) as LOAD'.
+  feed LOAD'.
+  eapply Mem.store_valid_access_2; eauto.
+  eapply Mem.load_valid_access; eauto.
+  destruct LOAD' as [v' LOAD']. specialize (MSAT _ LOAD').
+  destruct (zeq b b0).
+  SSSSSSCase "Stored in b".
+  subst. rewrite GENV. rewrite GENV in MSAT. destruct v; auto.
+  destruct (zlt (Int.unsigned ofs) (Int.unsigned o + size_chunk Mint32)).
+  destruct (zlt (Int.unsigned o) (Int.unsigned ofs + size_chunk chunk)).
+  SSSSSSSCase "Overlapped offset o".
+  pose proof LOAD as LOAD''.
+  eapply Mem.load_pointer_store in LOAD; eauto.
+  intuition; try solve [omegaContradiction]. merge. subst. simpl in *.
+  assert (o = ofs)
+    by (apply f_equal with (f:=Int.repr) in H8; rewrite Int.repr_unsigned in H8;
+      rewrite Int.repr_unsigned in H8; auto). subst. clear z z0 H8.
+  regsat_intro rs r. rewrite H in H4.
+  destruct (abs b) as []_eqn.
+  SSSSSSSSCase "abs b = Some".
+  apply MMap.get_add_same. exact IN.
+  SSSSSSSSCase "abs b = None".
+  eapply PTSet.ge_trans; eauto. apply MMap.get_add_same.
+  SSSSSSSCase "Didn't overlap offset o".
+  simpl in LOAD.
+  erewrite Mem.load_store_other in LOAD; eauto; [|right; right; omega]. merge.
+  destruct (abs b) as []_eqn.
+  SSSSSSSSCase "abs b = Some".
+  eapply MMap.get_ge; eauto.
+  SSSSSSSSCase "abs b = None".
+  eapply PTSet.ge_trans; eauto. apply MMap.get_ge; auto.
+  SSSSSSSCase "Didn't overlap offset o, for another reason".
+  simpl in LOAD.
+  erewrite Mem.load_store_other in LOAD; eauto; [|right; left; omega]. merge.
+  destruct (abs b) as []_eqn.
+  SSSSSSSSCase "abs b = Some".
+  eapply MMap.get_ge; eauto.
+  SSSSSSSSCase "abs b = None".
+  eapply PTSet.ge_trans; eauto. apply MMap.get_ge; auto.
+  SSSSSSCase "Didn't store in b0".
+  simpl in LOAD. erewrite Mem.load_store_other in LOAD; eauto. merge.
+  destruct (abs b0) as []_eqn; [|contradiction].
+  destruct v; auto.
+  destruct (abs b1) as []_eqn.
+  SSSSSSSCase "abs b1 = Some".
+  eapply MMap.get_ge; eauto.
+  SSSSSSSCase "abs b1 = None".
+  eapply PTSet.ge_trans; eauto. apply MMap.get_ge; auto.
   SSSCase "EF_malloc".
   exists (fun x =>
     if zeq x b
@@ -2438,7 +2536,15 @@ Proof.
   ].
   inv H0.
   SSSCase "EF_vstore (volatile)".
-  admit.
+  exists abs. constructor; auto.
+  SSSSCase "ok_abs_result".
+  econstructor.
+  SSSSSCase "result".
+  unfold safe_funanalysis. rewrite Heqo. rewrite Regmap.gi. reflexivity.
+  SSSSSCase "regsat".
+  apply regsat_top.
+  SSSSSCase "memsat".
+  apply memsat_top. auto.
   SSSCase "EF_vstore (not volatile)".
   exists abs. constructor; auto.
   SSSSCase "ok_stack".
@@ -2448,13 +2554,23 @@ Proof.
   SSSSCase "ok_abs_result".
   econstructor.
   SSSSSCase "result".
-  unfold safe_funanalysis. rewrite Heqo. rewrite PMap.gi. reflexivity.
+  unfold safe_funanalysis. rewrite Heqo. rewrite Regmap.gi. reflexivity.
   SSSSSCase "regsat".
   apply regsat_top.
   SSSSSCase "memsat".
   apply memsat_top. eapply ok_abs_mem_store; eauto.
   SSSCase "EF_vstore_global".
-  admit.
+  exists abs. inv H1; constructor; auto.
+  econstructor.
+  unfold safe_funanalysis. rewrite Heqo. rewrite Regmap.gi. reflexivity.
+  apply regsat_top.
+  apply memsat_top. auto.
+  erewrite Mem.nextblock_store; eauto.
+  eapply ok_abs_mem_store; eauto.
+  econstructor.
+  unfold safe_funanalysis. rewrite Heqo. rewrite Regmap.gi. reflexivity.
+  apply regsat_top.
+  apply memsat_top. eapply ok_abs_mem_store; eauto.
   SSSCase "EF_malloc".
   exists (fun x =>
     if zeq x b
@@ -2723,12 +2839,12 @@ Proof.
   inv STEP. destruct ef; inv H4; try solve [exists abs; constructor; auto].
   SCase "volatile store".
   exists abs; constructor; auto.
-  admit. (* eapply ok_abs_mem_store; eauto. *)
-  admit. (* erewrite Mem.nextblock_store; eauto. *)
+  inv H. auto. eapply ok_abs_mem_store; eauto.
+  inv H. auto. erewrite Mem.nextblock_store; eauto.
   SCase "global volatile store".
   exists abs; constructor; auto.
-  admit. (* eapply ok_abs_mem_store; eauto. *)
-  admit. (* erewrite Mem.nextblock_store; eauto. *)
+  inv H0. auto. eapply ok_abs_mem_store; eauto.
+  inv H0. auto. erewrite Mem.nextblock_store; eauto.
   SCase "malloc".
   exists (fun x =>
     if zeq x b
