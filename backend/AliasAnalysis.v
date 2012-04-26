@@ -943,7 +943,8 @@ Module RMap <: SEMILATTICE_WITH_TOP.
   Definition add (r: ROT.t) (s: PTSet.t) (rmap: t): t :=
     match rmap with
     | Top        => Top
-    | Some rmap' => Some (RMapWithoutTop.M.add r s rmap')
+    | Some rmap' =>
+      Some (RMapWithoutTop.M.add r (PTSet.lub s (get r rmap)) rmap')
     end.
 
   (*Parameter set: ROT.t -> PTSet.t -> t -> t.*)
@@ -958,10 +959,47 @@ Module RMap <: SEMILATTICE_WITH_TOP.
     destruct (RMapWithoutTop.M.find k t1);
     auto with ptset.
   Qed.
-  Axiom get_add_same: forall k v m, PTSet.ge (get k (add k v m)) v.
-  Axiom get_add: forall x y s m, PTSet.ge (get x (add y s m)) (get x m).
-  Axiom ge_add: forall k v m, ge (add k v m) m.
-  Axiom get_top: forall k, PTSet.ge (get k top) PTSet.top.
+
+  Theorem get_add_same: forall k v m, PTSet.ge (get k (add k v m)) v.
+  Proof.
+    intros. destruct m; simpl.
+    rewrite RMapWithoutTop.FMF.add_eq_o.
+    apply PTSet.ge_lub_left.
+    reflexivity.
+    apply PTSet.ge_top.
+  Qed.
+
+  Theorem get_add: forall x y s m, PTSet.ge (get x (add y s m)) (get x m).
+  Proof.
+    intros. destruct m; simpl.
+    destruct (peq x y).
+    subst. rewrite RMapWithoutTop.FMF.add_eq_o.
+    apply PTSet.ge_lub_right.
+    reflexivity.
+    rewrite RMapWithoutTop.FMF.add_neq_o.
+    apply PTSet.ge_refl. apply PTSet.eq_refl.
+    auto.
+    apply PTSet.ge_top.
+  Qed.
+
+  Theorem ge_add: forall k v m, ge (add k v m) m.
+  Proof.
+    intros. destruct m; simpl; intuition.
+    unfold RMapWithoutTop.ge. intros.
+    destruct (peq k k0).
+    subst. rewrite RMapWithoutTop.FMF.add_eq_o; [|auto].
+    generalize (RMapWithoutTop.M.find k0 t0); intros s. destruct s; [|auto].
+    apply PTSet.ge_lub_right.
+    rewrite RMapWithoutTop.FMF.add_neq_o; [|auto].
+    generalize (RMapWithoutTop.M.find k0 t0); intros s. destruct s; [|auto].
+    apply PTSet.ge_refl. apply PTSet.eq_refl.
+  Qed.
+
+  Theorem get_top: forall k, PTSet.ge (get k top) PTSet.top.
+  Proof.
+    intros. simpl. apply PTSet.ge_top.
+  Qed.
+
   Global Opaque eq ge bot get add (*set*).
 End RMap.
 
@@ -1010,31 +1048,96 @@ Module AbsPOMap (L: SEMILATTICE_WITH_TOP)
     end.
 
   (*Parameter set: AbsPO.t -> L.t -> t -> t.*)
-  Axiom get_add_same: forall k s m, L.ge (get k (add k s m)) s.
-  Axiom get_add: forall x y s m, L.ge (get x (add y s m)) (get x m).
-  Axiom get_add_overlap: forall x y s m,
+  Theorem get_add_same: forall k s m, L.ge (get k (add k s m)) s.
+  Proof.
+    intros. destruct m; simpl.
+    generalize (get_rec k t0). generalize (add_overlap k s t0). intros m' s'.
+    remember (MSL.M.add k (L.lub s s') m').
+    functional induction (get_rec k t1); rewrite MSL.FMF.add_eq_o in e; inv e;
+      try solve [destruct k; auto].
+    apply L.ge_lub_left.
+    apply L.ge_top.
+  Qed.
+
+  Theorem get_add: forall x y s m, L.ge (get x (add y s m)) (get x m).
+  Proof.
+    intros. destruct m; simpl.
+    destruct (AbsPO.eq_dec x y).
+
+    subst.
+    generalize (add_overlap y s t0). intros m'.
+    remember (MSL.M.add y (L.lub s (get_rec y t0)) m').
+    functional induction (get_rec y t1); rewrite MSL.FMF.add_eq_o in e; inv e;
+      try solve [destruct k; auto].
+    apply L.ge_lub_right.
+
+    remember (MSL.M.add y (L.lub s (get_rec y t0)) (add_overlap y s t0)).
+    functional induction (get_rec x t1).
+    rewrite MSL.FMF.add_neq_o in e.
+    admit.
+    destruct k, y; repeat (subst; intuition).
+    destruct k; destruct t1; inv e0. rewrite MSL.FMF.add_neq_o in e.
+    admit.
+    destruct y; repeat (subst; intuition).
+    admit.
+
+    apply L.ge_refl. apply L.eq_refl.
+  Qed.
+
+  Theorem get_add_overlap: forall x y s m,
     AbsPO.overlap x y ->
     L.ge (get x (add y s m)) s.
+  Proof.
+    intros.
+    admit.
+  Qed.
+
   (*
   Axiom get_set_same: forall k s m, L.ge (get k (set k s m)) s.
   Axiom get_set_other: forall x y s m, L.ge (get x (set y s m)) (get x m).
   *)
+
   (* Additional lemmas *)
-  Theorem get_eq: forall mmap mmap',
-    eq mmap mmap' ->
+  Theorem get_eq: forall mmap mmap'
+    (EQ: eq mmap mmap')
+    ,
     (forall k, L.eq (get k mmap) (get k mmap')).
   Proof.
-    intros. destruct mmap, mmap'; simpl in *.
-  Admitted.
-  Axiom get_ge: forall mmap mmap',
+    intros.
+    destruct mmap, mmap'; try solve [inv EQ | apply L.eq_refl]; simpl.
+    pose proof (EQ k) as EQk.
+    functional induction (get_rec k t0); rewrite e in EQk.
+    functional induction (get_rec k t1); rewrite e0 in EQk; intuition.
+    functional induction (get_rec k t1); rewrite e1 in EQk.
+    elim EQk. apply L.eq_refl. rewrite e2 in e0; inv e0.
+    pose proof (EQ p) as EQp.
+    functional induction (get_rec k t1); rewrite e1 in EQk.
+    elim EQk. rewrite e2 in e0; inv e0. rewrite e2 in e0; inv e0.
+    functional induction (get_rec p m); rewrite e0 in *;
+    functional induction (get_rec k0 m0); rewrite e3 in *; intuition.
+  Qed.
+
+  Theorem get_ge: forall mmap mmap',
     ge mmap mmap' ->
     (forall k, L.ge (get k mmap) (get k mmap')).
-  Axiom get_top: forall k, L.ge (get k top) L.top.
-  Axiom get_eq_top: forall mmap,
+  Proof.
+  Admitted.
+
+  Theorem get_top: forall k, L.ge (get k top) L.top.
+  Proof.
+  Admitted.
+
+  Theorem get_eq_top: forall mmap,
     eq mmap top ->
     (forall k, L.ge (get k mmap) L.top).
-  Axiom ge_add: forall k v m,
+  Proof.
+  Admitted.
+
+  Theorem ge_add: forall k v m,
     ge (add k v m) m.
+  Proof.
+  Admitted.
+
   Global Opaque eq ge bot get add (*set*) top.
 End AbsPOMap.
 
@@ -1560,7 +1663,8 @@ Lemma unknown_offset_top:
     ,
     PTSet.ge (unknown_offset s) PTSet.top.
 Proof.
-Admitted.
+  repeat intro. specialize (GETOP _ H). apply In_unknown_offset_same. auto.
+Qed.
 
 Lemma shift_offset_top:
   forall s
@@ -1568,7 +1672,19 @@ Lemma shift_offset_top:
     ,
     (forall oshift, PTSet.ge (shift_offset s oshift) PTSet.top).
 Proof.
-Admitted.
+  repeat intro. pose proof (GETOP _ H) as xIns. clear H.
+  remember (shift_offset s oshift).
+  functional induction (PTSet.In x t);
+    functional induction (PTSet.In x s);
+      merge; intuition.
+  unfold shift_offset. rewrite PTSet.AbsPSet.fold_1.
+  destruct x; inv e. destruct t; inv H0.
+  eapply fold_left_adds_prop.
+  apply PTSet.F.elements_iff. eauto.
+  intros. destruct x, y; subst; try (intuition; congruence).
+  intros. simpl. apply PTSet.F.add_iff. left; auto.
+  intros. simpl. destruct y; apply PTSet.F.add_iff; right; auto.
+Qed.
 
 Lemma In_image_of_ptset:
   forall x y mmap s,
@@ -1576,6 +1692,24 @@ Lemma In_image_of_ptset:
     PTSet.In y (MMap.get x mmap) ->
     PTSet.In y (image_of_ptset s mmap).
 Proof.
+  intros.
+  unfold image_of_ptset. rewrite PTSet.AbsPSet.fold_1.
+
+  functional induction (PTSet.In x s); intuition.
+
+  eapply fold_left_adds_prop.
+  apply PTSet.F.elements_iff. eauto.
+  intros. destruct x0, y0; subst; try (intuition; congruence).
+  intros. apply PTSet.ge_lub_left. auto.
+  intros. apply PTSet.ge_lub_right. auto.
+
+  functional induction (PTSet.In px s); intuition.
+
+  eapply fold_left_adds_prop.
+  apply PTSet.F.elements_iff. eauto.
+  intros. destruct x1, y0; subst; try (intuition; congruence).
+
+SearchAbout MMap.get.
 Admitted.
 
 Lemma In_add_ptset_to_image:

@@ -8,7 +8,7 @@ open AliasAnalysis
 open AliasAnalysisPrinters
 open RTL
 
-let print = false
+let print = true
 
 let cmp_keys x y =
   match x, y with
