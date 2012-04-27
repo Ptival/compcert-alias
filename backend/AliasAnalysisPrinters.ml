@@ -83,7 +83,7 @@ let string_of_mmap (mmap: MMap.t) =
   | None -> "⊤"
   | Some mmap' ->
       "{"
-      ^ MMap.MSL.M.fold
+      ^ MMap.Raw.MSL.M.fold
         (fun k v accu ->
           (if accu = "" then "" else accu ^ ", ")
           ^ string_of_absp k ^ " -> " ^ string_of_ptset v

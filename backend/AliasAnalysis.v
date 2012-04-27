@@ -1098,6 +1098,7 @@ Module AbsPOMap (L: SEMILATTICE_WITH_TOP)
   *)
 
   (* Additional lemmas *)
+  (*
   Theorem get_eq: forall mmap mmap'
     (EQ: eq mmap mmap')
     ,
@@ -1116,6 +1117,7 @@ Module AbsPOMap (L: SEMILATTICE_WITH_TOP)
     functional induction (get_rec p m); rewrite e0 in *;
     functional induction (get_rec k0 m0); rewrite e3 in *; intuition.
   Qed.
+  *)
 
   Theorem get_ge: forall mmap mmap',
     ge mmap mmap' ->
@@ -1123,9 +1125,16 @@ Module AbsPOMap (L: SEMILATTICE_WITH_TOP)
   Proof.
   Admitted.
 
-  Theorem get_top: forall k, L.ge (get k top) L.top.
+  Theorem ge_get_top: forall k, L.ge (get k top) L.top.
   Proof.
+    intros. simpl. apply L.ge_top.
   Admitted.
+
+  Theorem get_top: forall k,
+    get k top = L.top.
+  Proof.
+    auto.
+  Qed.
 
   Theorem get_eq_top: forall mmap,
     eq mmap top ->
@@ -1138,15 +1147,118 @@ Module AbsPOMap (L: SEMILATTICE_WITH_TOP)
   Proof.
   Admitted.
 
-  Global Opaque eq ge bot get add (*set*) top.
+  Theorem get_bot: forall k,
+    get k bot = L.bot.
+  Proof.
+    intros. simpl. remember MSL.bot.
+    functional induction (get_rec k t0); inv e; auto.
+  Qed.
 End AbsPOMap.
 
+Module WFAbsPOMap (L: SEMILATTICE_WITH_TOP)
+  <: OMap(AbsPO)(L)
+  <: SEMILATTICE_WITH_TOP.
+  Module Raw := AbsPOMap(L).
+  Definition well_formed (m: Raw.t) :=
+    forall x y, AbsPO.hierarchy y x -> L.ge (Raw.get y m) (Raw.get x m).
+  Definition t := { m: Raw.t | well_formed m }.
+
+  Definition eq (m: t) (n: t): Prop := Raw.eq (proj1_sig m) (proj1_sig n).
+  Theorem eq_refl: forall m, eq m m.
+  Proof. intros. apply Raw.eq_refl. Qed.
+  Theorem eq_sym: forall m n, eq m n -> eq n m.
+  Proof. intros. apply Raw.eq_sym. exact H. Qed.
+  Theorem eq_trans: forall m n o, eq m n -> eq n o -> eq m o.
+  Proof. intros. eapply Raw.eq_trans; eauto. Qed.
+  Definition beq (m: t) (n: t): bool := Raw.beq (proj1_sig m) (proj1_sig n).
+  Theorem beq_correct: forall m n, beq m n = true -> eq m n.
+  Proof. intros. apply Raw.beq_correct. exact H. Qed.
+  Definition ge (m: t) (n: t): Prop := Raw.ge (proj1_sig m) (proj1_sig n).
+  Theorem ge_refl: forall m n, eq m n -> ge m n.
+  Proof. intros. apply Raw.ge_refl. exact H. Qed.
+  Theorem ge_trans: forall m n o, ge m n -> ge n o -> ge m o.
+  Proof. intros. eapply Raw.ge_trans; eauto. Qed.
+  Program Definition bot: t := exist _ Raw.bot _.
+  Next Obligation.
+    repeat intro. setoid_rewrite Raw.get_bot. apply L.ge_bot.
+  Qed.
+  Theorem ge_bot: forall x, ge x bot.
+  Proof. intros. apply Raw.ge_bot. Qed.
+  Program Definition lub (m: t) (n: t): t := exist _ (Raw.lub m n) _.
+  Next Obligation.
+    repeat intro. destruct m as [m WFm], n as [n WFn]. simpl.
+    destruct m as [m|], n as [n|]; try solve [apply L.ge_top]; simpl.
+    remember (Raw.MSL.lub m n) as mn.
+    admit.
+  Qed.
+  Theorem ge_lub_left: forall x y, ge (lub x y) x.
+  Proof.
+    admit.
+  Qed.
+  Theorem ge_lub_right: forall x y, ge (lub x y) y.
+  Proof.
+    admit.
+  Qed.
+  Program Definition top: t := exist _ Raw.top _.
+  Next Obligation.
+    repeat intro. setoid_rewrite Raw.get_top. apply L.ge_top.
+  Qed.
+  Theorem ge_top: forall m, ge top m.
+  Proof. intros. apply Raw.ge_top. Qed.
+  Definition get k (m: t): L.t := Raw.get k (proj1_sig m).
+  Program Definition add k v (m: t): t := exist _ (Raw.add k v (proj1_sig m)) _.
+  Next Obligation.
+    repeat intro. admit.
+  Qed.
+  Theorem get_add_same: forall k s m, L.ge (get k (add k s m)) s.
+  Proof.
+    admit.
+  Qed.
+  Theorem get_add: forall x y s m, L.ge (get x (add y s m)) (get x m).
+  Proof.
+    admit.
+  Qed.
+  Theorem get_add_overlap: forall x y s m,
+    AbsPO.overlap x y ->
+    L.ge (get x (add y s m)) s.
+  Proof.
+    admit.
+  Qed.
+  Theorem get_top: forall k, L.ge (get k top) L.top.
+  Proof.
+    admit.
+  Qed.
+  Theorem get_eq_top: forall mmap,
+    eq mmap top ->
+    (forall k, L.ge (get k mmap) L.top).
+  Proof.
+    admit.
+  Qed.
+  Theorem get_ge: forall mmap mmap',
+    ge mmap mmap' ->
+    (forall k, L.ge (get k mmap) (get k mmap')).
+  Proof.
+  Admitted.
+  Theorem ge_add: forall k v m,
+    ge (add k v m) m.
+  Proof.
+  Admitted.
+  Theorem ge_get_hierarchy: forall x y m,
+    AbsPO.hierarchy x y ->
+    L.ge (get x m) (get y m).
+  Proof.
+    intros. unfold get. destruct m. simpl. apply w. exact H.
+  Qed.
+
+  Global Opaque eq ge bot get add (*set*) top.
+End WFAbsPOMap.
+
 Module MMap <: SEMILATTICE.
-  Module APOM := AbsPOMap(PTSet).
-  Include APOM.
+  Module WFAPOM := WFAbsPOMap(PTSet).
+  Include WFAPOM.
   Hint Resolve get_add_same get_add get_add_overlap
   (*get_set_same get_set_other*)
-    get_eq get_ge get_top get_eq_top: mmap.
+    (*get_ge*) get_top get_eq_top: mmap.
 End MMap.
 
 (* Result *)
@@ -1692,10 +1804,9 @@ Lemma In_image_of_ptset:
     PTSet.In y (MMap.get x mmap) ->
     PTSet.In y (image_of_ptset s mmap).
 Proof.
-  intros.
-  unfold image_of_ptset. rewrite PTSet.AbsPSet.fold_1.
+  intros. unfold image_of_ptset. rewrite PTSet.AbsPSet.fold_1.
 
-  functional induction (PTSet.In x s); intuition.
+  functional induction (PTSet.In x s); intuition. clear IHP.
 
   eapply fold_left_adds_prop.
   apply PTSet.F.elements_iff. eauto.
@@ -1703,14 +1814,62 @@ Proof.
   intros. apply PTSet.ge_lub_left. auto.
   intros. apply PTSet.ge_lub_right. auto.
 
-  functional induction (PTSet.In px s); intuition.
+  functional induction (PTSet.In px s); intuition; try clear IHP.
 
   eapply fold_left_adds_prop.
   apply PTSet.F.elements_iff. eauto.
   intros. destruct x1, y0; subst; try (intuition; congruence).
+  intros. apply PTSet.ge_lub_left. eapply MMap.ge_get_hierarchy; eauto.
+  crunch_hierarchy.
+  intros. apply PTSet.ge_lub_right. auto.
 
-SearchAbout MMap.get.
-Admitted.
+  functional induction (PTSet.In px s); intuition; try clear IHP.
+
+  eapply fold_left_adds_prop.
+  apply PTSet.F.elements_iff. eauto.
+  intros. destruct x2, y0; subst; try (intuition; congruence).
+  intros. apply PTSet.ge_lub_left. eapply MMap.ge_get_hierarchy; eauto.
+  crunch_hierarchy.
+  intros. apply PTSet.ge_lub_right. auto.
+
+  functional induction (PTSet.In px s); intuition; try clear IHP.
+
+  eapply fold_left_adds_prop.
+  apply PTSet.F.elements_iff. eauto.
+  intros. destruct x3, y0; subst; try (intuition; congruence).
+  intros. apply PTSet.ge_lub_left. eapply MMap.ge_get_hierarchy; eauto.
+  crunch_hierarchy.
+
+  crunch_hierarchy.
+  crunch_hierarchy.
+
+  eapply fold_left_adds_prop.
+  apply PTSet.F.elements_iff. eauto.
+  intros. destruct x3, y0; subst; try (intuition; congruence).
+  intros. apply PTSet.ge_lub_left. eapply MMap.ge_get_hierarchy; eauto.
+  crunch_hierarchy.
+  intros. apply PTSet.ge_lub_right. auto.
+
+  eapply fold_left_adds_prop.
+  apply PTSet.F.elements_iff. eauto.
+  intros. destruct x2, y0; subst; try (intuition; congruence).
+  intros. apply PTSet.ge_lub_left. eapply MMap.ge_get_hierarchy; eauto.
+  crunch_hierarchy.
+  intros. apply PTSet.ge_lub_right. auto.
+
+  eapply fold_left_adds_prop.
+  apply PTSet.F.elements_iff. eauto.
+  intros. destruct x1, y0; subst; try (intuition; congruence).
+  intros. apply PTSet.ge_lub_left. eapply MMap.ge_get_hierarchy; eauto.
+  crunch_hierarchy.
+  intros. apply PTSet.ge_lub_right. auto.
+
+  eapply fold_left_adds_prop.
+  apply PTSet.F.elements_iff. eauto.
+  intros. destruct x0, y0; subst; try (intuition; congruence).
+  intros. apply PTSet.ge_lub_left. auto.
+  intros. apply PTSet.ge_lub_right. auto.
+Qed.
 
 Lemma In_add_ptset_to_image:
   forall x y sfrom sto mmap
