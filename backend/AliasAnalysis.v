@@ -16,188 +16,11 @@ Require Import Registers.
 Require Import RTL.
 Require Import Values.
 
-(* Library *)
-
-Require String. Open Scope string_scope.
-Ltac move_to_top x :=
-  match reverse goal with
-  | H : _ |- _ => try move x after H
-  end.
-Tactic Notation "assert_eq" ident(x) constr(v) :=
-  let H := fresh in
-  assert (x = v) as H by reflexivity;
-  clear H.
-Tactic Notation "Case_aux" ident(x) constr(name) :=
-  first [
-    set (x := name); move_to_top x
-  | assert_eq x name; move_to_top x
-  | fail 1 "because we are working on a different case" ].
-Tactic Notation "Case" constr(name) := Case_aux Case name.
-Tactic Notation "SCase" constr(name) := Case_aux SCase name.
-Tactic Notation "SSCase" constr(name) := Case_aux SSCase name.
-Tactic Notation "SSSCase" constr(name) := Case_aux SSSCase name.
-Tactic Notation "SSSSCase" constr(name) := Case_aux SSSSCase name.
-Tactic Notation "SSSSSCase" constr(name) := Case_aux SSSSSCase name.
-Tactic Notation "SSSSSSCase" constr(name) := Case_aux SSSSSSCase name.
-Tactic Notation "SSSSSSSCase" constr(name) := Case_aux SSSSSSSCase name.
-Tactic Notation "SSSSSSSSCase" constr(name) := Case_aux SSSSSSSSCase name.
-Tactic Notation "SSSSSSSSSCase" constr(name) := Case_aux SSSSSSSSSCase name.
-
-Ltac unalias := repeat (autounfold with unalias in *).
-
-Ltac feed H :=
-  match type of H with
-  | ?foo -> _ =>
-    let FOO := fresh in
-    assert foo as FOO; [|specialize (H FOO); clear FOO]
-  end.
-
-Ltac feed_all H := feed H; [|try feed_all H].
-
-Ltac feed_n n H :=
-  match constr:n with
-  | O => idtac
-  | (S ?m) => feed H ; [| feed_n m H]
-  end.
-
-(* Interfaces *)
-
-Module Type Hierarchy.
-  Parameter t: Type.
-  Parameter top: t.
-  Parameter parent: t -> option t.
-  Parameter measure: t -> nat.
-  Axiom eq_dec: forall (x y: t), {eq x y} + {~eq x y}. (* useful for optint *)
-  Axiom hierarchy: t -> t -> Prop.
-  Axiom hierarchy_dec: forall x y, {hierarchy x y} + {~ hierarchy x y}.
-  Axiom top_spec: forall x, x <> top -> hierarchy top x.
-  Axiom parent_measure: forall x px,
-    parent x = Some px -> measure x = S (measure px).
-End Hierarchy.
-
-Module Type Overlap.
-  Include Hierarchy.
-  Axiom overlap: t -> t -> Prop.
-  Axiom overlap_dec: forall x y, {overlap x y} + {~ overlap x y}.
-End Overlap.
-
-(* A hierarchical set is a set over hierarchical elements, such that an element
-   up in the hierarchy embodies all of its ancestors. *)
-
-Module Type HSet (H: Hierarchy).
-  Parameter t: Type.
-  Parameter bot: t.
-  Parameter top: t.
-  Parameter add: H.t -> t -> t.
-  Parameter In: H.t -> t -> Prop.
-  Parameter mem: forall x s, {In x s} + {~In x s}.
-  Definition eq (s1 s2: t): Prop := forall x, In x s1 <-> In x s2.
-  Axiom In_add_same: forall x s, In x (add x s).
-  Axiom In_add_hierarchy: forall x y,
-    H.hierarchy x y -> (forall s, In y (add x s)).
-  Axiom In_add_already: forall x y s, In x s -> In x (add y s).
-  Definition singleton x := add x bot.
-  Axiom In_singleton: forall x, In x (singleton x).
-  Axiom In_singleton_hierarchy: forall x y,
-    H.hierarchy x y -> In y (singleton x).
-End HSet.
-
-Module Type OMap (O: Overlap) (L: SEMILATTICE).
-  Parameter t: Type.
-  Parameter get: O.t -> t -> L.t.
-  Parameter add: O.t -> L.t -> t -> t.
-  (* set should only work for keys at the bottom of the hierarchy *)
-  (* set still needs to propagate information upwards *)
-  (*
-    Parameter set: O.t -> L.t -> t -> t.
-  *)
-  Axiom get_add_same: forall k s m, L.ge (get k (add k s m)) s.
-  Axiom get_add: forall x y s m, L.ge (get x (add y s m)) (get x m).
-  Axiom get_add_overlap: forall x y s m,
-    O.overlap x y ->
-    L.ge (get x (add y s m)) s.
-  (*
-  Axiom get_set_same: forall k s m, L.ge (get k (set k s m)) s.
-  Axiom get_set_other: forall x y s m, L.ge (get x (set y s m)) (get x m).
-  *)
-End OMap.
-
-(* Useful functors *)
-
-Module HtoO (H: Hierarchy) <: Overlap.
-  Include H.
-  Definition overlap x y := hierarchy x y \/ hierarchy y x.
-  Definition overlap_dec: forall x y, {overlap x y} + {~ overlap x y}.
-  Proof.
-    intros. destruct (hierarchy_dec x y).
-    left. left. auto. destruct (hierarchy_dec y x).
-    left. right. auto.
-    right. intro. inv H; contradiction.
-  Defined.
-End HtoO.
-
-Module ProductSemiLattice (A: SEMILATTICE) (B: SEMILATTICE) <: SEMILATTICE.
-  Definition t := (A.t * B.t)%type.
-  Definition eq (x y: t) :=
-    let (a, b) := x in let (c, d) := y in
-    A.eq a c /\ B.eq b d.
-  Theorem eq_refl: forall x, eq x x.
-  Proof.
-    destruct x. split. apply A.eq_refl. apply B.eq_refl.
-  Qed.
-  Theorem eq_sym: forall x y, eq x y -> eq y x.
-  Proof.
-    intros. destruct x, y. inv H. constructor.
-    apply A.eq_sym. auto.
-    apply B.eq_sym. auto.
-  Qed.
-  Theorem eq_trans: forall x y z, eq x y -> eq y z -> eq x z.
-  Proof.
-    intros. destruct x, y, z. inv H. inv H0. constructor.
-    eapply A.eq_trans; eauto.
-    eapply B.eq_trans; eauto.
-  Qed.
-  Definition beq (x y: t) :=
-    let (a, b) := x in let (c, d) := y in
-    (A.beq a c) && (B.beq b d).
-  Theorem beq_correct: forall x y, beq x y = true -> eq x y.
-  Proof.
-    intros. destruct x, y. apply andb_prop in H. destruct H as [? ?]. constructor.
-    apply A.beq_correct. auto.
-    apply B.beq_correct. auto.
-  Qed.
-  Definition ge (x y: t) :=
-    let (a, b) := x in let (c, d) := y in
-    A.ge a c /\ B.ge b d.
-  Theorem ge_refl: forall x y, eq x y -> ge x y.
-  Proof.
-    intros. destruct x, y. inv H. constructor.
-    apply A.ge_refl. auto.
-    apply B.ge_refl. auto.
-  Qed.
-  Theorem ge_trans: forall x y z, ge x y -> ge y z -> ge x z.
-  Proof.
-    intros. destruct x, y, z. inv H. inv H0. constructor.
-    eapply A.ge_trans; eauto.
-    eapply B.ge_trans; eauto.
-  Qed.
-  Definition bot := (A.bot, B.bot).
-  Theorem ge_bot: forall x, ge x bot.
-  Proof.
-    destruct x. constructor. apply A.ge_bot. apply B.ge_bot.
-  Qed.
-  Definition lub (x y: t) :=
-    let (a, b) := x in let (c, d) := y in
-    (A.lub a c, B.lub b d).
-  Theorem ge_lub_left: forall x y, ge (lub x y) x.
-  Proof.
-    destruct x, y. constructor. apply A.ge_lub_left. apply B.ge_lub_left.
-  Qed.
-  Theorem ge_lub_right: forall x y, ge (lub x y) y.
-  Proof.
-    destruct x, y. constructor. apply A.ge_lub_right. apply B.ge_lub_right.
-  Qed.
-End ProductSemiLattice.
+Require Import AliasLib.
+Require Import AliasHierarchy.
+Require Import AliasSets.
+Require Import AliasMaps.
+Require Import AliasLattices.
 
 Module FMapAVLPlus(X: OrderedType).
 
@@ -373,75 +196,93 @@ Module MapSemiLattice
 End MapSemiLattice.
 
 Module SemiLatticeToLattice (S: SEMILATTICE) <: SEMILATTICE_WITH_TOP.
+
   Definition t := option S.t.
+
   Notation Top := None (only parsing).
+
   Definition eq (x y: t) :=
     match x, y with
     | Top,    Top    => True
     | Some a, Some b => S.eq a b
     | _,      _      => False
     end.
+
   Theorem eq_refl: forall x, eq x x.
   Proof.
     destruct x; intuition. apply S.eq_refl.
   Qed.
+
   Theorem eq_sym: forall x y, eq x y -> eq y x.
   Proof.
     intros. destruct x, y; simpl in *; intuition. apply S.eq_sym. auto.
   Qed.
+
   Theorem eq_trans: forall x y z, eq x y -> eq y z -> eq x z.
   Proof.
     intros. destruct x, y, z; simpl in *; intuition. eapply S.eq_trans; eauto.
   Qed.
+
   Definition beq (x y: t) :=
     match x, y with
     | Top,    Top => true
     | Some a, Some b => S.beq a b
     | _,      _ => false
     end.
+
   Theorem beq_correct: forall x y, beq x y = true -> eq x y.
   Proof.
     intros. destruct x, y; simpl in *; intuition. apply S.beq_correct. auto.
   Qed.
+
   Definition ge (x y: t) :=
     match x, y with
     | Top,    _      => True
     | _,      Top    => False
     | Some a, Some b => S.ge a b
     end.
+
   Theorem ge_refl: forall x y, eq x y -> ge x y.
   Proof.
     intros. destruct x, y; simpl in *; intuition. apply S.ge_refl. auto.
   Qed.
+
   Theorem ge_trans: forall x y z, ge x y -> ge y z -> ge x z.
   Proof.
     intros. destruct x, y, z; simpl in *; intuition. eapply S.ge_trans; eauto.
   Qed.
+
   Definition bot := Some S.bot.
+
   Theorem ge_bot: forall x, ge x bot.
   Proof.
     destruct x; simpl in *; intuition. apply S.ge_bot.
   Qed.
+
   Definition lub (x y: t) :=
     match x, y with
     | Top,    _      => Top
     | _,      Top    => Top
     | Some a, Some b => Some (S.lub a b)
     end.
+
   Theorem ge_lub_left: forall x y, ge (lub x y) x.
   Proof.
     destruct x, y; simpl in *; intuition. apply S.ge_lub_left.
   Qed.
+
   Theorem ge_lub_right: forall x y, ge (lub x y) y.
   Proof.
     destruct x, y; simpl in *; intuition. apply S.ge_lub_right.
   Qed.
-  (* New: *)
+
   Definition top := @Top S.t.
+
   Theorem ge_top: forall x, ge top x.
   Proof.
     destruct x; simpl in *; intuition.
   Qed.
+
 End SemiLatticeToLattice.
 
 (* Abstract blocks *)
@@ -452,22 +293,30 @@ Inductive absb' :=
 | Other
 | Stack
 .
+
 Definition absb := option absb'. (* None := All *)
+
 Hint Unfold absb: unalias.
-(* Better use this *)
 Notation All := None (only parsing).
 Notation Just := Some (only parsing).
 
 Module AbsBOT <: OrderedType.
+
   Definition t := absb.
+
   Definition eq := @eq t.
+
   Definition eq_refl := @refl_equal t.
+
   Definition eq_sym := @sym_eq t.
+
   Definition eq_trans := @trans_eq t.
+
   Definition eq_dec : forall x y, {eq x y}+{~eq x y}.
   Proof.
     unfold eq. destruct x, y; repeat decide equality. left. auto.
   Defined.
+
   Definition lt (x y: t) : Prop :=
     match x, y with
     | All,    All    => False
@@ -485,6 +334,7 @@ Module AbsBOT <: OrderedType.
       | _,                 _                                        => False
       end
     end.
+
   Theorem lt_trans : forall x y z, lt x y -> lt y z -> lt x z.
   Proof.
     intros.
@@ -493,11 +343,13 @@ Module AbsBOT <: OrderedType.
     try destruct o; try destruct o0; try destruct o1;
     auto; simpl in *; zify; omega.
   Qed.
+
   Theorem lt_not_eq : forall x y : t, lt x y -> ~ eq x y.
   Proof.
     repeat intro. inv H0. destruct y; simpl in H; auto.
     destruct a; auto; destruct o; auto;  zify; omega.
   Qed.
+
   Definition compare : forall x y : t, Compare lt eq x y.
   Proof.
     intros. unfold lt.
@@ -518,22 +370,19 @@ Module AbsBOT <: OrderedType.
     apply GT; rewrite Heqc in H.
     unfold BinPos.Plt. auto.
   Defined.
+
 End AbsBOT.
 
-Module AbsBH <: Hierarchy.
+Module AbsBHFun <: HierarchyFun.
   Definition t := absb.
+
+  Definition eq_dec: forall (x y: t), {eq x y} + {~ eq x y}.
+  Proof.
+    repeat decide equality.
+  Defined.
+
   Definition top: t := None.
-  Definition hierarchy x y :=
-    match x, y with
-    | _,      All    => False
-    | All,    _      => True
-    | Just a, Just b =>
-      match a, b with
-      | Allocs All,  Allocs (Just _)  => True
-      | Globals All, Globals (Just _) => True
-      | _,           _                => False
-      end
-    end.
+
   Definition parent x :=
     match x with
     | All    => None
@@ -545,27 +394,48 @@ Module AbsBH <: Hierarchy.
       end
     )
     end.
+
   Definition measure x :=
     (
-    match x with
-    | All    => 0
-    | Just a =>
-      match a with
-      | Allocs (Just _)  => 2
-      | Globals (Just _) => 2
-      | _                => 1
+      match x with
+      | All    => 0
+      | Just a =>
+        match a with
+        | Allocs (Just _)  => 2
+        | Globals (Just _) => 2
+        | _                => 1
+        end
       end
-    end
     )%nat.
-  Definition eq_dec: forall (x y: t), {eq x y} + {~ eq x y}.
+
+  Ltac crunch_absb :=
+    repeat (
+      simpl in *; try easy;
+      match goal with
+      | H: Some _ = None |- _ => inv H
+      | H: None = Some _ |- _ => inv H
+      | H: Some _ = Some _ |- _ => inv H
+      | x: option _ |- _ => destruct x
+      | x: absb' |- _ => destruct x
+      end
+    ); intuition.
+
+  Theorem parent_measure: forall x px,
+    parent x = Some px -> (measure px < measure x)%nat.
   Proof.
-    repeat decide equality.
-  Defined.
+    repeat crunch_absb.
+  Qed.
+
+  Theorem no_parent_is_top: forall x,
+    parent x = None <-> x = top.
+  Proof.
+    repeat crunch_absb.
+  Qed.
+
+(*
   Definition hierarchy_dec: forall x y, {hierarchy x y} + {~ hierarchy x y}.
   Proof.
-    intros.
-    destruct x, y; try destruct a, a0; try destruct o; try destruct o0;
-      simpl; auto.
+    intros. crunch_absb.
   Defined.
   Theorem top_spec: forall x, x <> top -> hierarchy top x.
   Proof.
@@ -574,11 +444,20 @@ Module AbsBH <: Hierarchy.
   Theorem parent_measure: forall x px,
     parent x = Some px -> measure x = S (measure px).
   Proof.
-    intros. destruct x; try destruct a; try destruct o; inv H; auto.
+    intros. crunch_absb.
   Qed.
-End AbsBH.
-
-(* With offsets *)
+  Theorem parent_hierarchy: forall x px,
+    parent x = Some px -> hierarchy px x.
+  Proof.
+    intros. crunch_absb.
+  Qed.
+  Theorem hierarchy_trans: forall x y z,
+    hierarchy x y -> hierarchy y z -> hierarchy x z.
+  Proof.
+    intros. crunch_absb.
+  Qed.
+*)
+End AbsBHFun.
 
 Inductive optint {t: Type}: Type :=
 | Blk: t -> optint
@@ -586,16 +465,18 @@ Inductive optint {t: Type}: Type :=
 .
 Definition absp := @optint absb.
 
-Module OptIntH (H: Hierarchy) <: Hierarchy.
+Module OptIntHFun (H: HierarchyFun) <: HierarchyFun.
+
   Definition t:= @optint H.t.
   Hint Unfold t: unalias.
+
+  Definition eq_dec: forall (x y: t), {eq x y} + {~ eq x y}.
+  Proof.
+    repeat decide equality; try apply H.eq_dec; apply Int.eq_dec.
+  Defined.
+
   Definition top: t := Blk H.top.
-  Definition hierarchy x y :=
-    match x, y with
-    | Blk a, Blk b   => H.hierarchy a b
-    | Blk a, Loc b _ => a = b \/ H.hierarchy a b
-    | _, _ => False
-    end.
+
   Definition parent x :=
     match x with
     | Loc b _ => Some (Blk b)
@@ -605,6 +486,7 @@ Module OptIntH (H: Hierarchy) <: Hierarchy.
       | None    => None
       end
     end.
+
   Definition measure x :=
     (
     match x with
@@ -612,59 +494,133 @@ Module OptIntH (H: Hierarchy) <: Hierarchy.
     | Blk b   => H.measure b
     end
     )%nat.
-  Definition eq_dec: forall (x y: t), {eq x y} + {~ eq x y}.
+
+  Theorem parent_measure: forall x px,
+    parent x = Some px -> (measure px < measure x)%nat.
   Proof.
-    repeat decide equality; try apply H.eq_dec; apply Int.eq_dec.
-  Defined.
+    intros. destruct x; simpl in *.
+    destruct (H.parent t0) as []_eqn; inversion_clear H.
+    now apply H.parent_measure.
+    inversion_clear H. auto.
+  Qed.
+
+  Theorem no_parent_is_top: forall x, parent x = None <-> x = top.
+  Proof.
+    intros. destruct x; simpl in *.
+    destruct (H.parent t0) as []_eqn.
+    split. congruence. intros. inversion H. subst.
+    pose proof (H.no_parent_is_top H.top). intuition. congruence.
+    intuition. apply H.no_parent_is_top in Heqo. now inversion_clear Heqo.
+    now intuition.
+  Qed.
+
+(*
   Definition hierarchy_dec: forall x y, {hierarchy x y} + {~ hierarchy x y}.
   Proof.
     intros. destruct x, y; auto. apply H.hierarchy_dec. destruct (H.eq_dec t0 t1).
     subst. left. simpl. auto.
     simpl. destruct (H.hierarchy_dec t0 t1); intuition.
   Defined.
+
   Theorem top_spec: forall x, x <> top -> hierarchy top x.
   Proof.
     intros. simpl in *. destruct x. unfold top in H.
     apply H.top_spec. congruence.
     destruct (H.eq_dec H.top t0). auto. right. apply H.top_spec. auto.
   Qed.
-  Theorem parent_measure: forall x px, parent x = Some px -> measure x = S (measure px).
+
+  Theorem parent_measure: forall x px,
+    parent x = Some px -> measure x = S (measure px).
   Proof.
     intros. destruct x; simpl in *. destruct (H.parent t0) as []_eqn; inv H.
     apply H.parent_measure. auto.
     inv H. auto.
   Qed.
-End OptIntH.
 
-Module AbsPH := OptIntH(AbsBH).
-Module AbsPO := HtoO(AbsPH).
+  Theorem parent_hierarchy: forall x px,
+    parent x = Some px -> hierarchy px x.
+  Proof.
+    intros.
+    destruct x, px; simpl in *; try destruct (H.parent t0) as []_eqn; inv H.
+    apply H.parent_hierarchy. auto.
+    left; reflexivity.
+    left; reflexivity.
+  Qed.
 
+  Theorem hierarchy_trans: forall x y z,
+    hierarchy x y -> hierarchy y z -> hierarchy x z.
+  Proof.
+    intros.
+    destruct x, y, z; simpl in *; intuition; subst;
+    try right; try solve [eapply H.hierarchy_trans; eauto].
+    exact H.
+  Qed.
+*)
+
+End OptIntHFun.
+
+Module AbsPHFun := OptIntHFun(AbsBHFun).
+
+Module AbsPH := MkHierarchy(AbsPHFun).
+
+Module AbsPR := HtoR(AbsPH).
+
+Ltac crunch_hierarchy :=
+  unfold AbsPR.t, AbsPHFun.t, AbsBHFun.t, AbsPR.related in *;
+  simpl in *;
+  try discriminate; try tauto;
+  match goal with
+  | b: absb |- _ => destruct b; crunch_hierarchy
+  | b: absb' |- _ => destruct b; crunch_hierarchy
+  | o: option _ |- _ => destruct o; crunch_hierarchy
+  | p: optint |- _ => destruct p; crunch_hierarchy
+  | H: Some _ = Some _ |- _ => inv H; crunch_hierarchy
+  | H: _ \/ _ |- _ => destruct H; crunch_hierarchy
+  | |- _ => idtac
+  end.
+(*
+Theorem absp_strong_ind: forall (P: absp -> Prop),
+  P AbsPR.top ->
+  (forall x, (forall y, AbsPR.above y x -> P y) -> P x) ->
+  (forall x, P x).
+Proof.
+  intros. destruct x; repeat (crunch_hierarchy; apply H0; intros).
+Qed.
+*)
 Module OptIntOT (OT: OrderedType) <: OrderedType.
+
   Definition t := @optint OT.t.
+
   Definition eq (x y: t): Prop :=
     match x, y with
     | Blk a,   Blk b   => OT.eq a b
     | Loc a x, Loc b y => OT.eq a b /\ x = y
     | _,       _       => False
     end.
+
   Definition eq_equiv := @eq_equivalence.
+
   Definition eq_refl: forall (x: t), eq x x.
   Proof.
     intros. destruct x. apply OT.eq_refl. split; auto.
   Defined.
+
   Theorem eq_sym: forall x y, eq x y -> eq y x.
   Proof.
     intros. destruct x, y; simpl in *; intuition; auto.
   Qed.
+
   Theorem eq_trans: forall (x y z: t), eq x y -> eq y z -> eq x z.
   Proof.
     destruct x, y, z; simpl in *; intuition; subst; auto; eapply OT.eq_trans; eauto.
   Qed.
+
   Definition eq_dec : forall x y, {eq x y}+{~eq x y}.
   Proof.
     unfold eq. destruct x, y; repeat decide equality; auto. apply OT.eq_dec.
     pose proof (OT.eq_dec t0 t1). pose proof (Int.eq_dec i i0). intuition.
   Defined.
+
   Definition lt (x y: t) : Prop :=
     match x, y with
     | Blk a,   Blk b   => OT.lt a b
@@ -672,6 +628,7 @@ Module OptIntOT (OT: OrderedType) <: OrderedType.
     | Loc _ _, Blk _   => True
     | Blk _,   Loc _ _ => False
     end.
+
   Theorem lt_trans : forall x y z, lt x y -> lt y z -> lt x z.
   Proof.
     intros. destruct x, y, z; simpl in *; intuition; subst; auto.
@@ -687,11 +644,13 @@ Module OptIntOT (OT: OrderedType) <: OrderedType.
     right. split. eapply OT.eq_trans; eauto. unfold Int.lt in *. repeat destruct zlt; auto.
     omegaContradiction.
   Qed.
+
   Theorem lt_not_eq : forall x y : t, lt x y -> ~ eq x y.
   Proof.
     destruct x, y; simpl in *; intuition; try solve [eapply OT.lt_not_eq; eauto].
     subst. unfold Int.lt in *. destruct zlt. omega. congruence.
   Qed.
+
   Definition compare : forall x y : t, Compare lt eq x y.
   Proof.
     intros. unfold lt. destruct x, y.
@@ -708,39 +667,157 @@ Module OptIntOT (OT: OrderedType) <: OrderedType.
     apply (f_equal Int.repr) in SEQ. setoid_rewrite Int.repr_signed in SEQ. contradiction.
     apply GT. auto.
   Defined.
+
 End OptIntOT.
 
 Module AbsPOT := OptIntOT(AbsBOT).
 
-Ltac crunch_hierarchy :=
-  unfold AbsPH.t, AbsBH.t in *;
-  simpl in *;
-  try discriminate; try tauto;
-  match goal with
-  | b: absb |- _ => destruct b; crunch_hierarchy
-  | b: absb' |- _ => destruct b; crunch_hierarchy
-  | o: option _ |- _ => destruct o; crunch_hierarchy
-  | p: optint |- _ => destruct p; crunch_hierarchy
-  | H: Some _ = Some _ |- _ => inv H; crunch_hierarchy
-  | H: _ \/ _ |- _ => destruct H; crunch_hierarchy
-  | |- _ => idtac
-  end.
+Ltac merge_parents :=
+  repeat (
+    match goal with
+      | H: AbsPH.parent ?x = _,
+        G: AbsPH.parent ?x = _
+        |- _ => rewrite G in H; inv H
+    end
+  ).
 
 Module PTSet
   <: HSet(AbsPH)
   <: SEMILATTICE_WITH_TOP.
+
   Module AbsPSet := FSetAVL.Make AbsPOT.
+
   Module F := FSetFacts.WFacts_fun AbsPOT AbsPSet.
+
   Definition t := AbsPSet.t.
+
   Definition add := AbsPSet.add.
+
   Function In (x: AbsPH.t) (s: t) {measure AbsPH.measure x}: Prop :=
     match AbsPH.parent x with
     | Some px => AbsPSet.In x s \/ In px s
     | None    => AbsPSet.In x s
     end.
   Proof.
-    intros. setoid_rewrite AbsPH.parent_measure at 2; eauto.
+    intros ??? H. exact (AbsPH.parent_measure _ _ H).
   Qed.
+
+  Lemma In_add_same: forall x s, In x (add x s).
+  Proof.
+    intros. remember (add x s) as s'. functional induction (In x s').
+    left. apply F.add_iff. destruct x; auto.
+    apply F.add_iff. destruct x; auto.
+  Qed.
+
+  Module HF := HierarchyFacts(AbsPH).
+
+  Theorem In_add_spec: forall x y s,
+    In x (add y s) <-> x = y \/ AbsPH.above y x \/ In x s.
+  Proof.
+    split; intros.
+    Case "->".
+    induction x using AbsPH.above_ind.
+    remember (add y s) as s'.
+    functional induction (In x s').
+    SCase "1".
+    intuition.
+    apply F.add_iff in H1. destruct x, y; intuition.
+    subst. now left.
+    right. right. functional induction (In (Blk t0) s); auto.
+    right. right. functional induction (In (Blk t0) s); auto.
+    right. right. functional induction (In (Loc t0 i) s); auto.
+    subst. now left.
+    right. right. functional induction (In (Loc t0 i) s); auto.
+    specialize (H0 px (AbsPH.parent_is_above _ _ e) H1).
+    intuition; subst.
+    right. left. exact (AbsPH.parent_is_above _ _ e).
+    right. left. eapply transitivity. apply H0.
+    exact (AbsPH.parent_is_above _ _ e).
+    right. right.
+    functional induction (In x s); merge_parents; auto.
+    SCase "2".
+    apply F.add_iff in H.
+    destruct y, x; intuition; subst; auto;
+      try solve [right; right;
+        match goal with |- ?goal => functional induction goal end; auto].
+    Case "<-".
+    intuition.
+    SCase "1".
+    subst. apply In_add_same.
+    SCase "2".
+    remember (add y s) as s'. functional induction (In x s').
+    right.
+    destruct (AbsPH.eq_dec y px).
+    subst. apply In_add_same.
+    refine (IHP _ (eq_refl _)).
+    exact (AbsPH.no_lozenge _ _ _ H e n).
+    apply AbsPH.no_parent_is_top in e. subst.
+    elim (HF.not_above_top _ H).
+    SCase "3".
+    remember (add y s) as s'.
+    functional induction (In x s); functional induction (In x s');
+      merge_parents; intuition.
+    left. apply F.add_iff. right. auto.
+    apply F.add_iff. right. auto.
+  Qed.
+
+  Theorem In_spec_aux:
+    forall x s,
+      In x s <->
+      AbsPSet.In x s \/
+      (exists px, AbsPH.parent x = Some px /\ In px s).
+  Proof.
+    split; intros.
+    functional induction (In x s).
+    destruct H; auto. right. exists px. auto.
+    auto.
+    functional induction (In x s).
+    destruct H; auto. destruct H as [px' [A B]]. rewrite A in e; inv e. auto.
+    destruct H; auto. destruct H as [px' [A B]]. rewrite A in e; inv e.
+  Qed.
+
+  Theorem In_spec:
+    forall x s,
+      In x s <->
+      AbsPSet.In x s \/
+      (exists ax, AbsPH.above ax x /\ AbsPSet.In ax s).
+  Proof.
+    split.
+    Case "->".
+    intros.
+    apply In_spec_aux in H. intuition. destruct H0 as [px [P H]].
+    right.
+    apply In_spec_aux in H. intuition.
+    exists px. split. apply AbsPH.parent_is_above. exact P. exact H0.
+    destruct H0 as [ppx [PP H]].
+    apply In_spec_aux in H. intuition.
+    exists ppx. split.
+    apply transitivity with (y := px).
+    apply AbsPH.parent_is_above. exact PP.
+    apply AbsPH.parent_is_above. exact P.
+    exact H0.
+    destruct H0 as [pppx [PPP H]].
+    apply In_spec_aux in H. intuition.
+    exists pppx. split.
+    apply transitivity with (y := ppx).
+    apply AbsPH.parent_is_above. exact PPP.
+    apply transitivity with (y := px).
+    apply AbsPH.parent_is_above. exact PP.
+    apply AbsPH.parent_is_above. exact P.
+    exact H0.
+    destruct H0 as [ppppx [PPPP H]]. crunch_hierarchy.
+    Case "<-".
+    intros. intuition. functional induction (In x s); intuition.
+    destruct H0 as [ax [ABOVE IN]].
+    functional induction (In x s).
+    right.
+    destruct (AbsPH.eq_dec ax px).
+    subst. functional induction (In px s); intuition.
+    refine (IHP _ IN).
+    eapply AbsPH.no_lozenge; eauto.
+    apply AbsPH.no_parent_is_top in e. subst. elim (HF.not_above_top _ ABOVE).
+  Qed.
+
   Definition mem x s : {In x s} + {~In x s}.
   Proof.
     functional induction (In x s).
@@ -751,19 +828,6 @@ Module PTSet
     apply F.mem_iff in Heqb. auto. apply F.not_mem_iff in Heqb. tauto.
   Defined.
   Definition bot := AbsPSet.empty.
-  Theorem In_add_same: forall x s, In x (add x s).
-  Proof.
-    intros. remember (add x s). functional induction (In x t0).
-    left. apply F.add_iff. destruct x; auto.
-    apply F.add_iff. destruct x; auto.
-  Qed.
-  Theorem In_add_hierarchy: forall x y,
-    AbsPH.hierarchy x y -> forall s, In y (add x s).
-  Proof.
-    intros. remember (add x s). functional induction (In y t0).
-    crunch_hierarchy; right; apply In_add_same.
-    crunch_hierarchy.
-  Qed.
   Definition eq (s1 s2: t): Prop :=
     forall x, In x s1 <-> In x s2.
   Theorem eq_refl: forall x, eq x x.
@@ -779,55 +843,13 @@ Module PTSet
     split; specialize (H x0); destruct H; specialize (H0 x0); destruct H0; auto.
   Qed.
   Definition beq: t -> t -> bool := AbsPSet.equal.
-  Lemma In_equiv:
-    forall x s,
-      In x s <->
-      AbsPSet.In x s \/
-      (exists px, AbsPH.parent x = Some px /\ In px s).
-  Proof.
-    split; intros.
-    functional induction (In x s).
-    destruct H; auto. right. exists px. auto.
-    auto.
-    functional induction (In x s).
-    destruct H; auto. destruct H as [px' [A B]]. rewrite A in e; inv e. auto.
-    destruct H; auto. destruct H as [px' [A B]]. rewrite A in e; inv e.
-  Qed.
-  Theorem In_add_already: forall x y s, In x s -> In x (add y s).
-  Proof.
-    intros.
-    apply In_equiv in H. apply In_equiv. intuition.
-    left. apply F.add_iff. auto.
-    right. destruct H0 as [px]. exists px. intuition.
-    apply In_equiv in H1. apply In_equiv. intuition.
-    left. apply F.add_iff. auto.
-    right. destruct H as [ppx]. exists ppx. intuition.
-    apply In_equiv in H2. apply In_equiv. intuition.
-    left. apply F.add_iff. auto.
-    right. destruct H as [pppx]. exists pppx. intuition.
-    apply In_equiv in H3. apply In_equiv. intuition.
-    left. apply F.add_iff. auto.
-    right. destruct H as [ppppx]. exfalso. intuition. crunch_hierarchy.
-  Qed.
   Definition beq_correct: forall x y, beq x y = true -> eq x y.
   Proof.
-    split; intros.
+    intros.
     apply F.equal_iff in H. unfold AbsPSet.Equal in H.
-    functional induction (In x0 y).
-    apply In_equiv in H0.
-    destruct H0. left. apply H. apply H0.
-    destruct H0 as [px' [A B]]. rewrite A in e; inv e. right. auto.
-    apply In_equiv in H0. destruct H0.
-    apply H. apply H0.
-    destruct H0 as [px' [A B]]. rewrite A in e; inv e.
-    apply F.equal_iff in H. unfold AbsPSet.Equal in H.
-    functional induction (In x0 x).
-    apply In_equiv in H0.
-    destruct H0. left. apply H. apply H0.
-    destruct H0 as [px' [A B]]. rewrite A in e; inv e. right. auto.
-    apply In_equiv in H0. destruct H0.
-    apply H. apply H0.
-    destruct H0 as [px' [A B]]. rewrite A in e; inv e.
+    split; intros;
+    functional induction (In x0 y); functional induction (In x0 x);
+    merge_parents; intuition; try left; apply H; auto.
   Qed.
   Definition ge (s1 s2: t): Prop := forall x, In x s2 -> In x s1.
   Theorem ge_refl: forall x y, eq x y -> ge x y.
@@ -841,7 +863,7 @@ Module PTSet
   Theorem ge_bot: forall x, ge x bot.
   Proof.
     repeat intro. remember bot. functional induction (In x0 t0).
-    destruct H. inv H. apply In_equiv. right. exists px. auto.
+    destruct H. inv H. apply In_spec_aux. right. exists px. auto.
     inv H.
   Qed.
   Definition lub' (old: t) (new: t): t :=
@@ -849,7 +871,7 @@ Module PTSet
       AbsPSet.filter
       (fun x =>
         AbsPSet.for_all
-        (fun y => negb (AbsPH.hierarchy_dec y x))
+        (fun y => negb (AbsPH.above_dec y x))
         out
       )
       out.
@@ -892,13 +914,13 @@ Module PTSet
   Definition singleton x := add x bot.
   Axiom In_singleton: forall x, In x (singleton x).
   Axiom In_singleton_hierarchy: forall x y,
-    AbsPH.hierarchy x y -> In y (singleton x).
+    AbsPH.above x y -> In y (singleton x).
   Axiom not_In_bot: forall x, ~ In x bot.
   Axiom In_top: forall x, In x top.
   Axiom ge_top_eq_top: forall x, ge x top <-> eq x top.
   Axiom top_ge: forall x, ge top x.
   Opaque mem In beq ge lub bot top.
-  Hint Resolve In_add_same In_add_hierarchy eq_refl eq_sym eq_trans beq_correct
+  Hint Resolve In_add_spec In_spec eq_refl eq_sym eq_trans beq_correct
     ge_refl ge_trans ge_bot ge_lub_left ge_lub_right In_singleton
     In_singleton_hierarchy not_In_bot ge_top In_top ge_top_eq_top top_ge: ptset.
 End PTSet.
@@ -1005,42 +1027,40 @@ End RMap.
 
 (* Memory *)
 
-Module AbsPOMap (L: SEMILATTICE_WITH_TOP)
-  <: OMap(AbsPO)(L)
-  <: SEMILATTICE_WITH_TOP.
+Module AbsPOMap (L: SEMILATTICE_WITH_TOP).
   Module AbsPOMapMergeStrategy :=
     NaiveMergeStrategy(AbsPOT)(L). (* won't use it anyway *)
   Module MSL := MapSemiLattice(AbsPOT)(L)(AbsPOMapMergeStrategy).
   Module LAT := SemiLatticeToLattice(MSL).
   Include LAT.
 
-  Function get_rec (k: AbsPO.t) (m: MSL.t) {measure AbsPO.measure k}: L.t :=
+  Function get_rec (k: AbsPR.t) (m: MSL.t) {measure AbsPR.measure k}: L.t :=
     match MSL.M.find k m with
     | Some s => s
     | None   =>
-      match AbsPO.parent k with
+      match AbsPR.parent k with
       | None   => L.bot
       | Some p => get_rec p m
       end
     end.
   Proof.
-    intros. rewrite (AbsPH.parent_measure k p teq0). auto.
+    intros ???? PARENT. exact (AbsPR.parent_measure _ _ PARENT).
   Qed.
 
-  Definition get (k: AbsPO.t) (m: t): L.t :=
+  Definition get (k: AbsPR.t) (m: t): L.t :=
     match m with
     | Top    => L.top
     | Some m => get_rec k m
     end.
 
-  Definition lub_on_overlap (key: AbsPO.t) (val: L.t) (k: AbsPO.t) (v: L.t)
+  Definition lub_on_overlap (key: AbsPR.t) (val: L.t) (k: AbsPR.t) (v: L.t)
     : L.t :=
-    if AbsPO.overlap_dec key k then L.lub v val else v.
+    if AbsPR.related_dec key k then L.lub val v else v.
 
   Definition add_overlap key val m :=
     MSL.M.mapi (lub_on_overlap key val) m.
 
-  Definition add (k: AbsPO.t) (v: L.t) (m: t): t :=
+  Definition add (k: AbsPR.t) (v: L.t) (m: t): t :=
     match m with
     | Top    => Top
     | Some m =>
@@ -1059,37 +1079,254 @@ Module AbsPOMap (L: SEMILATTICE_WITH_TOP)
     apply L.ge_top.
   Qed.
 
-  Theorem get_add: forall x y s m, L.ge (get x (add y s m)) (get x m).
+  Theorem ge_add_overlap: forall x s m, ge (Some (add_overlap x s m)) (Some m).
   Proof.
-    intros. destruct m; simpl.
-    destruct (AbsPO.eq_dec x y).
-
-    subst.
-    generalize (add_overlap y s t0). intros m'.
-    remember (MSL.M.add y (L.lub s (get_rec y t0)) m').
-    functional induction (get_rec y t1); rewrite MSL.FMF.add_eq_o in e; inv e;
-      try solve [destruct k; auto].
+    repeat intro. simpl. unfold add_overlap.
+    destruct (MSL.M.find k m) as []_eqn.
+    apply MSL.FMF.find_mapsto_iff in Heqo. eapply MSL.M.mapi_1 in Heqo.
+    destruct Heqo as [y [_ MT]].
+    apply MSL.FMF.find_mapsto_iff in MT. rewrite MT.
+    unfold lub_on_overlap. destruct (AbsPR.related_dec x y).
     apply L.ge_lub_right.
-
-    remember (MSL.M.add y (L.lub s (get_rec y t0)) (add_overlap y s t0)).
-    functional induction (get_rec x t1).
-    rewrite MSL.FMF.add_neq_o in e.
-    admit.
-    destruct k, y; repeat (subst; intuition).
-    destruct k; destruct t1; inv e0. rewrite MSL.FMF.add_neq_o in e.
-    admit.
-    destruct y; repeat (subst; intuition).
-    admit.
-
     apply L.ge_refl. apply L.eq_refl.
+    destruct (MSL.M.find k (MSL.M.mapi (lub_on_overlap x s) m)); exact I.
   Qed.
 
-  Theorem get_add_overlap: forall x y s m,
-    AbsPO.overlap x y ->
+  Ltac MSL_simpl :=
+    repeat (unfold not in *; try
+      match goal with
+        | H: MSL.M.find _ _ = Some _ |- _ =>
+          apply MSL.M.FMF.find_mapsto_iff in H
+        | H: MSL.M.find _ _ = None |- _ =>
+          apply MSL.M.FMF.not_find_in_iff in H
+        | H: MSL.M.MapsTo ?x ?s0 (MSL.M.add ?x ?s1 _) |- _ =>
+          apply MSL.M.FMF.add_mapsto_iff in H; simpl in H; intuition; subst;
+            auto
+        | A: MSL.M.MapsTo ?x ?s0 ?m,
+          B: MSL.M.MapsTo ?x ?s1 ?m |- _ =>
+            assert (s0 = s1) by (
+              apply MSL.M.FMF.find_mapsto_iff in A;
+                apply MSL.M.FMF.find_mapsto_iff in B;
+                  rewrite A in B; inversion_clear B; reflexivity
+            ); subst; clear B
+        | A: MSL.M.MapsTo ?x ?s ?m,
+          B: MSL.M.In ?x (MSL.M.add _ _ ?m) -> False |- _ =>
+            elim B; apply MSL.M.FMF.add_in_iff; right; exists s; exact A
+        | A: MSL.M.MapsTo ?x ?s ?m,
+          B: MSL.M.In ?x ?m -> False |- _ =>
+            elim B; exists s; exact A
+        | A: MSL.M.In ?x ?m -> False,
+          B: MSL.M.MapsTo ?x ?s (MSL.M.add ?y _ ?m),
+          C: ?x = ?y -> False |- _ =>
+            apply MSL.M.FMF.add_neq_mapsto_iff in B;
+              [elim A; exists s; exact B | ]
+        | A: MSL.M.MapsTo ?x ?s ?m,
+          B: MSL.M.In ?x (MSL.M.mapi _ ?m) -> False |- _ =>
+            elim B; apply MSL.M.FMF.mapi_in_iff; exists s; exact A
+        | A: MSL.M.In ?x ?m -> False,
+          B: MSL.M.MapsTo ?x ?s (MSL.M.mapi _ ?m) |- _ =>
+            elim A; rewrite <- MSL.M.FMF.mapi_in_iff; exists s; apply B
+      end
+    ).
+
+  Lemma ge_get_rec_add_1: forall x y s m,
+    L.ge s (get_rec y m) ->
+    L.ge (get_rec x (MSL.M.add y s m)) (get_rec x m).
+  Proof.
+    refine (AbsPR.above_ind _ _); intros.
+    remember (MSL.M.add y s m) as m'.
+    functional induction (get_rec x m);
+      functional induction (get_rec k m');
+        MSL_simpl; try solve [apply L.ge_bot]; merge_parents.
+    Case "1".
+    destruct (AbsPR.eq_dec k y).
+    subst. MSL_simpl.
+    functional induction (get_rec y m); MSL_simpl; auto.
+    apply L.ge_refl. apply L.eq_refl.
+    apply MSL.M.FMF.add_neq_mapsto_iff in e0.
+    MSL_simpl. apply L.ge_refl. apply L.eq_refl.
+    destruct y, k; intuition; congruence.
+    Case "2".
+    destruct (AbsPR.eq_dec k y).
+    subst. MSL_simpl.
+    functional induction (get_rec y m); MSL_simpl; merge_parents; auto.
+    MSL_simpl. destruct y, k; intuition; apply n; subst; reflexivity.
+    Case "3".
+    apply H. apply AbsPR.parent_is_above. exact e0. exact H0.
+  Qed.
+
+  Lemma ge_get_rec_add_2: forall x y s m,
+    L.ge s (get_rec x m) ->
+    L.ge (get_rec x (MSL.M.add y s m)) (get_rec x m).
+  Proof.
+    refine (AbsPR.above_ind _ _); intros.
+    remember (MSL.M.add y s m) as m'.
+    functional induction (get_rec x m);
+      functional induction (get_rec k m');
+        MSL_simpl; try solve [apply L.ge_bot]; merge_parents.
+    Case "1".
+    destruct (AbsPR.eq_dec k y).
+    subst. MSL_simpl. apply L.ge_refl. apply L.eq_refl.
+    apply MSL.M.FMF.add_neq_mapsto_iff in e0.
+    MSL_simpl. apply L.ge_refl. apply L.eq_refl.
+    destruct y; intuition.
+    apply n. destruct k. subst. reflexivity. elim H1.
+    apply n. destruct k. elim H1. intuition. subst. reflexivity.
+    Case "2".
+    destruct (AbsPR.eq_dec k y).
+    subst. MSL_simpl.
+    MSL_simpl. destruct y, k; intuition; apply n; subst; reflexivity.
+    Case "3".
+    apply H. apply AbsPR.parent_is_above. exact e0. exact H0.
+  Qed.
+
+  Module HF := HierarchyFacts(AbsPR).
+
+  Lemma In_eq_get_add_overlap: forall x s m,
+    MSL.M.In x m ->
+    L.eq (get_rec x m) (get_rec x (add_overlap x s m)).
+  Proof.
+    refine (AbsPR.above_ind _ _); intros.
+    remember (add_overlap x s m) as m'. unfold add_overlap in Heqm'.
+    functional induction (get_rec x m);
+      functional induction (get_rec k m');
+        MSL_simpl; merge_parents; try contradiction.
+    pose proof MSL.M.FMF.mapi_inv as INV. simpl in INV.
+    specialize (INV _ _ m k s1 (lub_on_overlap k s) e0).
+    destruct INV as [a [y INV]]. intuition. subst. MSL_simpl.
+    unfold lub_on_overlap in *. destruct (AbsPR.related_dec k y).
+    unfold AbsPR.related in r.
+    destruct y, k; intuition; try congruence;
+      subst; exfalso; eapply irreflexivity; eauto.
+    apply L.eq_refl.
+  Qed.
+
+  Theorem get_rec_mapi: forall x f m,
+    (~ MSL.M.In x m
+      /\ (forall y, AbsPR.above y x -> ~ MSL.M.In y m)
+      /\ get_rec x m = L.bot
+      /\ get_rec x (MSL.M.mapi f m) = L.bot
+    ) \/
+    exists y,
+      (x = y \/ AbsPR.above y x) /\
+      get_rec x (MSL.M.mapi f m) = f y (get_rec x m).
+  Proof.
+    refine (AbsPR.above_ind _ _); intros.
+    remember (MSL.M.mapi f m) as m'.
+    functional induction (get_rec x m);
+      functional induction (get_rec k m');
+        MSL_simpl; merge_parents; simpl in *; try discriminate.
+    Case "1".
+    right. exists k. intuition.
+    apply MSL.M.FMF.mapi_inv in e0; destruct e0 as [v [k' INV]]; intuition;
+      subst; simpl in *.
+    destruct k, k'; intuition; subst; MSL_simpl; reflexivity.
+    Case "2".
+    left. intuition.
+    apply AbsPR.no_parent_is_top in e0. subst.
+    elim (HF.not_above_top _ H0).
+    Case "1".
+    clear IHt0 IHt1.
+    specialize (H p0). feed H. auto using AbsPR.parent_is_above.
+    specialize (H f m). intuition.
+    SCase "1".
+    left. intuition.
+    destruct (AbsPR.eq_dec p0 y).
+    SSCase "1".
+    subst. contradiction.
+    SSCase "2".
+    apply H0 with (y := y). eauto using AbsPR.no_lozenge.
+    exact H4.
+    SCase "2".
+    destruct H0 as [y ?]. intuition.
+    SSCase "1".
+    subst. right. exists y. intuition. right. auto using AbsPR.parent_is_above.
+    SSCase "2".
+    right. exists y. intuition. right.
+    eapply transitivity; eauto using AbsPR.parent_is_above.
+  Qed.
+
+  Lemma ge_get_add_overlap: forall x s m,
+    L.ge (L.lub s (get_rec x m)) (get_rec x (add_overlap x s m)).
+  Proof.
+    intros. destruct (MSL.M.FMF.In_dec m x).
+    Case "In".
+    eapply L.ge_trans. apply L.ge_lub_right.
+    apply L.ge_refl. apply In_eq_get_add_overlap. exact i.
+    Case "~In".
+    unfold add_overlap, lub_on_overlap.
+    pose proof get_rec_mapi.
+    specialize (H x
+      (fun (k0 : AbsPR.t) (v : L.t) =>
+        if AbsPR.related_dec x k0 then L.lub s v else v)
+      m).
+    intuition.
+    rewrite H3. apply L.ge_bot.
+    destruct H0. intuition. subst. rewrite H1.
+    destruct (AbsPR.related_dec x0 x0). apply L.ge_refl. apply L.eq_refl.
+    apply L.ge_lub_right.
+    rewrite H1.
+    destruct (AbsPR.related_dec x x0). apply L.ge_refl. apply L.eq_refl.
+    apply L.ge_lub_right.
+  Qed.
+
+  Theorem get_add: forall x y s m, L.ge (get x (add y s m)) (get x m).
+  Proof.
+    intros. destruct m as [m|]; simpl.
+    Case "m <> top".
+    eapply L.ge_trans. apply ge_get_rec_add_1.
+    destruct (MSL.M.FMF.In_dec m y).
+    eapply L.ge_trans. apply L.ge_lub_right.
+    apply L.ge_refl. apply In_eq_get_add_overlap. exact i.
+    apply ge_get_add_overlap.
+    unfold add_overlap.
+    pose proof (get_rec_mapi x (lub_on_overlap y s) m). intuition.
+    rewrite H1. apply L.ge_bot.
+    destruct H0; intuition.
+    subst. rewrite H1. unfold lub_on_overlap.
+    destruct (AbsPR.related_dec y x0). apply L.ge_lub_right.
+    apply L.ge_refl; apply L.eq_refl.
+    rewrite H1. unfold lub_on_overlap.
+    destruct (AbsPR.related_dec y x0). apply L.ge_lub_right.
+    apply L.ge_refl; apply L.eq_refl.
+    apply L.ge_top.
+  Qed.
+
+  Theorem get_add_overlap: forall x y s (m: t),
+    (match m with None => True | Some m' => MSL.M.In AbsPR.top m' end) ->
+    AbsPR.related x y ->
     L.ge (get x (add y s m)) s.
   Proof.
-    intros.
+    intros. destruct m as [m|]; simpl.
+    Case "m <> T".
+    generalize dependent x; refine (AbsPR.above_ind _ _); intros.
+    remember (MSL.M.add y (L.lub s (get_rec y m)) (add_overlap y s m)) as m''.
+    functional induction (get_rec x m''); MSL_simpl.
+    SCase "1".
+    apply MSL.M.FMF.add_neq_mapsto_iff in e.
     admit.
+    destruct y, k.
+
+    eelim irreflexivity.
+    destruct (AbsBHFun.eq_dec t1 t0). subst. intro.
+
+[|crunch_hierarchy].
+    apply MSL.M.FMF.mapi_inv in e. destruct e as [s' [k' e]]. intuition. subst.
+    unfold lub_on_overlap. destruct (AbsPO.overlap_dec y k').
+    apply L.ge_lub_left.
+    destruct k, k'; simpl in *; intuition; subst; crunch_hierarchy.
+    destruct k; try destruct t0; inversion_clear e0.
+    elim e.
+    rewrite MSL.M.FMF.add_in_iff. right. apply MSL.M.FMF.mapi_in_iff. exact H.
+    destruct (AbsPO.eq_dec p y).
+    subst. eapply L.ge_trans.
+    apply (get_add_same y s (Some m)). apply L.ge_refl. apply L.eq_refl.
+    apply H0.
+    apply AbsPO.parent_hierarchy. exact e0.
+    unfold AbsPO.overlap in *. intuition.
+    left. crunch_hierarchy. (* TODO: lemma *)
+    right. crunch_hierarchy. (* TODO: lemma *)
+    apply L.ge_top.
   Qed.
 
   (*
@@ -1147,20 +1384,51 @@ Module AbsPOMap (L: SEMILATTICE_WITH_TOP)
   Proof.
   Admitted.
 
+  Lemma get_rec_bot: forall k,
+    get_rec k MSL.bot = L.bot.
+  Proof.
+    intros. remember MSL.bot as bot.
+    functional induction (get_rec k bot); inv e; auto.
+  Qed.
+
   Theorem get_bot: forall k,
     get k bot = L.bot.
   Proof.
-    intros. simpl. remember MSL.bot.
-    functional induction (get_rec k t0); inv e; auto.
+    apply get_rec_bot.
   Qed.
+
+  Lemma add_overlap_empty: forall k s m,
+    MSL.M.Empty m ->
+    MSL.M.Empty (add_overlap k s m).
+  Proof.
+    intros. repeat intro. apply MSL.M.FMF.mapi_inv in H0.
+    destruct H0 as [k' [v H0]]. intuition. eapply H. apply H3.
+  Qed.
+
+  Lemma get_rec_Madd_same: forall k s m,
+    L.eq (get_rec k (MSL.M.add k s m)) s.
+  Proof.
+    intros.
+    remember (MSL.M.add k s m) as m'.
+    functional induction (get_rec k m'); MSL_simpl.
+    apply L.eq_refl.
+    destruct k; intuition.
+    crunch_hierarchy. elim e. apply MSL.M.FMF.add_in_iff. intuition.
+    elim e. apply MSL.M.FMF.add_in_iff. destruct k; intuition.
+  Qed.
+
+  Opaque get add.
 End AbsPOMap.
 
 Module WFAbsPOMap (L: SEMILATTICE_WITH_TOP)
   <: OMap(AbsPO)(L)
   <: SEMILATTICE_WITH_TOP.
   Module Raw := AbsPOMap(L).
-  Definition well_formed (m: Raw.t) :=
-    forall x y, AbsPO.hierarchy y x -> L.ge (Raw.get y m) (Raw.get x m).
+  Inductive well_formed (m: Raw.t) :=
+  | wf_intro:
+    (forall x y, AbsPO.hierarchy y x -> L.ge (Raw.get y m) (Raw.get x m)) ->
+    (match m with None => True | Some m => Raw.MSL.M.In AbsPO.top m end) ->
+    well_formed m.
   Definition t := { m: Raw.t | well_formed m }.
 
   Definition eq (m: t) (n: t): Prop := Raw.eq (proj1_sig m) (proj1_sig n).
@@ -1178,9 +1446,35 @@ Module WFAbsPOMap (L: SEMILATTICE_WITH_TOP)
   Proof. intros. apply Raw.ge_refl. exact H. Qed.
   Theorem ge_trans: forall m n o, ge m n -> ge n o -> ge m o.
   Proof. intros. eapply Raw.ge_trans; eauto. Qed.
-  Program Definition bot: t := exist _ Raw.bot _.
+  Program Definition bot: t := exist _ (Raw.add AbsPO.top L.bot Raw.bot) _.
   Next Obligation.
-    repeat intro. setoid_rewrite Raw.get_bot. apply L.ge_bot.
+    constructor; intros. simpl. rewrite Raw.get_rec_bot.
+    assert (Raw.MSL.M.Empty (Raw.add_overlap AbsPO.top L.bot Raw.MSL.bot))
+      by (apply Raw.add_overlap_empty; apply Raw.MSL.M.empty_1).
+    generalize dependent (Raw.add_overlap AbsPO.top L.bot Raw.MSL.bot);
+      intros Mbot EMPTY.
+    generalize dependent y. refine (absp_strong_ind _ _ _); intros.
+
+    eapply L.ge_trans.
+    apply L.ge_refl. apply Raw.get_rec_Madd_same.
+
+
+
+
+    unfold Mbot.
+    exact EMPTY.
+    pose proof Raw.get_add_same. specialize (H0 AbsPO.top L.bot (Some Mbot)).
+    simpl in H0.
+
+    remember (Raw.MSL.M.add AbsPO.top (L.lub L.bot L.bot) Mbot) as m;
+    remember AbsPO.top as Ptop;
+    functional induction (Raw.get_rec Ptop m);
+    remember (Raw.MSL.M.add AbsPO.top (L.lub L.bot L.bot) Mbot) as m;
+    remember AbsPO.top as Ptop;
+    functional induction (Raw.get_rec x m).
+    MSL_simpl.
+
+    setoid_rewrite Raw.get_bot. apply L.ge_bot.
   Qed.
   Theorem ge_bot: forall x, ge x bot.
   Proof. intros. apply Raw.ge_bot. Qed.
@@ -1218,11 +1512,53 @@ Module WFAbsPOMap (L: SEMILATTICE_WITH_TOP)
   Proof.
     admit.
   Qed.
-  Theorem get_add_overlap: forall x y s m,
+  Theorem get_add_overlap: forall x y s (m: t),
     AbsPO.overlap x y ->
     L.ge (get x (add y s m)) s.
   Proof.
+    intros. destruct m as [[m|] WF]; simpl.
+    unfold get, add. simpl.
+    apply (Raw.get_add_overlap x y s (Some m)). unfold well_formed in WF.
+    pose proof Raw.get_add_overlap. specialize (H0 x y s (Some m)). simpl in H0. apply H0.
+    Case "m <> top".
+    destruct (AbsPO.eq_dec x y).
+    SCase "x = y".
+    subst. crunch_hierarchy.
+    SCase "x <> y".
+    generalize dependent x; refine (absp_strong_ind _ _ _); intros.
+
+    destruct (AbsPO.eq_dec AbsPO.top y).
+    subst. crunch_hierarchy.
+    unfold add.
+    remember (MSL.M.add y (L.lub s (get_rec y m)) (add_overlap y s m)) as m''.
+    remember AbsPO.top as top.
+    functional induction (get_rec top m''); MSL_simpl.
+    apply MSL.M.FMF.add_neq_mapsto_iff in e; [|crunch_hierarchy].
+    apply MSL.M.FMF.mapi_inv in e. destruct e as [s' [k e]]. intuition. subst.
+    unfold lub_on_overlap. destruct (AbsPO.overlap_dec y k).
+    apply L.ge_lub_left. crunch_hierarchy.
+    admit. (* Problem when the map is empty *)
+    simpl in e0. discriminate.
+
+    remember (MSL.M.add y (L.lub s (get_rec y m)) (add_overlap y s m)) as m''.
+    functional induction (get_rec x m''); MSL_simpl.
+    apply MSL.M.FMF.add_neq_mapsto_iff in e; [|crunch_hierarchy].
+    apply MSL.M.FMF.mapi_inv in e. destruct e as [s' [k' e]]. intuition. subst.
+    unfold lub_on_overlap. destruct (AbsPO.overlap_dec y k').
+    apply L.ge_lub_left.
+    destruct k, k'; simpl in *; intuition; subst; crunch_hierarchy.
+    destruct k; try destruct t0; inversion_clear e0. admit. (* need not empty *)
+
+    destruct (AbsPO.eq_dec p y).
+
+    subst. admit.
+
+    apply H.
+    apply AbsPO.parent_hierarchy. exact e0.
     admit.
+    exact n0.
+
+    apply L.ge_top.
   Qed.
   Theorem get_top: forall k, L.ge (get k top) L.top.
   Proof.
@@ -1287,8 +1623,8 @@ Lemma fold_left_adds_prop:
     P (fold_left f l s0).
 Proof.
   induction l; intros.
-  inv H.
-  inv H. apply H0 in H4. subst.
+  inversion H.
+  inversion_clear H. apply H0 in H3. subst.
   simpl. apply fold_left_preserves_prop; auto.
   eapply IHl; eauto.
 Qed.
@@ -1324,18 +1660,8 @@ Proof.
   eapply fold_left_adds_prop.
   apply PTSet.F.elements_iff. eauto.
   intros. destruct x, y; subst; try (intuition; congruence).
-  simpl. apply PTSet.In_add_same.
-  intros.
-  apply PTSet.In_equiv in H. intuition; apply PTSet.In_equiv.
-  left; destruct y; apply PTSet.F.add_iff; right; auto.
-  right. destruct H0 as [px]. exists px. intuition.
-  apply PTSet.In_equiv in H1. intuition; apply PTSet.In_equiv.
-  left; destruct y; apply PTSet.F.add_iff; right; auto.
-  right. destruct H as [px']. exists px'. intuition.
-  apply PTSet.In_equiv in H2. intuition; apply PTSet.In_equiv.
-  left; destruct y; apply PTSet.F.add_iff; right; auto.
-  exfalso.
-  destruct H as [px'']. intuition. crunch_hierarchy.
+  intros. simpl. apply PTSet.In_add_spec. auto.
+  intros. destruct y; apply PTSet.In_add_spec; auto.
 Qed.
 
 Lemma In_unknown_offset_same_aux:
@@ -1343,20 +1669,18 @@ Lemma In_unknown_offset_same_aux:
     (IN: PTSet.AbsPSet.In p s),
     PTSet.In p (unknown_offset s).
 Proof.
-  intros. apply PTSet.In_equiv. destruct p.
-  left. unfold unknown_offset. rewrite PTSet.AbsPSet.fold_1.
+  intros. destruct p. unfold unknown_offset. rewrite PTSet.AbsPSet.fold_1.
   eapply fold_left_adds_prop.
   apply PTSet.F.elements_iff. eauto.
   intros. destruct x, y; subst; try (intuition; congruence).
-  simpl. intros. apply PTSet.F.add_iff. auto.
-  intros. destruct y; apply PTSet.F.add_iff; right; auto.
-  right. exists (Blk a). intuition. apply PTSet.In_equiv. left.
+  simpl. intros. apply PTSet.In_add_spec. auto.
+  intros. destruct y; apply PTSet.In_add_spec; auto.
   unfold unknown_offset. rewrite PTSet.AbsPSet.fold_1.
   eapply fold_left_adds_prop.
   apply PTSet.F.elements_iff. eauto.
   intros. destruct x, y; subst; try (intuition; congruence).
-  simpl. intros. apply PTSet.F.add_iff. auto.
-  intros. destruct y; apply PTSet.F.add_iff; right; auto.
+  simpl. intros. apply PTSet.In_add_spec. simpl. auto.
+  intros. destruct y; apply PTSet.In_add_spec; auto.
 Qed.
 
 Theorem In_unknown_offset_same:
@@ -1364,31 +1688,16 @@ Theorem In_unknown_offset_same:
     (IN: PTSet.In p s),
     PTSet.In p (unknown_offset s).
 Proof.
-  intros.
-  apply PTSet.In_equiv in IN. intuition.
+  intros. apply PTSet.In_spec in IN. intuition.
   apply In_unknown_offset_same_aux. auto.
-  destruct H as [pp]. intuition. apply PTSet.In_equiv. right. exists pp.
-  intuition.
-  apply PTSet.In_equiv in H1. intuition.
-  apply In_unknown_offset_same_aux. auto.
-  destruct H as [ppp]. intuition. apply PTSet.In_equiv. right. exists ppp.
-  intuition.
-  apply PTSet.In_equiv in H2. intuition.
-  apply In_unknown_offset_same_aux. auto.
-  destruct H as [pppp]. intuition. apply PTSet.In_equiv. right. exists pppp.
-  intuition.
-  apply PTSet.In_equiv in H3. intuition.
-  apply In_unknown_offset_same_aux. auto.
-  destruct H as [ppppp]. intuition.
-  crunch_hierarchy.
+  destruct H as [ax [H IN]].
+  unfold unknown_offset. rewrite PTSet.AbsPSet.fold_1.
+  eapply fold_left_adds_prop.
+  apply PTSet.F.elements_iff. eauto.
+  intros. destruct x, y; subst; try (intuition; congruence).
+  intros. destruct ax; apply PTSet.In_add_spec; auto. crunch_hierarchy.
+  intros. destruct y; apply PTSet.In_add_spec; auto.
 Qed.
-
-(*
-Check MMap.MSL.M.fold.
-=>
-Anomaly: uncaught exception Failure "Cannot print a global reference".
-Please report.
-*)
 
 Definition image_of_ptset (s: PTSet.t) (m: MMap.t): PTSet.t :=
   PTSet.AbsPSet.fold
@@ -1711,18 +2020,21 @@ Lemma In_unknown_offset:
     ,
     (forall o', PTSet.In (Loc b o') (unknown_offset s)).
 Proof.
-  intros. remember (Loc b o) as lb. remember (Loc b o') as lb'.
-  remember (unknown_offset s) as uos.
-  functional induction (PTSet.In lb s); [ | crunch_hierarchy].
-  clear IHP. destruct IN.
-  functional induction (PTSet.In lb' uos); [ | crunch_hierarchy].
-  clear IHP.
-  assert (px = px0) by (crunch_hierarchy; auto); subst.
-  right. destruct px0; inv e. eapply In_unknown_offset_block_of_loc; eauto.
-  functional induction (PTSet.In lb' uos); [ | crunch_hierarchy].
-  clear IHP.
-  assert (px = px0) by (crunch_hierarchy; auto); subst.
-  right. eauto using In_unknown_offset_same.
+  intros. unfold unknown_offset. rewrite PTSet.AbsPSet.fold_1.
+  apply PTSet.In_spec in IN. intuition.
+
+  eapply fold_left_adds_prop.
+  apply PTSet.F.elements_iff. eauto.
+  intros. destruct x, y; subst; try (intuition; congruence).
+  intros. simpl. apply PTSet.In_add_spec. simpl. auto.
+  intros. destruct y; apply PTSet.In_add_spec; auto.
+
+  destruct H as [ax [H IN]].
+  eapply fold_left_adds_prop.
+  apply PTSet.F.elements_iff. eauto.
+  intros. destruct x, y; subst; try (intuition; congruence).
+  intros. destruct ax; apply PTSet.In_add_spec; simpl in *; intuition.
+  intros. destruct y; apply PTSet.In_add_spec; auto.
 Qed.
 
 Lemma In_shift_offset:
@@ -1734,39 +2046,20 @@ Lemma In_shift_offset:
 Proof.
   intros. subst. rewrite Int.add_commut.
   unfold shift_offset. rewrite PTSet.AbsPSet.fold_1.
-  apply PTSet.In_equiv in IN. intuition.
+  apply PTSet.In_spec in IN. intuition.
+
   eapply fold_left_adds_prop.
   apply PTSet.F.elements_iff. eauto.
   intros. destruct x, y; subst; try (intuition; congruence).
-  simpl. apply PTSet.In_add_same.
-  intros. destruct y; apply PTSet.In_add_already; auto.
+  intros. simpl. apply PTSet.In_add_spec. auto.
+  intros. destruct y; apply PTSet.In_add_spec; auto.
 
-  destruct H as [px]. simpl in *. intuition. inv H0.
-  apply PTSet.In_equiv in H1. intuition.
+  destruct H as [ax [H IN]].
   eapply fold_left_adds_prop.
   apply PTSet.F.elements_iff. eauto.
   intros. destruct x, y; subst; try (intuition; congruence).
-  simpl. apply PTSet.In_add_hierarchy. simpl. auto.
-  intros. destruct y; apply PTSet.In_add_already; auto.
-
-  destruct H as [px]. intuition.
-  apply PTSet.In_equiv in H1. intuition.
-  eapply fold_left_adds_prop.
-  apply PTSet.F.elements_iff. eauto.
-  intros. destruct x, y; subst; try (intuition; congruence).
-  intros. destruct px, b; inv H0. apply PTSet.In_add_hierarchy.
-  destruct a; simpl; auto; destruct o0; simpl; auto.
-  intros. destruct y; apply PTSet.In_add_already; auto.
-
-  destruct H as [ppx]. intuition.
-  apply PTSet.In_equiv in H2. intuition.
-  eapply fold_left_adds_prop.
-  apply PTSet.F.elements_iff. eauto.
-  intros. destruct x, y; subst; try (intuition; congruence).
-  intros. crunch_hierarchy; apply PTSet.In_add_hierarchy; simpl; auto.
-  intros. destruct y; apply PTSet.In_add_already; auto.
-
-  destruct H as [pppx]. intuition. exfalso. crunch_hierarchy.
+  intros. destruct ax; apply PTSet.In_add_spec; simpl; auto.
+  intros. destruct y; apply PTSet.In_add_spec; auto.
 Qed.
 
 Lemma unknown_offset_top:
@@ -1784,18 +2077,17 @@ Lemma shift_offset_top:
     ,
     (forall oshift, PTSet.ge (shift_offset s oshift) PTSet.top).
 Proof.
-  repeat intro. pose proof (GETOP _ H) as xIns. clear H.
-  remember (shift_offset s oshift).
-  functional induction (PTSet.In x t);
-    functional induction (PTSet.In x s);
-      merge; intuition.
-  unfold shift_offset. rewrite PTSet.AbsPSet.fold_1.
-  destruct x; inv e. destruct t; inv H0.
+  repeat intro. clear H. unfold shift_offset. rewrite PTSet.AbsPSet.fold_1.
+  pose proof (GETOP (Blk None)) as TOP.
+  feed TOP. apply PTSet.In_top. apply PTSet.In_spec in TOP. intuition.
+
   eapply fold_left_adds_prop.
-  apply PTSet.F.elements_iff. eauto.
-  intros. destruct x, y; subst; try (intuition; congruence).
-  intros. simpl. apply PTSet.F.add_iff. left; auto.
-  intros. simpl. destruct y; apply PTSet.F.add_iff; right; auto.
+  apply PTSet.F.elements_iff. apply H.
+  intros. destruct x0, y; subst; try (intuition; congruence).
+  intros. simpl. apply PTSet.In_add_spec. crunch_hierarchy.
+  intros. destruct y; apply PTSet.In_add_spec; auto.
+
+  destruct H as [ax [H IN]]. crunch_hierarchy.
 Qed.
 
 Lemma In_image_of_ptset:
@@ -1805,69 +2097,19 @@ Lemma In_image_of_ptset:
     PTSet.In y (image_of_ptset s mmap).
 Proof.
   intros. unfold image_of_ptset. rewrite PTSet.AbsPSet.fold_1.
-
-  functional induction (PTSet.In x s); intuition. clear IHP.
-
-  eapply fold_left_adds_prop.
-  apply PTSet.F.elements_iff. eauto.
-  intros. destruct x0, y0; subst; try (intuition; congruence).
-  intros. apply PTSet.ge_lub_left. auto.
-  intros. apply PTSet.ge_lub_right. auto.
-
-  functional induction (PTSet.In px s); intuition; try clear IHP.
-
-  eapply fold_left_adds_prop.
-  apply PTSet.F.elements_iff. eauto.
-  intros. destruct x1, y0; subst; try (intuition; congruence).
-  intros. apply PTSet.ge_lub_left. eapply MMap.ge_get_hierarchy; eauto.
-  crunch_hierarchy.
-  intros. apply PTSet.ge_lub_right. auto.
-
-  functional induction (PTSet.In px s); intuition; try clear IHP.
-
-  eapply fold_left_adds_prop.
-  apply PTSet.F.elements_iff. eauto.
-  intros. destruct x2, y0; subst; try (intuition; congruence).
-  intros. apply PTSet.ge_lub_left. eapply MMap.ge_get_hierarchy; eauto.
-  crunch_hierarchy.
-  intros. apply PTSet.ge_lub_right. auto.
-
-  functional induction (PTSet.In px s); intuition; try clear IHP.
-
-  eapply fold_left_adds_prop.
-  apply PTSet.F.elements_iff. eauto.
-  intros. destruct x3, y0; subst; try (intuition; congruence).
-  intros. apply PTSet.ge_lub_left. eapply MMap.ge_get_hierarchy; eauto.
-  crunch_hierarchy.
-
-  crunch_hierarchy.
-  crunch_hierarchy.
-
-  eapply fold_left_adds_prop.
-  apply PTSet.F.elements_iff. eauto.
-  intros. destruct x3, y0; subst; try (intuition; congruence).
-  intros. apply PTSet.ge_lub_left. eapply MMap.ge_get_hierarchy; eauto.
-  crunch_hierarchy.
-  intros. apply PTSet.ge_lub_right. auto.
-
-  eapply fold_left_adds_prop.
-  apply PTSet.F.elements_iff. eauto.
-  intros. destruct x2, y0; subst; try (intuition; congruence).
-  intros. apply PTSet.ge_lub_left. eapply MMap.ge_get_hierarchy; eauto.
-  crunch_hierarchy.
-  intros. apply PTSet.ge_lub_right. auto.
-
-  eapply fold_left_adds_prop.
-  apply PTSet.F.elements_iff. eauto.
-  intros. destruct x1, y0; subst; try (intuition; congruence).
-  intros. apply PTSet.ge_lub_left. eapply MMap.ge_get_hierarchy; eauto.
-  crunch_hierarchy.
-  intros. apply PTSet.ge_lub_right. auto.
+  apply PTSet.In_spec in H. intuition.
 
   eapply fold_left_adds_prop.
   apply PTSet.F.elements_iff. eauto.
   intros. destruct x0, y0; subst; try (intuition; congruence).
   intros. apply PTSet.ge_lub_left. auto.
+  intros. apply PTSet.ge_lub_right. auto.
+
+  destruct H1 as [ax [H IN]].
+  eapply fold_left_adds_prop.
+  apply PTSet.F.elements_iff. eauto.
+  intros. destruct x0, y0; subst; try (intuition; congruence).
+  intros. apply PTSet.ge_lub_left. eapply MMap.ge_get_hierarchy; eauto.
   intros. apply PTSet.ge_lub_right. auto.
 Qed.
 
@@ -1878,13 +2120,33 @@ Lemma In_add_ptset_to_image:
     ,
     PTSet.In x (MMap.get y (add_ptset_to_image sfrom sto mmap)).
 Proof.
-Admitted.
+  intros. unfold add_ptset_to_image. rewrite PTSet.AbsPSet.fold_1.
+  apply PTSet.In_spec in TO. intuition.
+
+  eapply fold_left_adds_prop.
+  apply PTSet.F.elements_iff. eauto.
+  intros. destruct x0, y0; subst; try (intuition; congruence).
+  intros. apply MMap.get_add_same. auto.
+  intros. apply MMap.get_add. auto.
+
+  destruct H as [ax [H IN]].
+  eapply fold_left_adds_prop.
+  apply PTSet.F.elements_iff. eauto.
+  intros. destruct x0, y0; subst; try (intuition; congruence).
+  intros. apply MMap.get_add_overlap. right. auto. auto.
+  intros. apply MMap.get_add. auto.
+Qed.
 
 Lemma ge_add_ptset_to_image:
   forall mmap s s',
     MMap.ge (add_ptset_to_image s s' mmap) mmap.
 Proof.
-Admitted.
+  intros. unfold add_ptset_to_image. rewrite PTSet.AbsPSet.fold_1.
+
+  eapply fold_left_preserves_prop.
+  apply MMap.ge_refl. apply MMap.eq_refl.
+  intros. eapply MMap.ge_trans; eauto. apply MMap.ge_add.
+Qed.
 
 Lemma addr_image_correct:
   forall ge rs rmap abs addr args b o ab s bsp
