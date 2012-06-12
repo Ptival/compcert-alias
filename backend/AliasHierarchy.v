@@ -103,7 +103,7 @@ Module Type Hierarchy.
 
   Parameter above: @relation t.
 
-  Axiom above_so: StrictOrder above.
+  Declare Instance above_so: StrictOrder above.
 
   Parameter above_dec: forall x y, {above x y} + {~ above x y}.
 
@@ -283,8 +283,10 @@ End HierarchyFacts.
 
 Module Type Relationship.
   Include Hierarchy.
-  Parameter related: t -> t -> Prop.
+  Definition related x y := above x y \/ above y x.
   Axiom related_dec: forall x y, {related x y} + {~ related x y}.
+  Declare Instance related_irrefl: Irreflexive related.
+  Declare Instance related_sym: Symmetric related.
 End Relationship.
 
 Module HtoR (H: Hierarchy) <: Relationship.
@@ -302,5 +304,15 @@ Module HtoR (H: Hierarchy) <: Relationship.
     now left; right.
     right. intro. now inversion H.
   Defined.
+
+  Instance related_irrefl: Irreflexive related.
+  Proof.
+    intuition. repeat intro. destruct H; eapply irreflexivity; eauto.
+  Qed.
+
+  Instance related_sym: Symmetric related.
+  Proof.
+    repeat intro. unfold related in *. intuition.
+  Qed.
 
 End HtoR.

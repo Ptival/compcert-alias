@@ -565,6 +565,24 @@ Module AbsPH := MkHierarchy(AbsPHFun).
 
 Module AbsPR := HtoR(AbsPH).
 
+Module AbsBH := MkHierarchy(AbsBHFun).
+
+Theorem related_spec: forall x y,
+  ~ AbsPR.related x y <->
+  (
+    match x, y with
+    | Loc blx ox, Loc bly oy => ox <> oy
+    | Blk blx, Blk bly
+    | Blk blx, Loc bly _
+    | Loc blx _, Blk bly
+      => ~ AbsBH.above blx bly \/ ~ AbsBH.above bly blx
+    end
+  ).
+Proof.
+  intros.
+  admit. (* TODO *)
+Qed.
+
 Ltac crunch_hierarchy :=
   unfold AbsPR.t, AbsPHFun.t, AbsBHFun.t, AbsPR.related in *;
   simpl in *;
@@ -941,22 +959,22 @@ Module NaiveMergeStrategy (KEY: OrderedType) (VAL: SEMILATTICE)
     forall x x' o1 o2,
       KEY.eq x x' -> f x o1 o2 = f x' o1 o2.
   Proof.
-    auto.
+    reflexivity.
   Qed.
 End NaiveMergeStrategy.
 
-Module RMapMergeStrategy := NaiveMergeStrategy(ROT)(PTSet).
-Module RMapWithoutTop := MapSemiLattice(ROT)(PTSet)(RMapMergeStrategy).
+Module RegMapMergeStrategy := NaiveMergeStrategy(ROT)(PTSet).
+Module RegMapWithoutTop := MapSemiLattice(ROT)(PTSet)(RegMapMergeStrategy).
 
-Module RMap <: SEMILATTICE_WITH_TOP.
-  Module L := SemiLatticeToLattice(RMapWithoutTop).
+Module RegMap <: SEMILATTICE_WITH_TOP.
+  Module L := SemiLatticeToLattice(RegMapWithoutTop).
   Include L.
   (* get should be like find, but wrapping the option type away *)
   Definition get (k: ROT.t) (rmap: t): PTSet.t :=
     match rmap with
     | Top        => PTSet.top
     | Some rmap' =>
-      match RMapWithoutTop.M.find k rmap' with
+      match RegMapWithoutTop.M.find k rmap' with
       | None   => PTSet.bot
       | Some s => s
       end
@@ -966,26 +984,26 @@ Module RMap <: SEMILATTICE_WITH_TOP.
     match rmap with
     | Top        => Top
     | Some rmap' =>
-      Some (RMapWithoutTop.M.add r (PTSet.lub s (get r rmap)) rmap')
+      Some (RegMapWithoutTop.M.add r (PTSet.lub s (get r rmap)) rmap')
     end.
 
   (*Parameter set: ROT.t -> PTSet.t -> t -> t.*)
 
   Theorem get_ge: forall rmap rmap',
     ge rmap rmap' ->
-    (forall k, PTSet.ge (RMap.get k rmap) (RMap.get k rmap')).
+    (forall k, PTSet.ge (RegMap.get k rmap) (RegMap.get k rmap')).
   Proof.
     intros. unfold get. destruct rmap, rmap'; auto with ptset.
     specialize (H k).
-    destruct (RMapWithoutTop.M.find k t0);
-    destruct (RMapWithoutTop.M.find k t1);
+    destruct (RegMapWithoutTop.M.find k t0);
+    destruct (RegMapWithoutTop.M.find k t1);
     auto with ptset.
   Qed.
 
   Theorem get_add_same: forall k v m, PTSet.ge (get k (add k v m)) v.
   Proof.
     intros. destruct m; simpl.
-    rewrite RMapWithoutTop.FMF.add_eq_o.
+    rewrite RegMapWithoutTop.FMF.add_eq_o.
     apply PTSet.ge_lub_left.
     reflexivity.
     apply PTSet.ge_top.
@@ -995,10 +1013,10 @@ Module RMap <: SEMILATTICE_WITH_TOP.
   Proof.
     intros. destruct m; simpl.
     destruct (peq x y).
-    subst. rewrite RMapWithoutTop.FMF.add_eq_o.
+    subst. rewrite RegMapWithoutTop.FMF.add_eq_o.
     apply PTSet.ge_lub_right.
     reflexivity.
-    rewrite RMapWithoutTop.FMF.add_neq_o.
+    rewrite RegMapWithoutTop.FMF.add_neq_o.
     apply PTSet.ge_refl. apply PTSet.eq_refl.
     auto.
     apply PTSet.ge_top.
@@ -1007,13 +1025,13 @@ Module RMap <: SEMILATTICE_WITH_TOP.
   Theorem ge_add: forall k v m, ge (add k v m) m.
   Proof.
     intros. destruct m; simpl; intuition.
-    unfold RMapWithoutTop.ge. intros.
+    unfold RegMapWithoutTop.ge. intros.
     destruct (peq k k0).
-    subst. rewrite RMapWithoutTop.FMF.add_eq_o; [|auto].
-    generalize (RMapWithoutTop.M.find k0 t0); intros s. destruct s; [|auto].
+    subst. rewrite RegMapWithoutTop.FMF.add_eq_o; [|auto].
+    generalize (RegMapWithoutTop.M.find k0 t0); intros s. destruct s; [|auto].
     apply PTSet.ge_lub_right.
-    rewrite RMapWithoutTop.FMF.add_neq_o; [|auto].
-    generalize (RMapWithoutTop.M.find k0 t0); intros s. destruct s; [|auto].
+    rewrite RegMapWithoutTop.FMF.add_neq_o; [|auto].
+    generalize (RegMapWithoutTop.M.find k0 t0); intros s. destruct s; [|auto].
     apply PTSet.ge_refl. apply PTSet.eq_refl.
   Qed.
 
@@ -1023,11 +1041,380 @@ Module RMap <: SEMILATTICE_WITH_TOP.
   Qed.
 
   Global Opaque eq ge bot get add (*set*).
-End RMap.
+End RegMap.
 
+Module MkRelMapAux
+  (R: Relationship)
+  (ROT: OrderedType
+    with Definition t := R.t
+    with Definition eq := @eq R.t
+    with Definition eq_dec := R.eq_dec)
+  (L: SEMILATTICE_WITH_TOP).
+  (* would be <: RelMap(R)(L) but we need Top to be present, cf. MkRelMap *)
+  (* We need a merge strategy to create a map semilattice from keys and image
+     lattice. It defines what to put in the lub of two maps when keys are
+     missing from either side. *)
+  Module MergeStrategy := NaiveMergeStrategy(ROT)(L).
+  Module MSL := MapSemiLattice(ROT)(L)(MergeStrategy).
+  (* The map semilattice does not have a Top. This adds it as an option on
+     the underlying map semilattice type. *)
+  Module LAT := SemiLatticeToLattice(MSL).
+  Include LAT.
+
+  Function get_rec (k: R.t) (m: MSL.t) {measure R.measure k}: L.t :=
+    match MSL.M.find k m with
+    | Some s => s
+    | None   =>
+      match R.parent k with
+      | None   => L.bot
+      | Some p => get_rec p m
+      end
+    end.
+  Proof.
+    intros ???? PARENT. exact (R.parent_measure _ _ PARENT).
+  Qed.
+
+  Definition get (k: R.t) (m: t): L.t :=
+    match m with
+    | Top    => L.top
+    | Some m => get_rec k m
+    end.
+
+  Definition lub_if_related (key: R.t) (val: L.t) (k: R.t) (v: L.t): L.t :=
+    if R.related_dec key k then L.lub val v else v.
+
+  Definition add_if_related key val m :=
+    MSL.M.mapi (lub_if_related key val) m.
+
+  Definition add (k: R.t) (v: L.t) (m: t): t :=
+    match m with
+    | Top    => Top
+    | Some m =>
+      Some (MSL.M.add k (L.lub v (get k (Some m))) (add_if_related k v m))
+    end.
+
+  Lemma get_rec_add_same: forall k s m, L.ge (get_rec k (MSL.M.add k s m)) s.
+  Proof.
+    intros.
+    remember (MSL.M.add k s m) as m'.
+    functional induction (get_rec k m'); rewrite MSL.FMF.add_eq_o in e; inv e;
+      auto; try solve [destruct k; auto].
+    apply L.ge_refl. apply L.eq_refl.
+  Qed.
+
+  Theorem get_add_same: forall k s m, L.ge (get k (add k s m)) s.
+  Proof.
+    intros. destruct m; simpl.
+    eapply L.ge_trans. apply get_rec_add_same. apply L.ge_lub_left.
+    apply L.ge_top.
+  Qed.
+
+  Theorem ge_add_if_related: forall x s m,
+    ge (Some (add_if_related x s m)) (Some m).
+  Proof.
+    repeat intro. simpl. unfold add_if_related.
+    destruct (MSL.M.find k m) as []_eqn.
+    apply MSL.FMF.find_mapsto_iff in Heqo. eapply MSL.M.mapi_1 in Heqo.
+    destruct Heqo as [y [_ MT]].
+    apply MSL.FMF.find_mapsto_iff in MT. rewrite MT.
+    unfold lub_if_related. destruct (R.related_dec x y).
+    apply L.ge_lub_right.
+    apply L.ge_refl. apply L.eq_refl.
+    destruct (MSL.M.find k (MSL.M.mapi (lub_if_related x s) m)); exact I.
+  Qed.
+
+  Ltac MSL_simpl :=
+    repeat (unfold not in *; try
+      match goal with
+        | H: MSL.M.find _ _ = Some _ |- _ =>
+          apply MSL.M.FMF.find_mapsto_iff in H
+        | H: MSL.M.find _ _ = None |- _ =>
+          apply MSL.M.FMF.not_find_in_iff in H
+        | H: MSL.M.MapsTo ?x ?s0 (MSL.M.add ?x ?s1 _) |- _ =>
+          apply MSL.M.FMF.add_mapsto_iff in H; simpl in H; intuition; subst;
+            auto
+        | A: MSL.M.MapsTo ?x ?s0 ?m,
+          B: MSL.M.MapsTo ?x ?s1 ?m |- _ =>
+            assert (s0 = s1) by (
+              apply MSL.M.FMF.find_mapsto_iff in A;
+                apply MSL.M.FMF.find_mapsto_iff in B;
+                  rewrite A in B; inversion_clear B; reflexivity
+            ); subst; clear B
+        | A: MSL.M.MapsTo ?x ?s ?m,
+          B: MSL.M.In ?x (MSL.M.add _ _ ?m) -> False |- _ =>
+            elim B; apply MSL.M.FMF.add_in_iff; right; exists s; exact A
+        | A: MSL.M.MapsTo ?x ?s ?m,
+          B: MSL.M.In ?x ?m -> False |- _ =>
+            elim B; exists s; exact A
+        | A: MSL.M.In ?x ?m -> False,
+          B: MSL.M.MapsTo ?x ?s (MSL.M.add ?y _ ?m),
+          C: ?x = ?y -> False |- _ =>
+            apply MSL.M.FMF.add_neq_mapsto_iff in B;
+              [elim A; exists s; exact B | ]
+        | A: MSL.M.MapsTo ?x ?s ?m,
+          B: MSL.M.In ?x (MSL.M.mapi _ ?m) -> False |- _ =>
+            elim B; apply MSL.M.FMF.mapi_in_iff; exists s; exact A
+        | A: MSL.M.In ?x ?m -> False,
+          B: MSL.M.MapsTo ?x ?s (MSL.M.mapi _ ?m) |- _ =>
+            elim A; rewrite <- MSL.M.FMF.mapi_in_iff; exists s; apply B
+      end
+    ).
+
+  Ltac merge_parents :=
+    repeat (
+      match goal with
+        | H: R.parent ?x = _,
+          G: R.parent ?x = _
+          |- _ => rewrite G in H; inv H
+      end
+    ).
+
+  Lemma ge_get_rec_add_1: forall x y s m,
+    L.ge s (get_rec y m) ->
+    L.ge (get_rec x (MSL.M.add y s m)) (get_rec x m).
+  Proof.
+    refine (R.above_ind _ _); intros.
+    remember (MSL.M.add y s m) as m'.
+    functional induction (get_rec x m);
+      functional induction (get_rec k m');
+        MSL_simpl; try solve [apply L.ge_bot]; merge_parents.
+    Case "1".
+    destruct (R.eq_dec k y).
+    subst. MSL_simpl.
+    functional induction (get_rec y m); MSL_simpl; auto.
+    apply MSL.M.FMF.add_neq_mapsto_iff in e0.
+    MSL_simpl. apply L.ge_refl. apply L.eq_refl. auto.
+    Case "2".
+    destruct (R.eq_dec k y).
+    subst. MSL_simpl.
+    functional induction (get_rec y m); MSL_simpl; merge_parents; auto.
+    MSL_simpl. auto.
+    Case "3".
+    apply H. apply R.parent_is_above. exact e0. exact H0.
+  Qed.
+
+  Lemma ge_get_rec_add_2: forall x y s m,
+    L.ge s (get_rec x m) ->
+    L.ge (get_rec x (MSL.M.add y s m)) (get_rec x m).
+  Proof.
+    refine (R.above_ind _ _); intros.
+    remember (MSL.M.add y s m) as m'.
+    functional induction (get_rec x m);
+      functional induction (get_rec k m');
+        MSL_simpl; try solve [apply L.ge_bot]; merge_parents.
+    Case "1".
+    destruct (R.eq_dec k y).
+    subst. MSL_simpl.
+    apply MSL.M.FMF.add_neq_mapsto_iff in e0.
+    MSL_simpl. apply L.ge_refl. apply L.eq_refl. auto.
+    Case "2".
+    destruct (R.eq_dec k y).
+    subst. MSL_simpl.
+    MSL_simpl. auto.
+    Case "3".
+    apply H. apply R.parent_is_above. exact e0. exact H0.
+  Qed.
+
+  Module HF := HierarchyFacts(R).
+
+  Lemma In_eq_get_add_if_related: forall x s m,
+    MSL.M.In x m ->
+    L.eq (get_rec x m) (get_rec x (add_if_related x s m)).
+  Proof.
+    refine (R.above_ind _ _); intros.
+    remember (add_if_related x s m) as m'. unfold add_if_related in Heqm'.
+    functional induction (get_rec x m);
+      functional induction (get_rec k m');
+        MSL_simpl; merge_parents; try contradiction.
+    pose proof MSL.M.FMF.mapi_inv as INV. simpl in INV.
+    specialize (INV _ _ m k s1 (lub_if_related k s) e0).
+    destruct INV as [a [y INV]]. intuition. subst. MSL_simpl.
+    unfold lub_if_related in *. destruct (R.related_dec k k).
+    now apply irreflexivity in r.
+    apply L.eq_refl.
+  Qed.
+
+  Theorem get_rec_mapi: forall x f m,
+    (~ MSL.M.In x m
+      /\ (forall y, R.above y x -> ~ MSL.M.In y m)
+      /\ get_rec x m = L.bot
+      /\ get_rec x (MSL.M.mapi f m) = L.bot
+    ) \/
+    exists y,
+      (x = y \/ R.above y x) /\
+      get_rec x (MSL.M.mapi f m) = f y (get_rec x m).
+  Proof.
+    refine (R.above_ind _ _); intros.
+    remember (MSL.M.mapi f m) as m'.
+    functional induction (get_rec x m);
+      functional induction (get_rec k m');
+        MSL_simpl; merge_parents; simpl in *; try discriminate.
+    Case "1".
+    right. exists k. intuition.
+    apply MSL.M.FMF.mapi_inv in e0; destruct e0 as [v [k' INV]]; intuition;
+      subst; simpl in *.
+    now MSL_simpl.
+    Case "2".
+    left. intuition.
+    apply R.no_parent_is_top in e0. subst.
+    elim (HF.not_above_top _ H0).
+    Case "1".
+    clear IHt0 IHt1.
+    specialize (H p0). feed H. auto using R.parent_is_above.
+    specialize (H f m). intuition.
+    SCase "1".
+    left. intuition.
+    destruct (R.eq_dec p0 y).
+    SSCase "1".
+    subst. contradiction.
+    SSCase "2".
+    apply H0 with (y := y). eauto using R.no_lozenge.
+    exact H4.
+    SCase "2".
+    destruct H0 as [y ?]. intuition.
+    SSCase "1".
+    subst. right. exists y. intuition. right. auto using R.parent_is_above.
+    SSCase "2".
+    right. exists y. intuition. right.
+    eapply transitivity; eauto using R.parent_is_above.
+  Qed.
+
+  Lemma ge_get_add_related: forall x s m,
+    L.ge (L.lub s (get_rec x m)) (get_rec x (add_if_related x s m)).
+  Proof.
+    intros. destruct (MSL.M.FMF.In_dec m x).
+    Case "In".
+    eapply L.ge_trans. apply L.ge_lub_right.
+    apply L.ge_refl. apply In_eq_get_add_if_related. exact i.
+    Case "~In".
+    unfold add_if_related, lub_if_related.
+    pose proof get_rec_mapi.
+    specialize (H x
+      (fun (k0 : R.t) (v : L.t) =>
+        if R.related_dec x k0 then L.lub s v else v)
+      m).
+    intuition.
+    rewrite H3. apply L.ge_bot.
+    destruct H0. intuition. subst. rewrite H1.
+    destruct (R.related_dec x0 x0). apply L.ge_refl. apply L.eq_refl.
+    apply L.ge_lub_right.
+    rewrite H1.
+    destruct (R.related_dec x x0). apply L.ge_refl. apply L.eq_refl.
+    apply L.ge_lub_right.
+  Qed.
+
+  Theorem get_add: forall x y s m, L.ge (get x (add y s m)) (get x m).
+  Proof.
+    intros. destruct m as [m|]; simpl.
+    Case "m <> top".
+    eapply L.ge_trans. apply ge_get_rec_add_1.
+    destruct (MSL.M.FMF.In_dec m y).
+    eapply L.ge_trans. apply L.ge_lub_right.
+    apply L.ge_refl. apply In_eq_get_add_if_related. exact i.
+    apply ge_get_add_related.
+    unfold add_if_related.
+    pose proof (get_rec_mapi x (lub_if_related y s) m). intuition.
+    rewrite H1. apply L.ge_bot.
+    destruct H0; intuition.
+    subst. rewrite H1. unfold lub_if_related.
+    destruct (R.related_dec y x0). apply L.ge_lub_right.
+    apply L.ge_refl; apply L.eq_refl.
+    rewrite H1. unfold lub_if_related.
+    destruct (R.related_dec y x0). apply L.ge_lub_right.
+    apply L.ge_refl; apply L.eq_refl.
+    apply L.ge_top.
+  Qed.
+
+  Theorem get_add_related: forall x y s (m: t),
+    (match m with None => True | Some m' => MSL.M.In R.top m' end) ->
+    R.related x y ->
+    L.ge (get x (add y s m)) s.
+  Proof.
+    intros ???? TOPIN REL. destruct m as [m|]; simpl.
+    Case "m <> T".
+    generalize dependent x; refine (R.above_ind _ _); intros.
+    remember (MSL.M.add y (L.lub s (get_rec y m)) (add_if_related y s m))
+    as m''.
+    functional induction (get_rec x m''); MSL_simpl.
+    SCase "1".
+    apply MSL.M.FMF.add_neq_mapsto_iff in e.
+    apply MSL.M.FMF.mapi_inv in e. destruct e as [s' [k' e]]. intuition. subst.
+    unfold lub_if_related. destruct (R.related_dec y k).
+    apply L.ge_lub_left.
+    elim n. now apply symmetry.
+    intro. subst. now apply irreflexivity in REL.
+    SCase "2".
+    apply R.no_parent_is_top in e0. subst. elim e.
+    rewrite MSL.M.FMF.add_in_iff. right. apply MSL.M.FMF.mapi_in_iff.
+    assumption.
+    SCase "3".
+    destruct (R.eq_dec y p).
+    subst. intuition. eapply L.ge_trans.
+    apply get_rec_add_same. apply L.ge_lub_left.
+    apply IHt0; auto; intros. apply H; auto.
+    eapply transitivity. apply H0. now apply R.parent_is_above.
+    unfold R.related in *. intuition. left. eapply transitivity.
+    apply R.parent_is_above. apply e0. assumption.
+    pose proof R.no_lozenge as NL. specialize (NL _ _ _ H0 e0 n). auto.
+    apply L.ge_top.
+  Qed.
+
+End MkRelMapAux.
+
+Module MkRelMap
+  (R: Relationship)
+  (ROT: OrderedType
+    with Definition t := R.t
+    with Definition eq := @eq R.t
+    with Definition eq_dec := R.eq_dec)
+  (L: SEMILATTICE_WITH_TOP)
+  <: RelMap(R)(L).
+  Module Raw := MkRelMapAux(R)(ROT)(L).
+
+  Definition has_top (m: Raw.t): Prop :=
+    match m with
+    | None => True
+    | Some m => Raw.MSL.M.In R.top m
+    end.
+
+  Definition t := { x : Raw.t | has_top x }.
+
+  Definition get (k: R.t) (m: t): L.t := Raw.get k (proj1_sig m).
+
+  Program Definition add k v (m: t): t := exist _ (Raw.add k v (proj1_sig m)) _.
+  Next Obligation.
+    destruct m as [m OK]. destruct m; simpl; intuition.
+    simpl in OK. apply Raw.MSL.M.FMF.add_in_iff. right.
+    now apply Raw.MSL.M.FMF.mapi_in_iff.
+  Qed.
+
+  Theorem get_add_same: forall k s m, L.ge (get k (add k s m)) s.
+  Proof.
+    intros. destruct m as [m OK].
+    unfold get, add; simpl; apply Raw.get_add_same.
+  Qed.
+
+  Theorem get_add: forall x y s m, L.ge (get x (add y s m)) (get x m).
+  Proof.
+    intros. destruct m as [m OK].
+    unfold get, add; simpl; apply Raw.get_add.
+  Qed.
+
+  Theorem get_add_related: forall x y s m,
+    R.related x y ->
+    L.ge (get x (add y s m)) s.
+  Proof.
+    intros. destruct m as [m OK].
+    unfold get, add; simpl; apply (Raw.get_add_related _ _ _ _ OK H).
+  Qed.
+
+End MkRelMap.
+
+
+
+(*
 (* Memory *)
-
-Module AbsPOMap (L: SEMILATTICE_WITH_TOP).
+Module AbsPOMap (L: SEMILATTICE_WITH_TOP) <: RelMap(AbsPR)(L).
   Module AbsPOMapMergeStrategy :=
     NaiveMergeStrategy(AbsPOT)(L). (* won't use it anyway *)
   Module MSL := MapSemiLattice(AbsPOT)(L)(AbsPOMapMergeStrategy).
@@ -1053,25 +1440,25 @@ Module AbsPOMap (L: SEMILATTICE_WITH_TOP).
     | Some m => get_rec k m
     end.
 
-  Definition lub_on_overlap (key: AbsPR.t) (val: L.t) (k: AbsPR.t) (v: L.t)
+  Definition lub_if_related (key: AbsPR.t) (val: L.t) (k: AbsPR.t) (v: L.t)
     : L.t :=
     if AbsPR.related_dec key k then L.lub val v else v.
 
-  Definition add_overlap key val m :=
-    MSL.M.mapi (lub_on_overlap key val) m.
+  Definition add_if_related key val m :=
+    MSL.M.mapi (lub_if_related key val) m.
 
   Definition add (k: AbsPR.t) (v: L.t) (m: t): t :=
     match m with
     | Top    => Top
     | Some m =>
-      Some (MSL.M.add k (L.lub v (get k (Some m))) (add_overlap k v m))
+      Some (MSL.M.add k (L.lub v (get k (Some m))) (add_if_related k v m))
     end.
 
   (*Parameter set: AbsPO.t -> L.t -> t -> t.*)
   Theorem get_add_same: forall k s m, L.ge (get k (add k s m)) s.
   Proof.
     intros. destruct m; simpl.
-    generalize (get_rec k t0). generalize (add_overlap k s t0). intros m' s'.
+    generalize (get_rec k t0). generalize (add_if_related k s t0). intros m' s'.
     remember (MSL.M.add k (L.lub s s') m').
     functional induction (get_rec k t1); rewrite MSL.FMF.add_eq_o in e; inv e;
       try solve [destruct k; auto].
@@ -1079,17 +1466,18 @@ Module AbsPOMap (L: SEMILATTICE_WITH_TOP).
     apply L.ge_top.
   Qed.
 
-  Theorem ge_add_overlap: forall x s m, ge (Some (add_overlap x s m)) (Some m).
+  Theorem ge_add_if_related: forall x s m,
+    ge (Some (add_if_related x s m)) (Some m).
   Proof.
-    repeat intro. simpl. unfold add_overlap.
+    repeat intro. simpl. unfold add_if_related.
     destruct (MSL.M.find k m) as []_eqn.
     apply MSL.FMF.find_mapsto_iff in Heqo. eapply MSL.M.mapi_1 in Heqo.
     destruct Heqo as [y [_ MT]].
     apply MSL.FMF.find_mapsto_iff in MT. rewrite MT.
-    unfold lub_on_overlap. destruct (AbsPR.related_dec x y).
+    unfold lub_if_related. destruct (AbsPR.related_dec x y).
     apply L.ge_lub_right.
     apply L.ge_refl. apply L.eq_refl.
-    destruct (MSL.M.find k (MSL.M.mapi (lub_on_overlap x s) m)); exact I.
+    destruct (MSL.M.find k (MSL.M.mapi (lub_if_related x s) m)); exact I.
   Qed.
 
   Ltac MSL_simpl :=
@@ -1182,22 +1570,24 @@ Module AbsPOMap (L: SEMILATTICE_WITH_TOP).
 
   Module HF := HierarchyFacts(AbsPR).
 
-  Lemma In_eq_get_add_overlap: forall x s m,
+  Lemma In_eq_get_add_if_related: forall x s m,
     MSL.M.In x m ->
-    L.eq (get_rec x m) (get_rec x (add_overlap x s m)).
+    L.eq (get_rec x m) (get_rec x (add_if_related x s m)).
   Proof.
     refine (AbsPR.above_ind _ _); intros.
-    remember (add_overlap x s m) as m'. unfold add_overlap in Heqm'.
+    remember (add_if_related x s m) as m'. unfold add_if_related in Heqm'.
     functional induction (get_rec x m);
       functional induction (get_rec k m');
         MSL_simpl; merge_parents; try contradiction.
     pose proof MSL.M.FMF.mapi_inv as INV. simpl in INV.
-    specialize (INV _ _ m k s1 (lub_on_overlap k s) e0).
+    specialize (INV _ _ m k s1 (lub_if_related k s) e0).
     destruct INV as [a [y INV]]. intuition. subst. MSL_simpl.
-    unfold lub_on_overlap in *. destruct (AbsPR.related_dec k y).
+    unfold lub_if_related in *. destruct (AbsPR.related_dec k y).
     unfold AbsPR.related in r.
     destruct y, k; intuition; try congruence;
-      subst; exfalso; eapply irreflexivity; eauto.
+    subst; exfalso;
+    match goal with H: AbsPR.above _ _ |- _ =>
+      now apply irreflexivity in H end.
     apply L.eq_refl.
   Qed.
 
@@ -1246,15 +1636,15 @@ Module AbsPOMap (L: SEMILATTICE_WITH_TOP).
     eapply transitivity; eauto using AbsPR.parent_is_above.
   Qed.
 
-  Lemma ge_get_add_overlap: forall x s m,
-    L.ge (L.lub s (get_rec x m)) (get_rec x (add_overlap x s m)).
+  Lemma ge_get_add_related: forall x s m,
+    L.ge (L.lub s (get_rec x m)) (get_rec x (add_if_related x s m)).
   Proof.
     intros. destruct (MSL.M.FMF.In_dec m x).
     Case "In".
     eapply L.ge_trans. apply L.ge_lub_right.
-    apply L.ge_refl. apply In_eq_get_add_overlap. exact i.
+    apply L.ge_refl. apply In_eq_get_add_if_related. exact i.
     Case "~In".
-    unfold add_overlap, lub_on_overlap.
+    unfold add_if_related, lub_if_related.
     pose proof get_rec_mapi.
     specialize (H x
       (fun (k0 : AbsPR.t) (v : L.t) =>
@@ -1277,22 +1667,27 @@ Module AbsPOMap (L: SEMILATTICE_WITH_TOP).
     eapply L.ge_trans. apply ge_get_rec_add_1.
     destruct (MSL.M.FMF.In_dec m y).
     eapply L.ge_trans. apply L.ge_lub_right.
-    apply L.ge_refl. apply In_eq_get_add_overlap. exact i.
-    apply ge_get_add_overlap.
-    unfold add_overlap.
-    pose proof (get_rec_mapi x (lub_on_overlap y s) m). intuition.
+    apply L.ge_refl. apply In_eq_get_add_if_related. exact i.
+    apply ge_get_add_related.
+    unfold add_if_related.
+    pose proof (get_rec_mapi x (lub_if_related y s) m). intuition.
     rewrite H1. apply L.ge_bot.
     destruct H0; intuition.
-    subst. rewrite H1. unfold lub_on_overlap.
+    subst. rewrite H1. unfold lub_if_related.
     destruct (AbsPR.related_dec y x0). apply L.ge_lub_right.
     apply L.ge_refl; apply L.eq_refl.
-    rewrite H1. unfold lub_on_overlap.
+    rewrite H1. unfold lub_if_related.
     destruct (AbsPR.related_dec y x0). apply L.ge_lub_right.
     apply L.ge_refl; apply L.eq_refl.
     apply L.ge_top.
   Qed.
 
-  Theorem get_add_overlap: forall x y s (m: t),
+  Theorem get_add_related: forall x y s (m: t),
+    AbsPR.related x y ->
+    L.ge (get x (add y s m)) s.
+  Proof. Admitted. (* see below *)
+
+  Theorem get_add_related_aux: forall x y s (m: t),
     (match m with None => True | Some m' => MSL.M.In AbsPR.top m' end) ->
     AbsPR.related x y ->
     L.ge (get x (add y s m)) s.
@@ -1300,17 +1695,50 @@ Module AbsPOMap (L: SEMILATTICE_WITH_TOP).
     intros. destruct m as [m|]; simpl.
     Case "m <> T".
     generalize dependent x; refine (AbsPR.above_ind _ _); intros.
-    remember (MSL.M.add y (L.lub s (get_rec y m)) (add_overlap y s m)) as m''.
+    remember (MSL.M.add y (L.lub s (get_rec y m)) (add_if_related y s m))
+    as m''.
     functional induction (get_rec x m''); MSL_simpl.
     SCase "1".
     apply MSL.M.FMF.add_neq_mapsto_iff in e.
+    apply MSL.M.FMF.mapi_inv in e. destruct e as [s' [k' e]]. intuition. subst.
+    unfold lub_if_related. destruct (AbsPR.related_dec y k').
+    apply L.ge_lub_left.
+    destruct k, k'; simpl in *; intuition; subst; elim n; now apply symmetry.
+    destruct y, k; intuition; subst; now apply irreflexivity in H1.
+    SCase "2".
+    apply AbsPR.no_parent_is_top in e0. subst. elim e.
+    rewrite MSL.M.FMF.add_in_iff. right. apply MSL.M.FMF.mapi_in_iff.
+    assumption.
+    SCase "3".
+    apply IHt0; auto; intros. apply H0; auto.
+    eapply transitivity. apply H2. now apply AbsPR.parent_is_above.
+  Admitted.
+(*
+    TODO.
+    destruct (AbsPO.eq_dec p y).
+    subst. eapply L.ge_trans.
+    apply (get_add_same y s (Some m)). apply L.ge_refl. apply L.eq_refl.
+    apply H0.
+    apply AbsPO.parent_hierarchy. exact e0.
+    unfold AbsPO.overlap in *. intuition.
+
+    unfold add_if_related, lub_if_related in e.
+
+
+    apply MSL.M.FMF.mapi_inv in e.
+
     admit.
-    destruct y, k.
-
-    eelim irreflexivity.
-    destruct (AbsBHFun.eq_dec t1 t0). subst. intro.
-
-[|crunch_hierarchy].
+    destruct y, k; subst; intuition; subst; eapply irreflexivity; eauto.
+    SCase "2".
+    apply AbsPR.no_parent_is_top in e0. subst. elim e.
+    apply MSL.M.FMF.add_in_iff. right. apply MSL.M.FMF.mapi_in_iff. apply H.
+    SCase "3".
+    admit.
+    Case "m = T".
+    apply L.ge_top.
+Qed.
+*)
+(*
     apply MSL.M.FMF.mapi_inv in e. destruct e as [s' [k' e]]. intuition. subst.
     unfold lub_on_overlap. destruct (AbsPO.overlap_dec y k').
     apply L.ge_lub_left.
@@ -1328,7 +1756,7 @@ Module AbsPOMap (L: SEMILATTICE_WITH_TOP).
     right. crunch_hierarchy. (* TODO: lemma *)
     apply L.ge_top.
   Qed.
-
+*)
   (*
   Axiom get_set_same: forall k s m, L.ge (get k (set k s m)) s.
   Axiom get_set_other: forall x y s m, L.ge (get x (set y s m)) (get x m).
@@ -1399,7 +1827,7 @@ Module AbsPOMap (L: SEMILATTICE_WITH_TOP).
 
   Lemma add_overlap_empty: forall k s m,
     MSL.M.Empty m ->
-    MSL.M.Empty (add_overlap k s m).
+    MSL.M.Empty (add_if_related k s m).
   Proof.
     intros. repeat intro. apply MSL.M.FMF.mapi_inv in H0.
     destruct H0 as [k' [v H0]]. intuition. eapply H. apply H3.
@@ -1419,6 +1847,7 @@ Module AbsPOMap (L: SEMILATTICE_WITH_TOP).
 
   Opaque get add.
 End AbsPOMap.
+*)
 
 Module WFAbsPOMap (L: SEMILATTICE_WITH_TOP)
   <: OMap(AbsPO)(L)
