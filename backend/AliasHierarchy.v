@@ -283,12 +283,19 @@ End HierarchyFacts.
 
 Module Type Relationship.
   Include Hierarchy.
-  Definition related x y := above x y \/ above y x.
-  Axiom related_dec: forall x y, {related x y} + {~ related x y}.
-  Declare Instance related_irrefl: Irreflexive related.
-  Declare Instance related_sym: Symmetric related.
+  Axiom overlap x y: t -> t -> Prop.
+  Axiom overlap_dec: forall x y, {overlap x y} + {~ overlap x y}.
+  (*Declare Instance overlap_irrefl: Irreflexive overlap.*)
+  Declare Instance overlap_sym: Symmetric overlap.
+  Axiom above_overlap: forall x y,
+    above x y -> overlap x y.
+  Axiom parent_overlap: forall x y px,
+    overlap x y ->
+    parent x = Some px ->
+    overlap px y.
 End Relationship.
 
+(*
 Module HtoR (H: Hierarchy) <: Relationship.
 
   Include H.
@@ -316,3 +323,4 @@ Module HtoR (H: Hierarchy) <: Relationship.
   Qed.
 
 End HtoR.
+*)
