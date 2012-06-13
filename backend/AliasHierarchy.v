@@ -281,11 +281,11 @@ Module HierarchyFacts(H: Hierarchy).
 
 End HierarchyFacts.
 
-Module Type Relationship.
+Module Type Overlap.
   Include Hierarchy.
-  Axiom overlap x y: t -> t -> Prop.
+  Axiom overlap: t -> t -> Prop.
   Axiom overlap_dec: forall x y, {overlap x y} + {~ overlap x y}.
-  (*Declare Instance overlap_irrefl: Irreflexive overlap.*)
+  Declare Instance overlap_refl: Reflexive overlap.
   Declare Instance overlap_sym: Symmetric overlap.
   Axiom above_overlap: forall x y,
     above x y -> overlap x y.
@@ -293,34 +293,52 @@ Module Type Relationship.
     overlap x y ->
     parent x = Some px ->
     overlap px y.
-End Relationship.
+End Overlap.
 
-(*
-Module HtoR (H: Hierarchy) <: Relationship.
+Module HtoO (H: Hierarchy) <: Overlap.
 
   Include H.
 
-  Definition related x y := above x y \/ above y x.
+  Definition overlap x y := x = y \/ above x y \/ above y x.
 
-  Definition related_dec: forall x y, {related x y} + {~ related x y}.
+  Definition overlap_dec: forall x y, {overlap x y} + {~ overlap x y}.
   Proof.
-    intros.
+    intros. destruct (eq_dec x y).
+    left. now left.
     destruct (above_dec x y).
-    now left; left.
+    left. right. now left.
     destruct (above_dec y x).
-    now left; right.
-    right. intro. now inversion H.
+    left. right. now right.
+    right. intro. inversion H; intuition.
   Defined.
 
-  Instance related_irrefl: Irreflexive related.
+  Instance overlap_refl: Reflexive overlap.
   Proof.
-    intuition. repeat intro. destruct H; eapply irreflexivity; eauto.
+    intro. unfold overlap. intuition.
   Qed.
 
-  Instance related_sym: Symmetric related.
+  Instance overlap_sym: Symmetric overlap.
   Proof.
-    repeat intro. unfold related in *. intuition.
+    repeat intro. unfold overlap in *. intuition.
   Qed.
 
-End HtoR.
-*)
+  Theorem above_overlap: forall x y,
+    above x y -> overlap x y.
+  Proof.
+    intros. unfold overlap. intuition.
+  Qed.
+
+  Theorem parent_overlap: forall x y px,
+    overlap x y ->
+    parent x = Some px ->
+    overlap px y.
+  Proof.
+    intros. unfold overlap in *. intuition.
+    subst. right. left. apply parent_is_above. assumption.
+    right. left. eapply transitivity.
+    apply parent_is_above. apply H0. assumption.
+    destruct (eq_dec y px). intuition.
+    pose proof no_lozenge as NL. specialize (NL _ _ _ H H0 n). intuition.
+  Qed.
+
+End HtoO.
