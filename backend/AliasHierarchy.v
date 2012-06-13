@@ -1,3 +1,4 @@
+Require Import Equalities.
 Require Import Omega.
 Require Import RelationClasses.
 Require Import Relations.
@@ -82,7 +83,7 @@ Module Type HierarchyFun.
 
   Parameter t: Type.
 
-  Parameter eq_dec: forall (x y: t), {eq x y} + {~eq x y}.
+  Parameter eq_dec: forall (x y: t), {x = y} + {x <> y}.
 
   Parameter top: t.
 

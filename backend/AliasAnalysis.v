@@ -124,9 +124,13 @@ Module MapSemiLattice
   (VAL: SEMILATTICE)
   (MGS: MergeStrategy(KEY)(VAL))
   <: SEMILATTICE.
+
   Module M := FMapAVLPlus(KEY).
+
   Module FMF := FMapFacts.WFacts_fun KEY M.
+
   Definition t := M.t VAL.t.
+
   Definition eq (x y: t): Prop :=
     forall k,
       match M.find k x, M.find k y with
@@ -134,22 +138,27 @@ Module MapSemiLattice
       | Some a, Some b => VAL.eq a b
       | _, _           => False
       end.
+
   Theorem eq_refl: forall x, eq x x.
   Proof.
     repeat intro. destruct M.find. apply VAL.eq_refl. auto.
   Qed.
+
   Theorem eq_sym: forall x y, eq x y -> eq y x.
   Proof.
     repeat intro. unalias. specialize (H k).
     destruct M.find; destruct M.find; auto. apply VAL.eq_sym. auto.
   Qed.
+
   Theorem eq_trans: forall x y z, eq x y -> eq y z -> eq x z.
   Proof.
     repeat intro. unalias. specialize (H k). specialize (H0 k).
     destruct M.find; destruct M.find; destruct M.find; auto.
     eapply VAL.eq_trans; eauto. contradiction.
   Qed.
+
   Definition beq: t -> t -> bool := M.equal VAL.beq.
+
   Theorem beq_correct: forall x y, beq x y = true -> eq x y.
   Proof.
     repeat intro. apply M.equal_2 in H. inv H.
@@ -160,6 +169,7 @@ Module MapSemiLattice
     apply FMF.not_find_in_iff in Heqo. elim Heqo. apply H0.
     apply FMF.in_find_iff. congruence.
   Qed.
+
   (* Assuming None is the same as B.bot *)
   Definition ge x y :=
     forall k,
@@ -169,12 +179,14 @@ Module MapSemiLattice
       | Some _, None   => True
       | None,   Some b => VAL.ge VAL.bot b
       end.
+
   Theorem ge_refl: forall x y, eq x y -> ge x y.
   Proof.
     repeat intro. unalias. specialize (H k).
     destruct (M.find k x) as []_eqn; destruct (M.find k y) as []_eqn; auto.
     apply VAL.ge_refl. auto. contradiction.
   Qed.
+
   Theorem ge_trans: forall x y z, ge x y -> ge y z -> ge x z.
   Proof.
     repeat intro. unalias. specialize (H k). specialize (H0 k).
@@ -184,16 +196,22 @@ Module MapSemiLattice
     eapply VAL.ge_trans. apply VAL.ge_bot. auto.
     eapply VAL.ge_trans. eauto. auto.
   Qed.
+
   Definition bot: t := M.empty VAL.t.
+
   Theorem ge_bot: forall x, ge x bot.
   Proof.
     repeat intro.
     destruct (M.find k x) as []_eqn; rewrite FMF.empty_o; auto.
   Qed.
+
   Definition lub (m: t) (n: t): t :=
     M.map2i VAL.t VAL.t VAL.t MGS.f MGS.f_compat m n.
+
   Axiom ge_lub_left: forall x y, ge (lub x y) x.
+
   Axiom ge_lub_right: forall x y, ge (lub x y) y.
+
 End MapSemiLattice.
 
 Module SemiLatticeToLattice (S: SEMILATTICE) <: SEMILATTICE_WITH_TOP.
@@ -702,38 +720,70 @@ Proof.
 Qed.
 *)
 
-Module OptIntOT (OT: OrderedType) <: OrderedType.
+Module Type OrderedTypeLogicEq <: OrderedType.
+
+  Parameter Inline t : Type.
+
+  Definition eq := @eq t.
+  Parameter Inline lt : t -> t -> Prop.
+
+  Axiom eq_refl : forall x : t, eq x x.
+  Axiom eq_sym : forall x y : t, eq x y -> eq y x.
+  Axiom eq_trans : forall x y z : t, eq x y -> eq y z -> eq x z.
+
+  Axiom lt_trans : forall x y z : t, lt x y -> lt y z -> lt x z.
+  Axiom lt_not_eq : forall x y : t, lt x y -> ~ eq x y.
+
+  Parameter compare : forall x y : t, Compare lt eq x y.
+
+  Hint Immediate eq_sym.
+  Hint Resolve eq_refl eq_trans lt_not_eq lt_trans.
+
+  Parameter eq_dec : forall x y, { eq x y } + { ~ eq x y }.
+
+End OrderedTypeLogicEq.
+
+Module OptIntOT (OT: OrderedTypeLogicEq) <: OrderedTypeLogicEq.
 
   Definition t := @optint OT.t.
 
-  Definition eq (x y: t): Prop :=
+  Definition eq := @eq t.
+  (* was:
     match x, y with
     | Blk a,   Blk b   => OT.eq a b
     | Loc a x, Loc b y => OT.eq a b /\ x = y
     | _,       _       => False
     end.
+    *)
 
-  Definition eq_equiv := @eq_equivalence.
-
-  Definition eq_refl: forall (x: t), eq x x.
+  Definition eq_refl: forall (x: t), eq x x := fun x => eq_refl x.
+  (*
   Proof.
-    intros. destruct x. apply OT.eq_refl. split; auto.
+    apply OT.eq_refl. split; auto.
   Defined.
+  *)
 
   Theorem eq_sym: forall x y, eq x y -> eq y x.
   Proof.
-    intros. destruct x, y; simpl in *; intuition; auto.
+    apply eq_sym.
+    (*intros. destruct x, y; simpl in *; intuition; auto.*)
   Qed.
 
   Theorem eq_trans: forall (x y z: t), eq x y -> eq y z -> eq x z.
   Proof.
-    destruct x, y, z; simpl in *; intuition; subst; auto; eapply OT.eq_trans; eauto.
+    apply eq_trans.
+    (*destruct x, y, z; simpl in *; intuition; subst; auto; eapply OT.eq_trans; eauto.*)
   Qed.
 
-  Definition eq_dec : forall x y, {eq x y}+{~eq x y}.
+  Definition eq_dec : forall (x y: t), {x = y} + {x <> y}.
   Proof.
+    unfold eq.
+    destruct x, y; repeat decide equality; auto;
+      try solve [apply OT.eq_dec | apply Int.eq_dec].
+    (*
     unfold eq. destruct x, y; repeat decide equality; auto. apply OT.eq_dec.
     pose proof (OT.eq_dec t0 t1). pose proof (Int.eq_dec i i0). intuition.
+    *)
   Defined.
 
   Definition lt (x y: t) : Prop :=
@@ -762,21 +812,22 @@ Module OptIntOT (OT: OrderedType) <: OrderedType.
 
   Theorem lt_not_eq : forall x y : t, lt x y -> ~ eq x y.
   Proof.
-    destruct x, y; simpl in *; intuition; try solve [eapply OT.lt_not_eq; eauto].
-    subst. unfold Int.lt in *. destruct zlt. omega. congruence.
+    destruct x, y; simpl in *; intuition;
+      try solve [inv H0; eapply OT.lt_not_eq; eauto].
+    inv H. inv H0. unfold Int.lt in *. destruct zlt. omega. congruence.
   Qed.
 
   Definition compare : forall x y : t, Compare lt eq x y.
   Proof.
     intros. unfold lt. destruct x, y.
-    destruct (OT.compare t0 t1). apply LT. auto. apply EQ. auto. apply GT. auto.
+    destruct (OT.compare t0 t1). apply LT. auto. inv e. apply EQ. reflexivity. apply GT. auto.
     apply GT. auto.
     apply LT. auto.
     destruct (OT.compare t0 t1). apply LT. auto.
     destruct (Int.lt i i0) as []_eqn.
     apply LT. right. split. apply e. auto.
     destruct (Int.eq_dec i i0).
-    subst. apply EQ. simpl. auto.
+    inv e. subst. apply EQ. simpl. reflexivity.
     apply GT. right. split. auto. unfold Int.lt in *. repeat (destruct zlt); auto.
     assert (SEQ: Int.signed i = Int.signed i0) by omega.
     apply (f_equal Int.repr) in SEQ. setoid_rewrite Int.repr_signed in SEQ. contradiction.
@@ -837,11 +888,9 @@ Module PTSet
     SCase "1".
     intuition.
     apply F.add_iff in H1. destruct x, y; intuition.
-    subst. now left.
     right. right. functional induction (In (Blk t0) s); auto.
     right. right. functional induction (In (Blk t0) s); auto.
     right. right. functional induction (In (Loc t0 i) s); auto.
-    subst. now left.
     right. right. functional induction (In (Loc t0 i) s); auto.
     specialize (H0 px (AbsPH.parent_is_above _ _ e) H1).
     intuition; subst.
@@ -1142,10 +1191,9 @@ End RegMap.
 
 Module MkOverlapMapAux
   (O: Overlap)
-  (OT: OrderedType
+  (OT: OrderedTypeLogicEq
     with Definition t := O.t
-    with Definition eq := @eq O.t
-    with Definition eq_dec := O.eq_dec)
+  )
   (L: SEMILATTICE_WITH_TOP).
   (* would be <: RelMap(R)(L) but we need Top to be present, cf. MkRelMap *)
   (* We need a merge strategy to create a map semilattice from keys and image
@@ -1282,8 +1330,8 @@ Module MkOverlapMapAux
     destruct (O.eq_dec k y).
     subst. MSL_simpl.
     functional induction (get_rec y m); MSL_simpl; auto.
-    apply MSL.M.FMF.add_neq_mapsto_iff in e0.
-    MSL_simpl. apply L.ge_refl. apply L.eq_refl. auto.
+    apply MSL.M.FMF.add_neq_mapsto_iff in e0; auto.
+    MSL_simpl. apply L.ge_refl. apply L.eq_refl.
     Case "2".
     destruct (O.eq_dec k y).
     subst. MSL_simpl.
@@ -1481,10 +1529,9 @@ End MkOverlapMapAux.
 
 Module MkOverlapMap
   (O: Overlap)
-  (OT: OrderedType
+  (OT: OrderedTypeLogicEq
     with Definition t := O.t
-    with Definition eq := @eq O.t
-    with Definition eq_dec := O.eq_dec)
+  )
   (L: SEMILATTICE_WITH_TOP)
   <: OverlapMap(O)(L).
   Module Raw := MkOverlapMapAux(O)(OT)(L).
@@ -1787,8 +1834,9 @@ End WFAbsPOMap.
 *)
 
 Module MMap <: SEMILATTICE.
-
   Module MMap := MkOverlapMap(AbsPO)(AbsPOT)(PTSet).
+  Include MMap.
+End MMap.
 
 Module MMap <: SEMILATTICE.
   Module WFAPOM := WFAbsPOMap(PTSet).
