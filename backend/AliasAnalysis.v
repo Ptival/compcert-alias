@@ -1533,7 +1533,8 @@ Module MkOverlapMap
     with Definition t := O.t
   )
   (L: SEMILATTICE_WITH_TOP)
-  <: OverlapMap(O)(L).
+  <: OverlapMap(O)(L)
+  <: SEMILATTICE_WITH_TOP.
   Module Raw := MkOverlapMapAux(O)(OT)(L).
 
   Definition has_top (m: Raw.t): Prop :=
@@ -1572,6 +1573,80 @@ Module MkOverlapMap
     intros. destruct m as [m OK].
     unfold get, add; simpl; apply (Raw.get_add_overlap _ _ _ _ OK H).
   Qed.
+
+  (* Now let's make this a semi-lattice: *)
+
+  Definition eq (m: t) (n: t): Prop := Raw.eq (proj1_sig m) (proj1_sig n).
+
+  Theorem eq_refl: forall m, eq m m.
+  Proof. intros. apply Raw.eq_refl. Qed.
+
+  Theorem eq_sym: forall m n, eq m n -> eq n m.
+  Proof. intros. apply Raw.eq_sym. exact H. Qed.
+
+  Theorem eq_trans: forall m n o, eq m n -> eq n o -> eq m o.
+  Proof. intros. eapply Raw.eq_trans; eauto. Qed.
+
+  Definition beq (m: t) (n: t): bool := Raw.beq (proj1_sig m) (proj1_sig n).
+
+  Theorem beq_correct: forall m n, beq m n = true -> eq m n.
+
+  Proof. intros. apply Raw.beq_correct. exact H. Qed.
+  Definition ge (m: t) (n: t): Prop := Raw.ge (proj1_sig m) (proj1_sig n).
+
+  Theorem ge_refl: forall m n, eq m n -> ge m n.
+  Proof. intros. apply Raw.ge_refl. exact H. Qed.
+
+  Theorem ge_trans: forall m n o, ge m n -> ge n o -> ge m o.
+  Proof. intros. eapply Raw.ge_trans; eauto. Qed.
+
+  Program Definition bot: t :=
+    exist _ (Some (Raw.MSL.M.add O.top L.bot (Raw.MSL.M.empty _))) _.
+  Next Obligation.
+    apply Raw.MSL.M.FMF.add_in_iff. auto.
+  Qed.
+
+  Theorem ge_bot: forall x, ge x bot.
+  Proof.
+    intros. unfold ge, bot. destruct x as [m T]. simpl in *.
+    destruct m as [m|]; auto. simpl in *. unfold Raw.MSL.ge.
+    intros k.
+    destruct (Raw.MSL.M.find k (
+      Raw.MSL.M.add O.top L.bot (Raw.MSL.M.empty _))
+    ) as []_eqn.
+    destruct (Raw.MSL.M.find k m) as []_eqn; Raw.MSL_simpl.
+    apply Raw.MSL.M.FMF.add_mapsto_iff in Heqo.
+    intuition; subst.
+    apply L.ge_bot. apply Raw.MSL.M.FMF.empty_mapsto_iff in H1; contradiction.
+    destruct (O.eq_dec k O.top).
+    subst. contradiction.
+    apply Raw.MSL.M.FMF.add_neq_mapsto_iff in Heqo; auto.
+    apply Raw.MSL.M.FMF.empty_mapsto_iff in Heqo; contradiction.
+    destruct (Raw.MSL.M.find k m); auto.
+  Qed.
+
+  Program Definition lub (m: t) (n: t): t := exist _ (Raw.lub m n) _.
+  Next Obligation.
+    repeat intro. destruct m as [m WFm], n as [n WFn]. simpl.
+    destruct m as [m|], n as [n|]; simpl; auto.
+    remember (Raw.MSL.lub m n) as mn.
+    admit.
+  Qed.
+
+  Theorem ge_lub_left: forall x y, ge (lub x y) x.
+  Proof.
+    admit.
+  Qed.
+
+  Theorem ge_lub_right: forall x y, ge (lub x y) y.
+  Proof.
+    admit.
+  Qed.
+
+  Program Definition top: t := exist _ Raw.top _.
+
+  Theorem ge_top: forall m, ge top m.
+  Proof. intros. apply Raw.ge_top. Qed.
 
 End MkOverlapMap.
 
@@ -1833,25 +1908,17 @@ Module WFAbsPOMap (L: SEMILATTICE_WITH_TOP)
 End WFAbsPOMap.
 *)
 
-Module MMap <: SEMILATTICE.
+Module MemMap <: SEMILATTICE.
   Module MMap := MkOverlapMap(AbsPO)(AbsPOT)(PTSet).
   Include MMap.
-End MMap.
-
-Module MMap <: SEMILATTICE.
-  Module WFAPOM := WFAbsPOMap(PTSet).
-  Include WFAPOM.
-  Hint Resolve get_add_same get_add get_add_overlap
-  (*get_set_same get_set_other*)
-    (*get_ge*) get_top get_eq_top: mmap.
-End MMap.
+End MemMap.
 
 (* Result *)
 
 Module Result <: SEMILATTICE.
-  Module R := ProductSemiLattice(RMap)(MMap).
+  Module R := ProductSemiLattice(RegMap)(MemMap).
   Include R.
-  Definition top := (RMap.top, MMap.top).
+  Definition top := (RegMap.top, MemMap.top).
 End Result.
 
 Lemma fold_left_preserves_prop:
@@ -1928,9 +1995,14 @@ Proof.
   eapply fold_left_adds_prop.
   apply PTSet.F.elements_iff. eauto.
   intros. destruct x, y; subst; try (intuition; congruence).
-  simpl. intros. apply PTSet.In_add_spec. simpl. auto.
+  simpl. intros. apply PTSet.In_add_spec. right. left. constructor. now compute.
   intros. destruct y; apply PTSet.In_add_spec; auto.
 Qed.
+
+Theorem not_loc_above: forall b o x,
+  ~ AbsPH.above (Loc b o) x.
+Proof.
+  intros.
 
 Theorem In_unknown_offset_same:
   forall p s
@@ -1944,7 +2016,8 @@ Proof.
   eapply fold_left_adds_prop.
   apply PTSet.F.elements_iff. eauto.
   intros. destruct x, y; subst; try (intuition; congruence).
-  intros. destruct ax; apply PTSet.In_add_spec; auto. crunch_hierarchy.
+  intros. destruct ax; apply PTSet.In_add_spec; auto.
+  exfalso. compute in H. destruct y; inv H. destruct t0; inv H1.
   intros. destruct y; apply PTSet.In_add_spec; auto.
 Qed.
 
