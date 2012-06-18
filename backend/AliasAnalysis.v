@@ -334,7 +334,7 @@ Module AbsBOT <: OrderedType.
   Definition eq_dec : forall x y, {eq x y}+{~eq x y}.
   Proof.
     unfold eq. destruct x, y; repeat decide equality. left. auto.
-  Defined.
+  Qed.
 
   Definition lt (x y: t) : Prop :=
     match x, y with
@@ -388,7 +388,7 @@ Module AbsBOT <: OrderedType.
     pose proof (Pcompare_antisym i i0 Eq). unfold CompOpp in *.
     apply GT; rewrite Heqc in H.
     unfold BinPos.Plt. auto.
-  Defined.
+  Qed.
 
 End AbsBOT.
 
@@ -398,7 +398,7 @@ Module AbsBHFun <: HierarchyFun.
   Definition eq_dec: forall (x y: t), {eq x y} + {~ eq x y}.
   Proof.
     repeat decide equality.
-  Defined.
+  Qed.
 
   Definition top: t := None.
 
@@ -451,31 +451,6 @@ Module AbsBHFun <: HierarchyFun.
     repeat crunch_absb.
   Qed.
 
-(*
-  Definition hierarchy_dec: forall x y, {hierarchy x y} + {~ hierarchy x y}.
-  Proof.
-    intros. crunch_absb.
-  Defined.
-  Theorem top_spec: forall x, x <> top -> hierarchy top x.
-  Proof.
-    destruct x; simpl; intuition.
-  Qed.
-  Theorem parent_measure: forall x px,
-    parent x = Some px -> measure x = S (measure px).
-  Proof.
-    intros. crunch_absb.
-  Qed.
-  Theorem parent_hierarchy: forall x px,
-    parent x = Some px -> hierarchy px x.
-  Proof.
-    intros. crunch_absb.
-  Qed.
-  Theorem hierarchy_trans: forall x y z,
-    hierarchy x y -> hierarchy y z -> hierarchy x z.
-  Proof.
-    intros. crunch_absb.
-  Qed.
-*)
 End AbsBHFun.
 
 Inductive optint {t: Type}: Type :=
@@ -492,7 +467,7 @@ Module OptIntHFun (H: HierarchyFun) <: HierarchyFun.
   Definition eq_dec: forall (x y: t), {eq x y} + {~ eq x y}.
   Proof.
     repeat decide equality; try apply H.eq_dec; apply Int.eq_dec.
-  Defined.
+  Qed.
 
   Definition top: t := Blk H.top.
 
@@ -533,49 +508,6 @@ Module OptIntHFun (H: HierarchyFun) <: HierarchyFun.
     now intuition.
   Qed.
 
-(*
-  Definition hierarchy_dec: forall x y, {hierarchy x y} + {~ hierarchy x y}.
-  Proof.
-    intros. destruct x, y; auto. apply H.hierarchy_dec. destruct (H.eq_dec t0 t1).
-    subst. left. simpl. auto.
-    simpl. destruct (H.hierarchy_dec t0 t1); intuition.
-  Defined.
-
-  Theorem top_spec: forall x, x <> top -> hierarchy top x.
-  Proof.
-    intros. simpl in *. destruct x. unfold top in H.
-    apply H.top_spec. congruence.
-    destruct (H.eq_dec H.top t0). auto. right. apply H.top_spec. auto.
-  Qed.
-
-  Theorem parent_measure: forall x px,
-    parent x = Some px -> measure x = S (measure px).
-  Proof.
-    intros. destruct x; simpl in *. destruct (H.parent t0) as []_eqn; inv H.
-    apply H.parent_measure. auto.
-    inv H. auto.
-  Qed.
-
-  Theorem parent_hierarchy: forall x px,
-    parent x = Some px -> hierarchy px x.
-  Proof.
-    intros.
-    destruct x, px; simpl in *; try destruct (H.parent t0) as []_eqn; inv H.
-    apply H.parent_hierarchy. auto.
-    left; reflexivity.
-    left; reflexivity.
-  Qed.
-
-  Theorem hierarchy_trans: forall x y z,
-    hierarchy x y -> hierarchy y z -> hierarchy x z.
-  Proof.
-    intros.
-    destruct x, y, z; simpl in *; intuition; subst;
-    try right; try solve [eapply H.hierarchy_trans; eauto].
-    exact H.
-  Qed.
-*)
-
 End OptIntHFun.
 
 Module AbsPHFun := OptIntHFun(AbsBHFun).
@@ -603,7 +535,7 @@ Module AbsPO <: Overlap.
     intros.
     destruct x, y; unfold overlap; try solve [apply AbsBO.overlap_dec].
     destruct (Int.eq_dec i i0); destruct (AbsBO.overlap_dec t0 t1); intuition.
-  Defined.
+  Qed.
 
   Instance overlap_refl: Reflexive overlap.
   Proof.
@@ -634,7 +566,7 @@ Module AbsPO <: Overlap.
     subst. auto.
   Qed.
 
-  Theorem above_overlap: forall x y,
+  Theorem above_overlaps: forall x y,
     above x y -> overlap x y.
   Proof.
     intros.
@@ -643,7 +575,7 @@ Module AbsPO <: Overlap.
     destruct x, y; intuition.
   Qed.
 
-  Lemma parent_overlap_aux: forall x y px,
+  Lemma parent_overlaps_aux: forall x y px,
     AbsBO.overlap x y ->
     AbsBHFun.parent x = Some px ->
     AbsBO.overlap px y.
@@ -658,43 +590,21 @@ Module AbsPO <: Overlap.
     intros. unfold AbsBH.is_parent in *. rewrite H2 in H. inv H. auto.
   Qed.
 
-  Theorem parent_overlap: forall x y px,
-    overlap x y ->
+  Theorem parent_overlaps_too: forall x y px,
     parent x = Some px ->
+    overlap x y ->
     overlap px y.
   Proof.
-    intros ??? O P.
+    intros ??? P O.
     destruct x, y; simpl in *; try solve [
       destruct (AbsBHFun.parent t0) as []_eqn; inv P; simpl;
-        eapply parent_overlap_aux; eauto
+        eapply parent_overlaps_aux; eauto
     ].
     destruct px; simpl in *; inv P; intuition.
     destruct px; simpl in *; inv P; intuition.
   Qed.
 
 End AbsPO.
-
-(*
-Module AbsPR := HtoR(AbsPH).
-
-Module AbsBH := MkHierarchy(AbsBHFun).
-
-Theorem related_spec: forall x y,
-  ~ AbsPR.related x y <->
-  (
-    match x, y with
-    | Loc blx ox, Loc bly oy => ox <> oy
-    | Blk blx, Blk bly
-    | Blk blx, Loc bly _
-    | Loc blx _, Blk bly
-      => ~ AbsBH.above blx bly \/ ~ AbsBH.above bly blx
-    end
-  ).
-Proof.
-  intros.
-  admit. (* TODO *)
-Qed.
-*)
 
 Ltac crunch_hierarchy :=
   unfold AbsPO.t, AbsPHFun.t, AbsBHFun.t, AbsPO.overlap in *;
@@ -748,20 +658,8 @@ Module OptIntOT (OT: OrderedTypeLogicEq) <: OrderedTypeLogicEq.
   Definition t := @optint OT.t.
 
   Definition eq := @eq t.
-  (* was:
-    match x, y with
-    | Blk a,   Blk b   => OT.eq a b
-    | Loc a x, Loc b y => OT.eq a b /\ x = y
-    | _,       _       => False
-    end.
-    *)
 
   Definition eq_refl: forall (x: t), eq x x := fun x => eq_refl x.
-  (*
-  Proof.
-    apply OT.eq_refl. split; auto.
-  Defined.
-  *)
 
   Theorem eq_sym: forall x y, eq x y -> eq y x.
   Proof.
@@ -772,7 +670,6 @@ Module OptIntOT (OT: OrderedTypeLogicEq) <: OrderedTypeLogicEq.
   Theorem eq_trans: forall (x y z: t), eq x y -> eq y z -> eq x z.
   Proof.
     apply eq_trans.
-    (*destruct x, y, z; simpl in *; intuition; subst; auto; eapply OT.eq_trans; eauto.*)
   Qed.
 
   Definition eq_dec : forall (x y: t), {x = y} + {x <> y}.
@@ -780,11 +677,7 @@ Module OptIntOT (OT: OrderedTypeLogicEq) <: OrderedTypeLogicEq.
     unfold eq.
     destruct x, y; repeat decide equality; auto;
       try solve [apply OT.eq_dec | apply Int.eq_dec].
-    (*
-    unfold eq. destruct x, y; repeat decide equality; auto. apply OT.eq_dec.
-    pose proof (OT.eq_dec t0 t1). pose proof (Int.eq_dec i i0). intuition.
-    *)
-  Defined.
+  Qed.
 
   Definition lt (x y: t) : Prop :=
     match x, y with
@@ -832,7 +725,7 @@ Module OptIntOT (OT: OrderedTypeLogicEq) <: OrderedTypeLogicEq.
     assert (SEQ: Int.signed i = Int.signed i0) by omega.
     apply (f_equal Int.repr) in SEQ. setoid_rewrite Int.repr_signed in SEQ. contradiction.
     apply GT. auto.
-  Defined.
+  Qed.
 
 End OptIntOT.
 
@@ -990,7 +883,7 @@ Module PTSet
     apply F.mem_iff in Heqb. auto. apply F.not_mem_iff in Heqb. tauto.
     destruct (AbsPSet.mem x s) as []_eqn.
     apply F.mem_iff in Heqb. auto. apply F.not_mem_iff in Heqb. tauto.
-  Defined.
+  Qed.
   Definition bot := AbsPSet.empty.
   Definition eq (s1 s2: t): Prop :=
     forall x, In x s1 <-> In x s2.
@@ -1556,7 +1449,7 @@ Module MkOverlapMapAux
     apply get_rec_add_same. apply L.ge_lub_left.
     apply IHt0; auto; intros. apply H; auto.
     eapply transitivity. apply H0. now apply O.parent_is_above.
-    eapply O.parent_overlap; eauto.
+    eapply O.parent_overlaps_too; eauto.
     apply L.ge_top.
   Qed.
 
@@ -1731,264 +1624,6 @@ Module MkOverlapMap
   Admitted.
 
 End MkOverlapMap.
-
-(*
-  (* Additional lemmas *)
-  (*
-  Theorem get_eq: forall mmap mmap'
-    (EQ: eq mmap mmap')
-    ,
-    (forall k, L.eq (get k mmap) (get k mmap')).
-  Proof.
-    intros.
-    destruct mmap, mmap'; try solve [inv EQ | apply L.eq_refl]; simpl.
-    pose proof (EQ k) as EQk.
-    functional induction (get_rec k t0); rewrite e in EQk.
-    functional induction (get_rec k t1); rewrite e0 in EQk; intuition.
-    functional induction (get_rec k t1); rewrite e1 in EQk.
-    elim EQk. apply L.eq_refl. rewrite e2 in e0; inv e0.
-    pose proof (EQ p) as EQp.
-    functional induction (get_rec k t1); rewrite e1 in EQk.
-    elim EQk. rewrite e2 in e0; inv e0. rewrite e2 in e0; inv e0.
-    functional induction (get_rec p m); rewrite e0 in *;
-    functional induction (get_rec k0 m0); rewrite e3 in *; intuition.
-  Qed.
-  *)
-
-  Theorem get_ge: forall mmap mmap',
-    ge mmap mmap' ->
-    (forall k, L.ge (get k mmap) (get k mmap')).
-  Proof.
-  Admitted.
-
-  Theorem ge_get_top: forall k, L.ge (get k top) L.top.
-  Proof.
-    intros. simpl. apply L.ge_top.
-  Admitted.
-
-  Theorem get_top: forall k,
-    get k top = L.top.
-  Proof.
-    auto.
-  Qed.
-
-  Theorem get_eq_top: forall mmap,
-    eq mmap top ->
-    (forall k, L.ge (get k mmap) L.top).
-  Proof.
-  Admitted.
-
-  Theorem ge_add: forall k v m,
-    ge (add k v m) m.
-  Proof.
-  Admitted.
-
-  Lemma get_rec_bot: forall k,
-    get_rec k MSL.bot = L.bot.
-  Proof.
-    intros. remember MSL.bot as bot.
-    functional induction (get_rec k bot); inv e; auto.
-  Qed.
-
-  Theorem get_bot: forall k,
-    get k bot = L.bot.
-  Proof.
-    apply get_rec_bot.
-  Qed.
-
-  Lemma add_overlap_empty: forall k s m,
-    MSL.M.Empty m ->
-    MSL.M.Empty (add_if_related k s m).
-  Proof.
-    intros. repeat intro. apply MSL.M.FMF.mapi_inv in H0.
-    destruct H0 as [k' [v H0]]. intuition. eapply H. apply H3.
-  Qed.
-
-  Lemma get_rec_Madd_same: forall k s m,
-    L.eq (get_rec k (MSL.M.add k s m)) s.
-  Proof.
-    intros.
-    remember (MSL.M.add k s m) as m'.
-    functional induction (get_rec k m'); MSL_simpl.
-    apply L.eq_refl.
-    destruct k; intuition.
-    crunch_hierarchy. elim e. apply MSL.M.FMF.add_in_iff. intuition.
-    elim e. apply MSL.M.FMF.add_in_iff. destruct k; intuition.
-  Qed.
-
-  Opaque get add.
-End AbsPOMap.
-*)
-(*
-Module WFAbsPOMap (L: SEMILATTICE_WITH_TOP)
-  <: OMap(AbsPO)(L)
-  <: SEMILATTICE_WITH_TOP.
-  Module Raw := AbsPOMap(L).
-  Inductive well_formed (m: Raw.t) :=
-  | wf_intro:
-    (forall x y, AbsPO.hierarchy y x -> L.ge (Raw.get y m) (Raw.get x m)) ->
-    (match m with None => True | Some m => Raw.MSL.M.In AbsPO.top m end) ->
-    well_formed m.
-  Definition t := { m: Raw.t | well_formed m }.
-
-  Definition eq (m: t) (n: t): Prop := Raw.eq (proj1_sig m) (proj1_sig n).
-  Theorem eq_refl: forall m, eq m m.
-  Proof. intros. apply Raw.eq_refl. Qed.
-  Theorem eq_sym: forall m n, eq m n -> eq n m.
-  Proof. intros. apply Raw.eq_sym. exact H. Qed.
-  Theorem eq_trans: forall m n o, eq m n -> eq n o -> eq m o.
-  Proof. intros. eapply Raw.eq_trans; eauto. Qed.
-  Definition beq (m: t) (n: t): bool := Raw.beq (proj1_sig m) (proj1_sig n).
-  Theorem beq_correct: forall m n, beq m n = true -> eq m n.
-  Proof. intros. apply Raw.beq_correct. exact H. Qed.
-  Definition ge (m: t) (n: t): Prop := Raw.ge (proj1_sig m) (proj1_sig n).
-  Theorem ge_refl: forall m n, eq m n -> ge m n.
-  Proof. intros. apply Raw.ge_refl. exact H. Qed.
-  Theorem ge_trans: forall m n o, ge m n -> ge n o -> ge m o.
-  Proof. intros. eapply Raw.ge_trans; eauto. Qed.
-  Program Definition bot: t := exist _ (Raw.add AbsPO.top L.bot Raw.bot) _.
-  Next Obligation.
-    constructor; intros. simpl. rewrite Raw.get_rec_bot.
-    assert (Raw.MSL.M.Empty (Raw.add_overlap AbsPO.top L.bot Raw.MSL.bot))
-      by (apply Raw.add_overlap_empty; apply Raw.MSL.M.empty_1).
-    generalize dependent (Raw.add_overlap AbsPO.top L.bot Raw.MSL.bot);
-      intros Mbot EMPTY.
-    generalize dependent y. refine (absp_strong_ind _ _ _); intros.
-
-    eapply L.ge_trans.
-    apply L.ge_refl. apply Raw.get_rec_Madd_same.
-
-
-
-
-    unfold Mbot.
-    exact EMPTY.
-    pose proof Raw.get_add_same. specialize (H0 AbsPO.top L.bot (Some Mbot)).
-    simpl in H0.
-
-    remember (Raw.MSL.M.add AbsPO.top (L.lub L.bot L.bot) Mbot) as m;
-    remember AbsPO.top as Ptop;
-    functional induction (Raw.get_rec Ptop m);
-    remember (Raw.MSL.M.add AbsPO.top (L.lub L.bot L.bot) Mbot) as m;
-    remember AbsPO.top as Ptop;
-    functional induction (Raw.get_rec x m).
-    MSL_simpl.
-
-    setoid_rewrite Raw.get_bot. apply L.ge_bot.
-  Qed.
-  Theorem ge_bot: forall x, ge x bot.
-  Proof. intros. apply Raw.ge_bot. Qed.
-  Program Definition lub (m: t) (n: t): t := exist _ (Raw.lub m n) _.
-  Next Obligation.
-    repeat intro. destruct m as [m WFm], n as [n WFn]. simpl.
-    destruct m as [m|], n as [n|]; try solve [apply L.ge_top]; simpl.
-    remember (Raw.MSL.lub m n) as mn.
-    admit.
-  Qed.
-  Theorem ge_lub_left: forall x y, ge (lub x y) x.
-  Proof.
-    admit.
-  Qed.
-  Theorem ge_lub_right: forall x y, ge (lub x y) y.
-  Proof.
-    admit.
-  Qed.
-  Program Definition top: t := exist _ Raw.top _.
-  Next Obligation.
-    repeat intro. setoid_rewrite Raw.get_top. apply L.ge_top.
-  Qed.
-  Theorem ge_top: forall m, ge top m.
-  Proof. intros. apply Raw.ge_top. Qed.
-  Definition get k (m: t): L.t := Raw.get k (proj1_sig m).
-  Program Definition add k v (m: t): t := exist _ (Raw.add k v (proj1_sig m)) _.
-  Next Obligation.
-    repeat intro. admit.
-  Qed.
-  Theorem get_add_same: forall k s m, L.ge (get k (add k s m)) s.
-  Proof.
-    admit.
-  Qed.
-  Theorem get_add: forall x y s m, L.ge (get x (add y s m)) (get x m).
-  Proof.
-    admit.
-  Qed.
-  Theorem get_add_overlap: forall x y s (m: t),
-    AbsPO.overlap x y ->
-    L.ge (get x (add y s m)) s.
-  Proof.
-    intros. destruct m as [[m|] WF]; simpl.
-    unfold get, add. simpl.
-    apply (Raw.get_add_overlap x y s (Some m)). unfold well_formed in WF.
-    pose proof Raw.get_add_overlap. specialize (H0 x y s (Some m)). simpl in H0. apply H0.
-    Case "m <> top".
-    destruct (AbsPO.eq_dec x y).
-    SCase "x = y".
-    subst. crunch_hierarchy.
-    SCase "x <> y".
-    generalize dependent x; refine (absp_strong_ind _ _ _); intros.
-
-    destruct (AbsPO.eq_dec AbsPO.top y).
-    subst. crunch_hierarchy.
-    unfold add.
-    remember (MSL.M.add y (L.lub s (get_rec y m)) (add_overlap y s m)) as m''.
-    remember AbsPO.top as top.
-    functional induction (get_rec top m''); MSL_simpl.
-    apply MSL.M.FMF.add_neq_mapsto_iff in e; [|crunch_hierarchy].
-    apply MSL.M.FMF.mapi_inv in e. destruct e as [s' [k e]]. intuition. subst.
-    unfold lub_on_overlap. destruct (AbsPO.overlap_dec y k).
-    apply L.ge_lub_left. crunch_hierarchy.
-    admit. (* Problem when the map is empty *)
-    simpl in e0. discriminate.
-
-    remember (MSL.M.add y (L.lub s (get_rec y m)) (add_overlap y s m)) as m''.
-    functional induction (get_rec x m''); MSL_simpl.
-    apply MSL.M.FMF.add_neq_mapsto_iff in e; [|crunch_hierarchy].
-    apply MSL.M.FMF.mapi_inv in e. destruct e as [s' [k' e]]. intuition. subst.
-    unfold lub_on_overlap. destruct (AbsPO.overlap_dec y k').
-    apply L.ge_lub_left.
-    destruct k, k'; simpl in *; intuition; subst; crunch_hierarchy.
-    destruct k; try destruct t0; inversion_clear e0. admit. (* need not empty *)
-
-    destruct (AbsPO.eq_dec p y).
-
-    subst. admit.
-
-    apply H.
-    apply AbsPO.parent_hierarchy. exact e0.
-    admit.
-    exact n0.
-
-    apply L.ge_top.
-  Qed.
-  Theorem get_top: forall k, L.ge (get k top) L.top.
-  Proof.
-    admit.
-  Qed.
-  Theorem get_eq_top: forall mmap,
-    eq mmap top ->
-    (forall k, L.ge (get k mmap) L.top).
-  Proof.
-    admit.
-  Qed.
-  Theorem get_ge: forall mmap mmap',
-    ge mmap mmap' ->
-    (forall k, L.ge (get k mmap) (get k mmap')).
-  Proof.
-  Admitted.
-  Theorem ge_add: forall k v m,
-    ge (add k v m) m.
-  Proof.
-  Admitted.
-  Theorem ge_get_hierarchy: forall x y m,
-    AbsPO.hierarchy x y ->
-    L.ge (get x m) (get y m).
-  Proof.
-    intros. unfold get. destruct m. simpl. apply w. exact H.
-  Qed.
-
-  Global Opaque eq ge bot get add (*set*) top.
-End WFAbsPOMap.
-*)
 
 Module MemMap <: SEMILATTICE.
   Module MemMap := MkOverlapMap(AbsPO)(AbsPOT)(PTSet).
@@ -2566,7 +2201,7 @@ Proof.
   apply PTSet.F.elements_iff. eauto.
   intros. destruct x0, y0; subst; try (intuition; congruence).
   intros. apply MemMap.get_add_overlap; auto.
-  apply symmetry. now apply AbsPO.above_overlap.
+  apply symmetry. now apply AbsPO.above_overlaps.
   intros. apply MemMap.get_add. auto.
 Qed.
 
@@ -2819,7 +2454,9 @@ Proof.
   eapply Genv.find_invert_symbol in FIND. unfold ge. rewrite FIND. auto.
   eapply Genv.find_symbol_not_fresh in FIND; eauto. contradiction.
 Qed.
+
 Set Undo 9000.
+
 Theorem satisfy_step:
   forall ge st t st' abs
     (SAT:  satisfy ge abs st)
@@ -3787,7 +3424,7 @@ Proof.
       [compute; auto | apply PTSet.In_top]]
     ].
   apply MemMap.get_add_overlap. apply AbsPO.overlap_sym.
-  apply AbsPO.above_overlap. eright; [|left; compute; reflexivity].
+  apply AbsPO.above_overlaps. eright; [|left; compute; reflexivity].
   left; compute; reflexivity.
   apply PTSet.In_top.
 
@@ -3801,7 +3438,7 @@ Proof.
       [compute; auto | apply PTSet.In_top]]
     ].
   apply MemMap.get_add_overlap. apply AbsPO.overlap_sym.
-  apply AbsPO.above_overlap. eright; [|left; compute; reflexivity].
+  apply AbsPO.above_overlaps. eright; [|left; compute; reflexivity].
   left; compute; reflexivity.
   apply PTSet.In_top.
   SSSSSSSCase "abs b0 = None".
@@ -3812,7 +3449,7 @@ Proof.
       [apply MemMap.get_add | apply MemMap.get_add_overlap; compute; auto]]
     ].
   apply MemMap.get_add_overlap. apply AbsPO.overlap_sym.
-  apply AbsPO.above_overlap.
+  apply AbsPO.above_overlaps.
   eright; [|left; compute; reflexivity].
   left; compute; reflexivity.
   SSSSSCase "abs b = None".
@@ -3939,4 +3576,81 @@ Proof.
   destruct (zlt b0 (Mem.nextblock m0));
   apply MemMap.get_eq_top; auto with ptset.
   apply load_valid_block in LOAD. congruence.
+Qed.
+
+Definition disjoint (x y: PTSet.t) :=
+  forall a b,
+    PTSet.In a x -> PTSet.In b y -> ~ AbsPO.overlap a b.
+
+Theorem conclusion: forall
+  ge abs cs f sp pc rs m
+  (SAT: satisfy ge abs (State cs f sp pc rs m))
+  rmap mmap (RES: (safe_funanalysis f)#pc = (rmap, mmap))
+  r1 r2 (DISJ: disjoint (RegMap.get r1 rmap) (RegMap.get r2 rmap))
+  b1 o1 (R1: rs # r1 = Vptr b1 o1)
+  b2 o2 (R2: rs # r2 = Vptr b2 o2)
+  ,
+  Vptr b1 o1 <> Vptr b2 o2.
+Proof.
+  repeat intro. inv H. inv SAT. inv RES0. rewrite RPC in RES. inv RES.
+  pose proof (RSAT r1) as Sr1. pose proof (RSAT r2) as Sr2.
+  unfold regsat, valsat in Sr1, Sr2.
+  rewrite R1 in Sr1. rewrite R2 in Sr2.
+  destruct (abs b2).
+
+  elim (DISJ (Loc a o2) (Loc a o2)); auto. apply reflexivity.
+
+  elim (DISJ AbsPH.top AbsPH.top); auto using PTSet.In_top. apply reflexivity.
+Qed.
+
+Definition disjoint_dec_bool (a b: PTSet.t): bool :=
+  PTSet.AbsPSet.for_all
+  (fun x =>
+    PTSet.AbsPSet.for_all
+    (fun y =>
+      negb (AbsPO.overlap_dec x y)
+    )
+    b
+  )
+  a.
+
+Module Facts := OverlapFacts(AbsPO).
+
+Theorem disjoint_dec_bool_spec: forall a b,
+  disjoint_dec_bool a b = true -> disjoint a b.
+Proof.
+  intros a b DISJ x y INx INy OVER.
+  apply PTSet.F.for_all_iff in DISJ.
+  apply PTSet.In_spec in INx; destruct INx as [INx | [ax [Ax INax]]].
+  Case "x is really in a".
+  specialize (DISJ x INx). simpl in DISJ.
+  apply PTSet.In_spec in INy; destruct INy as [INy | [ay [Ay INay]]].
+  SCase "y is really in b".
+  apply PTSet.F.for_all_iff in DISJ; auto.
+  specialize (DISJ y INy). simpl in DISJ.
+  destruct (AbsPO.overlap_dec x y). inv DISJ. contradiction.
+  repeat intro. subst. reflexivity.
+  SCase "y has an ancestor in b".
+  apply PTSet.F.for_all_iff in DISJ; auto.
+  specialize (DISJ ay INay). simpl in DISJ.
+  destruct (AbsPO.overlap_dec x ay). inv DISJ. elim n.
+  symmetry. eapply Facts.above_overlaps_too; eauto. now symmetry.
+  repeat intro. subst. reflexivity.
+  Case "x has an ancestor in a".
+  specialize (DISJ ax INax). simpl in DISJ.
+  apply PTSet.In_spec in INy; destruct INy as [INy | [ay [Ay INay]]].
+  SCase "y is really in b".
+  apply PTSet.F.for_all_iff in DISJ; auto.
+  specialize (DISJ y INy). simpl in DISJ.
+  destruct (AbsPO.overlap_dec ax y). inv DISJ.
+  elim n. eapply Facts.above_overlaps_too; eauto.
+  repeat intro. subst. reflexivity.
+  SCase "y has an ancestor in b".
+  apply PTSet.F.for_all_iff in DISJ; auto.
+  specialize (DISJ ay INay). simpl in DISJ.
+  destruct (AbsPO.overlap_dec ax ay). inv DISJ. elim n.
+  eapply Facts.above_overlaps_too; eauto. symmetry.
+  eapply Facts.above_overlaps_too; eauto. now symmetry.
+  repeat intro. subst. reflexivity.
+  repeat intro. subst. reflexivity.
 Qed.

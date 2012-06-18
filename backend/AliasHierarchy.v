@@ -246,55 +246,82 @@ End MkHierarchy.
 
 Module HierarchyFacts(H: Hierarchy).
 
-  Include H.
-
-  Theorem parent_top_is_none: parent top = None.
+  Theorem parent_top_is_none: H.parent H.top = None.
   Proof.
-    now apply (no_parent_is_top top).
+    now apply (H.no_parent_is_top H.top).
   Qed.
 
-  Instance above_so_instance: StrictOrder above := above_so.
-
-  Theorem not_above_top: forall x, ~ above x top.
+  Theorem not_above_top: forall x, ~ H.above x H.top.
   Proof.
     intros x H.
-    destruct (eq_dec x top).
-    subst. now destruct irreflexivity with (x := top).
-    destruct (top_above top) as [H' _].
+    destruct (H.eq_dec x H.top).
+    subst. now destruct irreflexivity with (x := H.top).
+    destruct (H.top_above H.top) as [H' _].
     specialize (H' (eq_refl _) _ n).
-    assert (above x x) by (eapply transitivity; eauto).
+    assert (H.above x x) by (eapply transitivity; eauto).
     now destruct irreflexivity with (x := x).
   Qed.
 
   Theorem above_measure: forall x ax,
-    above ax x -> measure ax < measure x.
+    H.above ax x -> H.measure ax < H.measure x.
   Proof.
-    refine (above_ind _ _). intros x IH ax ABOVE.
-    destruct (parent x) as [px|]_eqn.
-    destruct (eq_dec ax px).
-    subst. now apply parent_measure.
-    apply transitivity with (y := measure px).
-    apply IH. now apply parent_is_above.
-    exact (no_lozenge _ _ _ ABOVE Heqo n).
-    now apply parent_measure.
-    apply no_parent_is_top in Heqo. subst. elim (not_above_top _ ABOVE).
+    refine (H.above_ind _ _). intros x IH ax ABOVE.
+    destruct (H.parent x) as [px|]_eqn.
+    destruct (H.eq_dec ax px).
+    subst. now apply H.parent_measure.
+    apply transitivity with (y := H.measure px).
+    apply IH. now apply H.parent_is_above.
+    exact (H.no_lozenge _ _ _ ABOVE Heqo n).
+    now apply H.parent_measure.
+    apply H.no_parent_is_top in Heqo. subst. elim (not_above_top _ ABOVE).
   Qed.
 
 End HierarchyFacts.
 
 Module Type Overlap.
+
   Include Hierarchy.
+
   Axiom overlap: t -> t -> Prop.
+
   Axiom overlap_dec: forall x y, {overlap x y} + {~ overlap x y}.
+
   Declare Instance overlap_refl: Reflexive overlap.
+
   Declare Instance overlap_sym: Symmetric overlap.
-  Axiom above_overlap: forall x y,
+
+  Axiom above_overlaps: forall x y,
     above x y -> overlap x y.
-  Axiom parent_overlap: forall x y px,
-    overlap x y ->
+
+  Axiom parent_overlaps_too: forall x y px,
     parent x = Some px ->
+    overlap x y ->
     overlap px y.
+
 End Overlap.
+
+Module OverlapFacts (O: Overlap).
+
+  Module Facts := HierarchyFacts(O).
+
+  Theorem above_overlaps_too: forall x ax y,
+    O.above ax x ->
+    O.overlap x y ->
+    O.overlap ax y.
+  Proof.
+    refine (O.above_ind _ _). intros ? IND ?? A O.
+    destruct (O.parent x) as []_eqn.
+    destruct (O.eq_dec ax t).
+    subst.
+    eapply O.parent_overlaps_too; eauto.
+    apply IND with (y := t).
+    now apply O.parent_is_above.
+    eapply O.no_lozenge; eauto.
+    eapply O.parent_overlaps_too; eauto.
+    apply O.no_parent_is_top in Heqo. subst. elim (Facts.not_above_top _ A).
+  Qed.
+
+End OverlapFacts.
 
 Module HtoO (H: Hierarchy) <: Overlap.
 
@@ -323,23 +350,23 @@ Module HtoO (H: Hierarchy) <: Overlap.
     repeat intro. unfold overlap in *. intuition.
   Qed.
 
-  Theorem above_overlap: forall x y,
+  Theorem above_overlaps: forall x y,
     above x y -> overlap x y.
   Proof.
     intros. unfold overlap. intuition.
   Qed.
 
-  Theorem parent_overlap: forall x y px,
-    overlap x y ->
+  Theorem parent_overlaps_too: forall x y px,
     parent x = Some px ->
+    overlap x y ->
     overlap px y.
   Proof.
-    intros. unfold overlap in *. intuition.
+    intros ??? P O. unfold overlap in *. destruct O as [O|[O|O]].
     subst. right. left. apply parent_is_above. assumption.
     right. left. eapply transitivity.
-    apply parent_is_above. apply H0. assumption.
+    apply parent_is_above. apply P. assumption.
     destruct (eq_dec y px). intuition.
-    pose proof no_lozenge as NL. specialize (NL _ _ _ H H0 n). intuition.
+    pose proof no_lozenge as NL. specialize (NL _ _ _ O P n). intuition.
   Qed.
 
 End HtoO.
