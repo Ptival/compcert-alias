@@ -61,12 +61,12 @@ let string_of_ptset s =
   then "⊥"
   else string_of_set PTSet.AbsPSet.fold string_of_absp s
 
-let string_of_rmap (rmap: RMap.t) =
+let string_of_rmap (rmap: RegMap.t) =
   match rmap with
   | None -> "⊤"
   | Some rmap' ->
       "{"
-      ^ RMapWithoutTop.M.fold
+      ^ RegMapWithoutTop.M.fold
         (fun k v accu ->
           if PTSet.beq v PTSet.bot
           then accu
@@ -78,12 +78,12 @@ let string_of_rmap (rmap: RMap.t) =
         ""
       ^ "}"
 
-let string_of_mmap (mmap: MMap.t) =
+let string_of_mmap (mmap: MemMap.t) =
   match mmap with
   | None -> "⊤"
   | Some mmap' ->
       "{"
-      ^ MMap.Raw.MSL.M.fold
+      ^ MemMap.Raw.MSL.M.fold
         (fun k v accu ->
           (if accu = "" then "" else accu ^ ", ")
           ^ string_of_absp k ^ " -> " ^ string_of_ptset v

@@ -46,11 +46,7 @@ let alias_analysis fd =
   match fd with
   | Internal f ->
       if print then print_endline ("--------------------");
-      let res = funanalysis f in
-      begin match res with
-      | None            -> print_endline "KILDALL FAILED"
-      | Some (_, ptree) ->
-          let _ = sorted_biprint (fn_code f) ptree in
-          ()
-      end
+      let (_, ptree) = safe_funanalysis f in
+      let _ = sorted_biprint (fn_code f) ptree in
+      ()
   | External _ -> ()

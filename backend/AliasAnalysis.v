@@ -841,6 +841,9 @@ Module PTSet
   Proof.
     split.
     Case "->".
+
+    (*revert x. refine (AbsPO.above_ind _ _); intros x IND IN.*)
+
     intros.
     apply In_spec_aux in H. intuition. destruct H0 as [px [P H]].
     right.
@@ -2454,8 +2457,6 @@ Proof.
   eapply Genv.find_invert_symbol in FIND. unfold ge. rewrite FIND. auto.
   eapply Genv.find_symbol_not_fresh in FIND; eauto. contradiction.
 Qed.
-
-Set Undo 9000.
 
 Theorem satisfy_step:
   forall ge st t st' abs
