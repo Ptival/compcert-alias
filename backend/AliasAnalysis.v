@@ -1213,38 +1213,182 @@ Module MkOverlapMapAux
       end
     ).
 
+  Lemma eq_get_add_same: forall k v mtop m,
+    mtop = Some m ->
+    get k (add k v mtop) = L.lub v (get_rec k m).
+  Proof.
+    intros. destruct mtop; inv H; simpl.
+    remember (MSL.M.add k (L.lub v (get_rec k m)) (add_if_overlap k v m)) as m'.
+    functional induction (get_rec k m'); MSL_simpl; elim e;
+      apply MSL.M.FMF.add_in_iff; auto.
+  Qed.
+
+  Lemma mapsto_get_rec: forall k v m,
+    MSL.M.MapsTo k v m ->
+    get_rec k m = v.
+  Proof.
+    intros. functional induction (get_rec k m); MSL_simpl. auto.
+  Qed.
+
+  Lemma eq_get_rec_parent: forall k p m,
+    ~ MSL.M.In k m ->
+    O.parent k = Some p ->
+    get_rec k m = get_rec p m.
+  Proof.
+    intros ? ? ? NIN P.
+    now functional induction (get_rec k m); MSL_simpl; merge_parents.
+  Qed.
+
+(*
+  Lemma eq_get_add_diff: forall x px k v mtop m,
+    mtop = Some m ->
+    x <> k ->
+    O.parent x = Some px ->
+    get x (add k v mtop) = get px (add k v mtop).
+  Proof.
+    intros. destruct mtop; inv H; simpl.
+    remember (MSL.M.add k (L.lub v (get_rec k m)) (add_if_overlap k v m)) as m';
+    functional induction (get_rec x m');
+    remember (MSL.M.add k (L.lub v (get_rec k m)) (add_if_overlap k v m)) as m';
+    functional induction (get_rec px m');
+    MSL_simpl.
+    elim H0.
+    simpl in e.
+      apply MSL.M.FMF.add_in_iff; auto.
+  Qed.
+*)
+
+  Module OF := OverlapFacts(O).
+
   Definition get_add_above_increasing: forall x ax k v m
     (* will need this axiom: *)
     (LUB_INC_L: forall a b, L.ge a b -> L.ge (L.lub v a) (L.lub v b)),
+    (match m with None => True | Some m' => MSL.M.In O.top m' end) ->
+    (forall x px, O.above px x -> L.ge (get px m) (get x m)) ->
     O.above ax x ->
     L.ge (get ax m) (get x m) ->
     L.ge (get ax (add k v m)) (get x (add k v m)).
   Proof.
-    intros. destruct m as [m|]; simpl in *; [|apply L.ge_top].
-
-    remember ((MSL.M.add k (L.lub v (get_rec k m))
-      (add_if_overlap k v m))) as m'.
-
-    assert (AX: ax = k -> get_rec ax m' = L.lub v (get_rec ax m)).
-    intros. subst.
-    remember ((MSL.M.add k (L.lub v (get_rec k m))
-      (add_if_overlap k v m))) as m'.
-    functional induction (get_rec k m'); MSL_simpl;
-      elim e; apply MSL.M.FMF.add_in_iff; auto.
-
-    assert (X: x = k -> get_rec x m' = L.lub v (get_rec x m)).
-    intros. subst.
-    remember ((MSL.M.add k (L.lub v (get_rec k m))
-      (add_if_overlap k v m))) as m'.
-    functional induction (get_rec k m'); MSL_simpl;
-      elim e; apply MSL.M.FMF.add_in_iff; auto.
-
-    destruct (O.eq_dec x k).
-
-    rewrite (X e). admit.
-
-    admit.
-
+    intros ????? ? HT WO A GE. destruct m as [m|]; [|apply L.ge_top].
+    destruct (O.eq_dec x k) as [XK | NXK].
+    Case "x = k".
+    subst. erewrite eq_get_add_same; eauto.
+    destruct (O.eq_dec ax k) as [AXK | NAXK].
+    SCase "ax = k".
+    subst. erewrite eq_get_add_same; eauto.
+    SCase "ax <> k".
+    generalize dependent ax. refine (O.above_ind _ _); intros ? IND A GE NXK.
+    simpl.
+    remember (MSL.M.add k (L.lub v (get_rec k m)) (add_if_overlap k v m)) as m'.
+    functional induction (get_rec x m'); MSL_simpl.
+    SSCase "1".
+    apply MSL.M.FMF.add_mapsto_iff in e.
+    destruct e as [? | [_ MT]]; intuition; subst; auto.
+    apply MSL.M.FMF.mapi_inv in MT.
+    destruct MT as [x [? [? [? MT]]]]. subst.
+    simpl in GE. erewrite mapsto_get_rec in GE; eauto.
+    unfold lub_if_overlap.
+    destruct (O.eq_dec k k0).
+    congruence.
+    destruct (O.overlap_dec k k0) as [O|NO]; simpl.
+    apply LUB_INC_L. auto.
+    elim NO. symmetry. now apply O.above_overlaps.
+    elim e. apply O.no_parent_is_top in e0. subst.
+    apply MSL.M.FMF.add_in_iff. right.
+    now apply MSL.M.FMF.mapi_in_iff.
+    simpl in IND. apply IND.
+    now apply O.parent_is_above.
+    etransitivity; eauto. now apply O.parent_is_above.
+    simpl in GE. erewrite eq_get_rec_parent in GE; eauto.
+    intro. apply e. MSL.M.FMF.map_iff. right. now apply MSL.M.FMF.mapi_in_iff.
+    intro. subst. eapply asymmetry. apply A. now apply O.parent_is_above.
+    Case "x <> k".
+    simpl.
+    remember (MSL.M.add k (L.lub v (get_rec k m)) (add_if_overlap k v m)) as m'.
+    functional induction (get_rec x m'); MSL_simpl.
+    apply MSL.M.FMF.add_mapsto_iff in e.
+    destruct e as [? | [_ MT]]; intuition; subst; try congruence.
+    apply MSL.M.FMF.mapi_inv in MT.
+    destruct MT as [x [? [? [? MT]]]]. subst.
+    simpl in GE. setoid_rewrite mapsto_get_rec at 2 in GE; eauto.
+    unfold lub_if_overlap. destruct (O.eq_dec k k0); try congruence. simpl.
+    destruct (O.eq_dec ax k) as [AXK | NAXK].
+    SCase "ax = k".
+    subst. pose proof eq_get_add_same as EQ. specialize (EQ k v (Some m) m).
+    simpl in EQ. rewrite EQ; auto. clear EQ.
+    destruct (O.overlap_dec k k0); simpl. now apply LUB_INC_L.
+    eapply L.ge_trans. apply L.ge_lub_right. assumption.
+    SCase "ax <> k".
+    generalize dependent ax. refine (O.above_ind _ _); intros ax IND A GE NAXK.
+    remember (MSL.M.add k (L.lub v (get_rec k m)) (add_if_overlap k v m)) as m'.
+    functional induction (get_rec ax m'); MSL_simpl.
+    apply MSL.M.FMF.add_mapsto_iff in e.
+    destruct e as [? | [_ MT']]; intuition; subst; try congruence.
+    apply MSL.M.FMF.mapi_inv in MT'.
+    destruct MT' as [ax [? [? [? MT']]]]. subst.
+    setoid_rewrite mapsto_get_rec in GE; eauto.
+    unfold lub_if_overlap. destruct (O.eq_dec k k1); try congruence. simpl.
+    destruct (O.overlap_dec k k0); destruct (O.overlap_dec k k1); simpl.
+    now apply LUB_INC_L.
+    elim n1. symmetry. eapply OF.above_overlaps_too; eauto. now symmetry.
+    eapply L.ge_trans. apply L.ge_lub_right. auto.
+    auto.
+    elim e. apply O.no_parent_is_top in e0. subst.
+    apply MSL.M.FMF.add_in_iff. right.
+    now apply MSL.M.FMF.mapi_in_iff.
+    simpl in IND.
+    destruct (O.eq_dec p k).
+    subst. clear IHt0.
+    pose proof eq_get_add_same as EQ. specialize (EQ k v (Some m) m).
+    simpl in EQ. rewrite EQ; auto. clear EQ.
+    erewrite eq_get_rec_parent in GE; eauto.
+    destruct (O.overlap_dec k k0); simpl.
+    now apply LUB_INC_L.
+    eapply L.ge_trans. apply L.ge_lub_right. assumption.
+    intro. apply e. MSL.M.FMF.map_iff. right. now apply MSL.M.FMF.mapi_in_iff.
+    apply IND.
+    now apply O.parent_is_above.
+    etransitivity; eauto. now apply O.parent_is_above.
+    erewrite eq_get_rec_parent in GE; eauto.
+    intro. apply e. MSL.M.FMF.map_iff. right. now apply MSL.M.FMF.mapi_in_iff.
+    intro. subst. congruence.
+    apply O.no_parent_is_top in e0. subst.
+    elim e. MSL.M.FMF.map_iff. right. now apply MSL.M.FMF.mapi_in_iff.
+    destruct (O.eq_dec ax p).
+    subst. apply L.ge_refl. apply L.eq_refl.
+    destruct (O.eq_dec k p).
+    subst.
+    pose proof eq_get_add_same as EQ. specialize (EQ p v (Some m) m).
+    simpl in EQ. rewrite EQ; auto. clear EQ.
+    remember (MSL.M.add p (L.lub v (get_rec p m)) (add_if_overlap p v m)) as m'.
+    clear IHt0. (* ? *)
+    functional induction (get_rec ax m'); MSL_simpl.
+    apply MSL.M.FMF.add_mapsto_iff in e1.
+    destruct e1 as [? | [_ MT']]; intuition; subst; try congruence.
+    apply MSL.M.FMF.mapi_inv in MT'.
+    destruct MT' as [v' [? [? [? MT']]]]. subst.
+    simpl in *. setoid_rewrite mapsto_get_rec at 1 in GE; eauto.
+    unfold lub_if_overlap. destruct (O.eq_dec p k); try congruence. simpl.
+    destruct (O.overlap_dec p k); simpl.
+    apply LUB_INC_L. erewrite eq_get_rec_parent in GE; eauto.
+    intro. apply e. MSL.M.FMF.map_iff. right. now apply MSL.M.FMF.mapi_in_iff.
+    elim n1. symmetry. apply O.above_overlaps. eapply O.no_lozenge; eauto.
+    elim e1. apply O.no_parent_is_top in e2. subst.
+    apply MSL.M.FMF.add_in_iff. right.
+    now apply MSL.M.FMF.mapi_in_iff.
+    simpl in *. destruct (O.eq_dec p0 p).
+    subst.
+    pose proof eq_get_add_same as EQ. specialize (EQ p v (Some m) m).
+    simpl in EQ. rewrite EQ; auto. apply L.ge_refl. apply L.eq_refl.
+    apply IHt0; auto.
+    etransitivity; eauto. now apply O.parent_is_above.
+    eapply L.ge_trans; eauto. apply WO. now apply O.parent_is_above.
+    apply IHt0.
+    eapply O.no_lozenge; eauto.
+    simpl in *. setoid_rewrite eq_get_rec_parent at 2 in GE; eauto.
+    intro. apply e. MSL.M.FMF.map_iff. right. now apply MSL.M.FMF.mapi_in_iff.
+    auto.
+    reflexivity.
   Qed.
 
   Lemma ge_get_rec_add_1: forall x y s m,
@@ -1494,7 +1638,7 @@ Module MkOverlapMap
     assert (
       LUB_INC_L : (forall a b : L.t, L.ge a b -> L.ge (L.lub v a) (L.lub v b))
     ) by admit.
-    exact (GAAI x px k v (Some m) LUB_INC_L H (WO _ _ H)).
+    exact (GAAI x px k v (Some m) LUB_INC_L HT WO H (WO _ _ H)).
   Qed.
 
   Theorem get_add_same: forall k s m, L.ge (get k (add k s m)) s.
