@@ -100,7 +100,7 @@ End HierarchyFun.
 
 Module Type Hierarchy.
 
-  Include HierarchyFun.
+  Include Type HierarchyFun.
 
   Parameter above: @relation t.
 
@@ -280,7 +280,7 @@ End HierarchyFacts.
 
 Module Type Overlap.
 
-  Include Hierarchy.
+  Include Type Hierarchy.
 
   Axiom overlap: t -> t -> Prop.
 
