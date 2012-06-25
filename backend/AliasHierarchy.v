@@ -100,7 +100,7 @@ End HierarchyFun.
 
 Module Type Hierarchy.
 
-  Include Type HierarchyFun.
+  Include HierarchyFun.
 
   Parameter above: @relation t.
 
@@ -112,6 +112,10 @@ Module Type Hierarchy.
     parent x = Some px -> above px x.
 
   Axiom above_ind: forall (P: t -> Prop),
+    (forall x, (forall y, above y x -> P y) -> P x) ->
+    (forall x, P x).
+
+  Axiom above_rec: forall (P: t -> Set),
     (forall x, (forall y, above y x -> P y) -> P x) ->
     (forall x, P x).
 
@@ -187,6 +191,13 @@ Module MkHierarchy(H: HierarchyFun) <: Hierarchy.
     (forall x, P x).
   Proof.
     apply well_founded_ind, wf_above.
+  Qed.
+
+  Theorem above_rec: forall (P: t -> Set),
+    (forall x, (forall y, above y x -> P y) -> P x) ->
+    (forall x, P x).
+  Proof.
+    apply well_founded_induction, wf_above.
   Qed.
 
   Theorem top_above: forall t,
@@ -276,11 +287,33 @@ Module HierarchyFacts(H: Hierarchy).
     apply H.no_parent_is_top in Heqo. subst. elim (not_above_top _ ABOVE).
   Qed.
 
+  Definition exists_ancestor
+    (P: H.t -> Prop) (P_dec: forall x, { P x } + { ~ P x }) x: Prop :=
+    exists ax, H.above ax x /\ P ax.
+
+  Theorem exists_ancestor_dec: forall P P_dec x,
+    { exists_ancestor P P_dec x } + { forall ax, H.above ax x -> ~ P ax }.
+  Proof.
+    intros P P_dec. refine (H.above_rec _ _); intros x REC.
+    destruct (H.parent x) as [px|]_eqn.
+    destruct (REC px) as [EX|NEX]. now apply H.parent_is_above.
+    left. destruct EX as [ax [Aax Pax]]. exists ax. split.
+    etransitivity. apply Aax. now apply H.parent_is_above. assumption.
+    destruct (P_dec px) as [Ppx | NPpx].
+    left. exists px. split.
+    now apply H.parent_is_above. assumption.
+    right. intros ax Aax Pax. destruct (H.eq_dec ax px).
+    subst. contradiction.
+    apply (NEX ax); auto. eapply H.no_lozenge; eauto.
+    right. intros ax Aax. apply H.no_parent_is_top in Heqo. subst.
+    now apply not_above_top in Aax.
+  Qed.
+
 End HierarchyFacts.
 
 Module Type Overlap.
 
-  Include Type Hierarchy.
+  Include Hierarchy.
 
   Axiom overlap: t -> t -> Prop.
 

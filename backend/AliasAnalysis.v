@@ -857,7 +857,7 @@ Ltac merge_parents :=
 
 Module Type SEMILAT_TOP_LINCL.
 
-  Include Type SEMILATTICE_WITH_TOP.
+  Include SEMILATTICE_WITH_TOP.
 
   Axiom lub_inc_l: forall a b,
     ge a b ->
@@ -1060,43 +1060,69 @@ Module PTSet
     inv H.
   Qed.
 
-  Definition lub' (old: t) (new: t): t :=
-    let out := AbsPSet.union old new in
-      AbsPSet.filter
-      (fun x =>
-        AbsPSet.for_all
-        (fun y => negb (AbsPH.above_dec y x))
-        out
-      )
-      out.
+  Definition is_not_above x y := negb (AbsPH.above_dec y x).
+
+  Definition is_necessary s x := AbsPSet.for_all (is_not_above x) s.
+
+  Definition normalize s := AbsPSet.filter (is_necessary s) s.
+
+  Definition lub' a b := normalize (AbsPSet.union a b).
+
+  Module HFacts := HierarchyFacts(AbsPH).
+
+  Definition AbsPSet_In_dec: forall s x,
+    { AbsPSet.In x s } + { ~ AbsPSet.In x s }.
+  Proof.
+    intros. destruct (AbsPSet.mem x s) as []_eqn.
+    left. now apply F.mem_iff.
+    right. now apply F.not_mem_iff.
+  Qed.
+
+  Theorem normalize_spec: forall s x,
+    In x s ->
+    In x (normalize s).
+  Proof.
+    intros s. refine (AbsPH.above_ind _ _); intros x IND IN.
+
+    apply In_spec in IN. destruct IN as [IN|ax INax].
+
+    pose proof HFacts.exists_ancestor_dec as EA.
+    specialize (EA (fun x => AbsPSet.In x s) (AbsPSet_In_dec s) x). simpl in EA.
+    SearchAbout AbsPSet.In.
+    apply In_spec.
+    destruct (AbsPSet.mem x (normalize s)) as []_eqn.
+    apply F.mem_iff in Heqb. now left.
+    apply F.not_mem_iff in Heqb. right.
+
+    destruct (AbsPH.parent x) as [px|]_eqn.
+    assert (In px (normalize s)). apply IND. now apply AbsPH.parent_is_above.
+
+    unfold normalize.
+    intros. unfold lub'. apply In_spec in H. intuition. pose proof F.filter_iff.
 
   (* [widen s t] widens s according to t, that is, it returns a set greater
      than s, according to some criterion on [s] and [t]. *)
+  Definition is_eq_shifted b o l :=
+    match l with
+    | Loc b' o' => andb (AbsBOT.eq_dec b b') (negb (Int.eq o o'))
+    | Blk _     => false
+    end.
+
+  Definition add_widened widener x res :=
+    AbsPSet.add
+    (
+      match x with
+      | Blk b => Blk b
+      | Loc b o =>
+        if AbsPSet.exists_ (is_eq_shifted b o) widener
+        then Blk b (* widening *)
+        else Loc b o
+      end
+    )
+    res.
+
   Definition widen (widened: t) (widener: t): t :=
-    AbsPSet.fold
-      (fun x res =>
-        AbsPSet.add
-        (
-          match x with
-            | Blk b => Blk b
-            | Loc b o =>
-              if AbsPSet.exists_
-                (fun y =>
-                  match y with
-                    | Loc b' o' =>
-                      andb (AbsBOT.eq_dec b b') (negb (Int.eq o o'))
-                    | _ => false
-                  end
-                )
-                widener
-                then Blk b (* widening *)
-                else Loc b o
-          end
-        )
-        res
-      )
-      widened
-      AbsPSet.empty.
+    AbsPSet.fold (add_widened widener) widened AbsPSet.empty.
 
   (* lub takes into account its use in the Kildall algorithm. Therefore, it
      performs widening if its 2nd parameter grows in a possibly-infinite
@@ -1104,8 +1130,14 @@ Module PTSet
   Definition lub (old: t) (new: t): t :=
     lub' old (widen new old).
 
-  Theorem ge_lub_left: forall x y, ge (lub x y) x.
+  Theorem ge_lub_left: forall a b, ge (lub a b) a.
   Proof.
+    intros a b x H. apply In_spec in H. intuition.
+
+    remember (lub a b) as lubab. functional induction (In x lubab).
+
+    admit.
+
     admit.
   Qed.
 
