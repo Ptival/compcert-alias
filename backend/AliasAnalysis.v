@@ -1083,22 +1083,29 @@ Module PTSet
     In x (normalize s).
   Proof.
     intros s. refine (AbsPH.above_ind _ _); intros x IND IN.
-
-    apply In_spec in IN. destruct IN as [IN|ax INax].
-
     pose proof HFacts.exists_ancestor_dec as EA.
     specialize (EA (fun x => AbsPSet.In x s) (AbsPSet_In_dec s) x). simpl in EA.
-    SearchAbout AbsPSet.In.
     apply In_spec.
     destruct (AbsPSet.mem x (normalize s)) as []_eqn.
     apply F.mem_iff in Heqb. now left.
     apply F.not_mem_iff in Heqb. right.
-
-    destruct (AbsPH.parent x) as [px|]_eqn.
-    assert (In px (normalize s)). apply IND. now apply AbsPH.parent_is_above.
-
-    unfold normalize.
-    intros. unfold lub'. apply In_spec in H. intuition. pose proof F.filter_iff.
+    destruct EA as [EX | NEX].
+    destruct EX as [ax [Aax INax]]. specialize (IND ax Aax).
+    feed IND. apply In_spec. now left. apply In_spec in IND.
+    destruct IND as [INax' | [ax' INax']].
+    exists ax. auto.
+    exists ax'. intuition. etransitivity; eauto.
+    elim Heqb. unfold normalize. apply F.filter_iff.
+    repeat intro. subst. auto.
+    split.
+    apply In_spec in IN. intuition. destruct H as [ax [Aax INax]].
+    elim (NEX _ Aax INax).
+    unfold is_necessary. apply F.for_all_iff.
+    repeat intro. subst. auto.
+    intros x0 INx0. unfold is_not_above.
+    destruct (AbsPH.above_dec x0 x); simpl; auto.
+    elim (NEX _ a INx0).
+  Qed.
 
   (* [widen s t] widens s according to t, that is, it returns a set greater
      than s, according to some criterion on [s] and [t]. *)
