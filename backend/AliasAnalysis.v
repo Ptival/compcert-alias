@@ -629,6 +629,17 @@ Module AbsPHFun := OptIntHFun(AbsBHFun).
 
 Module AbsPH := MkHierarchy(AbsPHFun).
 
+Theorem not_loc_above: forall b o x,
+  ~ AbsPH.above (Loc b o) x.
+Proof.
+  repeat intro. apply clos_trans_t1n_iff in H.
+  remember (Loc b o) as l. induction H.
+  subst. compute in H.
+  destruct y; try solve [inv H]. destruct t; try solve [inv H].
+  subst. compute in H.
+  destruct y; try solve [inv H]. destruct t; try solve [inv H].
+Qed.
+
 Module AbsPO <: Overlap.
   Include AbsPH.
 
@@ -1107,6 +1118,20 @@ Module PTSet
     elim (NEX _ a INx0).
   Qed.
 
+  Theorem lub'_spec: forall a b x,
+    (In x a \/ In x b) -> In x (lub' a b).
+  Proof.
+    intros. unfold lub'. apply normalize_spec, In_spec. intuition.
+    apply In_spec in H0. intuition.
+    left. apply F.union_iff. now left.
+    right. destruct H as [ax [Aax Inax]].
+    exists ax. split. easy. apply F.union_iff. left. easy.
+    apply In_spec in H0. intuition.
+    left. apply F.union_iff. now right.
+    right. destruct H as [ax [Aax Inax]].
+    exists ax. split. easy. apply F.union_iff. right. easy.
+  Qed.
+
   (* [widen s t] widens s according to t, that is, it returns a set greater
      than s, according to some criterion on [s] and [t]. *)
   Definition is_eq_shifted b o l :=
@@ -1128,8 +1153,52 @@ Module PTSet
     )
     res.
 
+  Theorem add_widened_spec: forall widener x res,
+    In x (add_widened widener x res).
+  Proof.
+    intros. apply In_spec. unfold add_widened.
+    destruct x as [b|b o]; simpl.
+    left. apply F.add_iff. now left.
+    destruct (AbsPSet.exists_ (is_eq_shifted b o) widener) as []_eqn.
+    right. exists (Blk b). split.
+    now apply AbsPH.parent_is_above.
+    apply F.add_iff. now left.
+    left.
+    apply F.add_iff. now left.
+  Qed.
+
   Definition widen (widened: t) (widener: t): t :=
     AbsPSet.fold (add_widened widener) widened AbsPSet.empty.
+
+  Theorem widen_spec: forall widened widener x,
+    In x widened -> In x (widen widened widener).
+  Proof.
+    intros. unfold widen. rewrite AbsPSet.fold_1. apply In_spec in H. intuition.
+
+    eapply fold_left_adds_prop; eauto.
+    apply PTSet.F.elements_iff. eauto.
+    intros. apply add_widened_spec.
+    intros. apply In_spec in H. apply In_spec. intuition.
+    left. apply F.add_iff. now right.
+    right. destruct H1 as [ax [Aax Inax]]. exists ax. split.
+    easy.
+    apply F.add_iff. now right.
+
+    destruct H0 as [ax [Aax Inax]].
+    eapply fold_left_adds_prop; eauto.
+    apply PTSet.F.elements_iff. eauto.
+    intros. apply In_spec. right. destruct ax as [b|bo].
+    exists (Blk b). split. easy. apply F.add_iff. now left.
+    elim (not_loc_above _ _ _ Aax).
+
+    intros. apply In_spec in H. apply In_spec. intuition.
+    left. apply F.add_iff. now right.
+    right.
+    destruct H0 as [aax [Aaax Inaax]].
+    destruct aax as [b|b o].
+    exists (Blk b). split. easy. apply F.add_iff. now right.
+    elim (not_loc_above _ _ _ Aaax).
+  Qed.
 
   (* lub takes into account its use in the Kildall algorithm. Therefore, it
      performs widening if its 2nd parameter grows in a possibly-infinite
@@ -1139,18 +1208,12 @@ Module PTSet
 
   Theorem ge_lub_left: forall a b, ge (lub a b) a.
   Proof.
-    intros a b x H. apply In_spec in H. intuition.
-
-    remember (lub a b) as lubab. functional induction (In x lubab).
-
-    admit.
-
-    admit.
+    repeat intro. apply lub'_spec. now left.
   Qed.
 
-  Theorem ge_lub_right: forall x y, ge (lub x y) y.
+  Theorem ge_lub_right: forall a b, ge (lub a b) b.
   Proof.
-    admit.
+    repeat intro. apply lub'_spec. right. now apply widen_spec.
   Qed.
 
   Definition top := add AbsPH.top AbsPSet.empty.
@@ -1271,7 +1334,7 @@ Module NaiveMergeStrategy (KEY: OrderedType) (VAL: SEMILATTICE)
 End NaiveMergeStrategy.
 
 Module RegMapMergeStrategy := NaiveMergeStrategy(RegOT)(PTSet).
-Module RegMapWithoutTop := MapSemiLattice(RegOT)(PTSet)(RegMapMergeStrategy).
+Module RegMapWithoutTop := MapSemiLattice(RegOT)(PTSet).
 
 Module RegMap <: SEMILATTICE_WITH_TOP.
   Module L := SemiLatticeToLattice(RegMapWithoutTop).
@@ -1362,7 +1425,7 @@ Module MkOverlapMapAux
      missing from either side. *)
   Module MergeStrategy := NaiveMergeStrategy(OT)(L).
 
-  Module MSL := MapSemiLattice(OT)(L)(MergeStrategy).
+  Module MSL := MapSemiLattice(OT)(L).
 
   (* The map semilattice does not have a Top. This adds it as an option on
      the underlying map semilattice type. *)
@@ -2017,10 +2080,18 @@ Module MkOverlapMap
 
 End MkOverlapMap.
 
-Module MemMap <: SEMILATTICE.
-  Module MemMap := MkOverlapMap(AbsPO)(AbsPOT)(PTSet).
-  Include MemMap.
-End MemMap.
+Module MemMap <: SEMILATTICE := MkOverlapMap(AbsPO)(AbsPOT)(PTSet).
+
+Lemma MemMap_get_above:
+  forall x ax,
+    AbsPH.above ax x ->
+    forall mmap e,
+      PTSet.In e (MemMap.get x mmap) ->
+      PTSet.In e (MemMap.get ax mmap).
+Proof.
+  intros x ax A mmap. destruct mmap as [m [HT WO]]. unfold MemMap.get; simpl.
+  now apply WO.
+Qed.
 
 (* Result *)
 
@@ -2082,17 +2153,6 @@ Proof.
   intros. destruct x, y; subst; try (intuition; congruence).
   simpl. intros. apply PTSet.In_add_spec. right. left. constructor. now compute.
   intros. destruct y; apply PTSet.In_add_spec; auto.
-Qed.
-
-Theorem not_loc_above: forall b o x,
-  ~ AbsPH.above (Loc b o) x.
-Proof.
-  repeat intro. apply clos_trans_t1n_iff in H.
-  remember (Loc b o) as l. induction H.
-  subst. compute in H.
-  destruct y; try solve [inv H]. destruct t; try solve [inv H].
-  subst. compute in H.
-  destruct y; try solve [inv H]. destruct t; try solve [inv H].
 Qed.
 
 Theorem In_unknown_offset_same:
@@ -2546,7 +2606,7 @@ Proof.
   intros. destruct x0, y0; subst; try (intuition; congruence).
   intros. apply PTSet.ge_lub_left.
   pose proof MemMap.get_add_overlap.
-  eapply MemMap.get_add_overlap; eauto.
+  eapply MemMap_get_above; eauto.
   intros. apply PTSet.ge_lub_right. auto.
 Qed.
 
@@ -2604,9 +2664,9 @@ Proof.
   apply PTSet.ge_lub_left. eapply In_unknown_offset; eauto.
   eapply In_unknown_offset; eauto.
   specialize (GENV _ _ Heqo0). merge. apply PTSet.In_singleton.
-  specialize (GENV _ _ Heqo). merge. apply PTSet.In_singleton_hierarchy.
+  specialize (GENV _ _ Heqo). merge. apply PTSet.above_In_singleton.
   constructor. now compute.
-  specialize (GENV _ _ Heqo0). merge. apply PTSet.In_singleton_hierarchy.
+  specialize (GENV _ _ Heqo0). merge. apply PTSet.above_In_singleton.
   constructor. now compute.
   rewrite Int.add_zero_l. apply PTSet.In_singleton.
 Qed.
@@ -2947,9 +3007,9 @@ Proof.
   SSSSSCase "Olea Aglobal".
   apply PTSet.In_singleton.
   SSSSSCase "Olea Abased".
-  apply PTSet.In_singleton_hierarchy. constructor. now compute.
+  apply PTSet.above_In_singleton. constructor. now compute.
   SSSSSCase "Olea Abasedscaled".
-  apply PTSet.In_singleton_hierarchy. constructor. now compute.
+  apply PTSet.above_In_singleton. constructor. now compute.
   SSSSSCase "Olea Ainstack".
   rewrite Int.add_zero_l. apply PTSet.In_singleton.
   SSSSCase "memsat".
@@ -2983,9 +3043,9 @@ Proof.
   apply PTSet.ge_lub_left. eapply In_unknown_offset; eauto.
   eapply In_unknown_offset; eauto.
   specialize (GENV _ _ Heqo2). merge. apply PTSet.In_singleton.
-  specialize (GENV _ _ Heqo1). merge. apply PTSet.In_singleton_hierarchy.
+  specialize (GENV _ _ Heqo1). merge. apply PTSet.above_In_singleton.
   constructor. now compute.
-  specialize (GENV _ _ Heqo1). merge. apply PTSet.In_singleton_hierarchy.
+  specialize (GENV _ _ Heqo1). merge. apply PTSet.above_In_singleton.
   constructor. now compute.
   rewrite Int.add_zero_l. apply PTSet.In_singleton.
   SSSSSSCase "abs b = None".
@@ -3000,9 +3060,9 @@ Proof.
   eapply In_unknown_offset; eauto.
   apply unknown_offset_top; auto. apply PTSet.In_top.
   specialize (GENV _ _ Heqo2). merge. apply PTSet.In_singleton.
-  specialize (GENV _ _ Heqo3). merge. apply PTSet.In_singleton_hierarchy.
+  specialize (GENV _ _ Heqo3). merge. apply PTSet.above_In_singleton.
   constructor. now compute.
-  specialize (GENV _ _ Heqo3). merge. apply PTSet.In_singleton_hierarchy.
+  specialize (GENV _ _ Heqo3). merge. apply PTSet.above_In_singleton.
   constructor. now compute.
   merge. rewrite Int.add_zero_l. apply PTSet.In_singleton.
   SSSSSCase "r <> dst".
@@ -3113,7 +3173,7 @@ Proof.
   unfold regsat, valsat. rewrite Regmap.gss. destruct v; auto.
   inv H1. specialize (GENV _ _ H4). rewrite GENV.
   eapply PTSet.ge_trans. apply RegMap.get_ge; apply RGE. apply RegMap.get_add_same.
-  apply PTSet.In_singleton_hierarchy.
+  apply PTSet.above_In_singleton.
   right with (y := Blk (Some (Globals (Some id))));
     constructor; compute; try reflexivity.
   SSSSSCase "memsat".
@@ -3130,7 +3190,7 @@ Proof.
   unfold regsat, valsat. rewrite Regmap.gss. destruct v; auto.
   inv H1. specialize (GENV _ _ H4). rewrite GENV.
   eapply PTSet.ge_trans. apply RegMap.get_ge; apply RGE. apply RegMap.get_add_same.
-  apply PTSet.In_singleton_hierarchy.
+  apply PTSet.above_In_singleton.
   right with (y := Blk (Some (Globals (Some id))));
     constructor; compute; try reflexivity.
   SSSSSCase "memsat".
