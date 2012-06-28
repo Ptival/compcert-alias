@@ -257,9 +257,9 @@ Module MapSemiLattice
           apply FMF.find_mapsto_iff in H
         | H: M.find _ _ = None |- _ =>
           apply FMF.not_find_in_iff in H
-        | H: M.MapsTo ?x ?s0 (M.add ?x ?s1 _) |- _ =>
-          apply FMF.add_mapsto_iff in H; simpl in H; intuition; subst;
-            auto
+        | H: M.MapsTo _ _ (M.empty _) |- _ => inversion H
+        | H: M.MapsTo _ _ (M.add _ _ _) |- _ =>
+          apply FMF.add_mapsto_iff in H; simpl in H; intuition; subst; auto
         | A: M.MapsTo ?x ?s0 ?m,
           B: M.MapsTo ?x ?s1 ?m |- _ =>
             assert (s0 = s1) by (
@@ -1090,10 +1090,11 @@ Module PTSet
   Qed.
 
   Theorem normalize_spec: forall s x,
-    In x s ->
-    In x (normalize s).
+    In x s <-> In x (normalize s).
   Proof.
-    intros s. refine (AbsPH.above_ind _ _); intros x IND IN.
+    split.
+    Case "->".
+    revert x. refine (AbsPH.above_ind _ _); intros x IND IN.
     pose proof HFacts.exists_ancestor_dec as EA.
     specialize (EA (fun x => AbsPSet.In x s) (AbsPSet_In_dec s) x). simpl in EA.
     apply In_spec.
@@ -1116,12 +1117,18 @@ Module PTSet
     intros x0 INx0. unfold is_not_above.
     destruct (AbsPH.above_dec x0 x); simpl; auto.
     elim (NEX _ a INx0).
+    Case "<-".
+    revert x. refine (AbsPH.above_ind _ _); intros x IND IN.
+    apply In_spec in IN. apply In_spec. intuition.
+    apply F.filter_iff in H. intuition. repeat intro; subst; easy.
+    destruct H as [ax [A IN]]. right. exists ax. apply F.filter_iff in IN.
+    intuition. repeat intro; subst; easy.
   Qed.
 
   Theorem lub'_spec: forall a b x,
     (In x a \/ In x b) -> In x (lub' a b).
   Proof.
-    intros. unfold lub'. apply normalize_spec, In_spec. intuition.
+    intros. unfold lub'. apply -> normalize_spec. apply In_spec. intuition.
     apply In_spec in H0. intuition.
     left. apply F.union_iff. now left.
     right. destruct H as [ax [Aax Inax]].
@@ -1140,18 +1147,17 @@ Module PTSet
     | Blk _     => false
     end.
 
+  Definition widening widener x :=
+    match x with
+    | Blk b => Blk b
+    | Loc b o =>
+      if AbsPSet.exists_ (is_eq_shifted b o) widener
+      then Blk b (* widening *)
+      else Loc b o
+    end.
+
   Definition add_widened widener x res :=
-    AbsPSet.add
-    (
-      match x with
-      | Blk b => Blk b
-      | Loc b o =>
-        if AbsPSet.exists_ (is_eq_shifted b o) widener
-        then Blk b (* widening *)
-        else Loc b o
-      end
-    )
-    res.
+    AbsPSet.add (widening widener x) res.
 
   Theorem add_widened_spec: forall widener x res,
     In x (add_widened widener x res).
@@ -1165,6 +1171,16 @@ Module PTSet
     apply F.add_iff. now left.
     left.
     apply F.add_iff. now left.
+  Qed.
+
+  Theorem add_widened_spec_2: forall widener x res y,
+    In x res ->
+    In x (add_widened widener y res).
+  Proof.
+    intros ???? IN. apply In_spec in IN. apply In_spec.
+    destruct IN as [IN|[ax [A IN]]].
+    left. apply F.add_iff. now right.
+    right. exists ax. split. easy. apply F.add_iff. now right.
   Qed.
 
   Definition widen (widened: t) (widener: t): t :=
@@ -1218,42 +1234,51 @@ Module PTSet
 
   Definition top := add AbsPH.top AbsPSet.empty.
 
+  Theorem In_top: forall x, In x top.
+  Proof.
+    intros. apply In_spec. destruct (AbsPH.eq_dec x AbsPH.top).
+    left. subst. apply F.add_iff. now left.
+    right. exists AbsPH.top. split.
+    apply AbsPH.top_above; auto.
+    apply F.add_iff. now left.
+  Qed.
+
   Theorem ge_top: forall x, ge top x.
   Proof.
-    admit.
+    repeat intro. apply In_spec.
+    destruct (AbsPH.eq_dec x0 AbsPH.top).
+    left. subst. apply F.add_iff. now left.
+    right. exists AbsPH.top. split.
+    apply AbsPH.top_above; auto.
+    apply F.add_iff. now left.
   Qed.
 
   Definition singleton x := add x bot.
 
   Theorem In_singleton: forall x, In x (singleton x).
   Proof.
-    admit.
+    intros. apply In_spec. left. apply F.add_iff. now left.
   Qed.
 
   Theorem above_In_singleton: forall x y,
     AbsPH.above x y -> In y (singleton x).
   Proof.
-    admit.
+    intros. apply In_spec. right. exists x. split.
+    easy.
+    apply F.add_iff. now left.
   Qed.
 
   Theorem not_In_bot: forall x, ~ In x bot.
   Proof.
-    admit.
-  Qed.
-
-  Theorem In_top: forall x, In x top.
-  Proof.
-    admit.
+    repeat intro. apply In_spec in H. intuition. inversion H0.
+    destruct H0 as [? [_ ?]]. inversion H.
   Qed.
 
   Theorem ge_top_eq_top: forall x, ge x top <-> eq x top.
   Proof.
-    admit.
-  Qed.
-
-  Theorem top_ge: forall x, ge top x.
-  Proof.
-    admit.
+    repeat (split; repeat intro); auto.
+    apply In_top.
+    now apply H.
   Qed.
 
   Theorem not_In_empty: forall x, ~ In x AbsPSet.empty.
@@ -1262,56 +1287,139 @@ Module PTSet
     functional induction (In x empty). intuition. inv H0. inv H.
   Qed.
 
-  Lemma ge_elements:
+  Lemma InA_elements_In: forall x s,
+    InA Logic.eq x (AbsPSet.elements s) -> In x s.
+  Proof.
+    intros. apply In_spec. left. now apply F.elements_iff.
+  Qed.
+
+  Lemma ge_InA_elements_In:
     forall a b,
       ge a b ->
       forall x,
         InA Logic.eq x (AbsPSet.elements b) ->
-        InA Logic.eq x (AbsPSet.elements a).
+        In x a.
   Proof.
-    admit.
+    intros. apply H. now apply InA_elements_In.
+  Qed.
+
+  Module P := FSetProperties.Properties(AbsPSet).
+
+  Lemma AbsPSet_fold_inv: forall x f sinit sfold,
+    AbsPSet.In x (AbsPSet.fold (fun e s => AbsPSet.add (f e) s) sfold sinit) ->
+    ~ AbsPSet.In x sinit ->
+    exists ax, AbsPSet.In ax sfold /\ x = f ax.
+  Proof.
+    intros x f sinit sfold. apply P.fold_rec.
+    intros. congruence.
+    intros x0 a s' s'' Insfold NIns' ADD IND InADD NIninit.
+    apply F.add_iff in InADD. destruct InADD as [fx0_eq_x | Inxa].
+    exists x0. split; auto. apply ADD. now left.
+    destruct (IND Inxa NIninit) as [ax [Insfold' x_fax]].
+    exists ax. split; auto. apply ADD. now right.
+  Qed.
+
+  Lemma widen_inv: forall x s w,
+    AbsPSet.In x (widen s w) ->
+    exists dx, AbsPSet.In dx s /\ (x = widening w dx).
+  Proof.
+    intros x s w H. unfold widen in H.
+    pose proof (AbsPSet_fold_inv _ _ _ _ H).
+    destruct H0 as [ax [Inax xax]]. intro IN. inversion IN. subst. exists ax.
+    split; easy.
+  Qed.
+
+  Lemma widen_inc_l_aux: forall b o s v,
+    In (Loc b o) s ->
+    AbsPSet.exists_ (is_eq_shifted b o) v = true ->
+    In (Blk b) (widen s v).
+  Proof.
+    intros ???? IN EX. unfold widen. rewrite AbsPSet.fold_1.
+    apply In_spec in IN. destruct IN as [IN|[ax [A IN]]].
+    eapply fold_left_adds_prop; eauto.
+    apply F.elements_iff. apply IN.
+    intros. unfold add_widened. unfold widening. rewrite EX. apply In_spec.
+    left. apply F.add_iff. now left.
+    intros. now apply add_widened_spec_2.
+    eapply fold_left_adds_prop; eauto.
+    apply F.elements_iff. apply IN.
+    intros. unfold add_widened. unfold widening. destruct ax. apply In_spec.
+    destruct (AbsBHFun.eq_dec b t0).
+    subst. left. apply F.add_iff. now left.
+    right. exists (Blk t0). split.
+    eapply AbsPH.no_lozenge; eauto.
+    unfold AbsPH.is_parent. simpl. reflexivity. congruence.
+    apply F.add_iff. now left.
+    elim (not_loc_above _ _ _ A).
+    intros. now apply add_widened_spec_2.
   Qed.
 
   Lemma widen_inc_l: forall a b,
     ge a b ->
     forall v, ge (widen a v) (widen b v).
   Proof.
-    unfold widen. repeat intro.
-    rewrite AbsPSet.fold_1. rewrite AbsPSet.fold_1 in H0.
-    admit.
+    intros a b GE v x INb. apply In_spec in INb.
+    destruct INb as [INb | [ax [A IN]]].
+    Case "direct".
+    pose proof INb as INV. apply widen_inv in INV.
+    destruct INV as [dx [dxInb xdx]]. subst.
+    destruct dx; simpl in *.
+    apply widen_spec. apply GE. apply In_spec. now left.
+    destruct (AbsPSet.exists_ (is_eq_shifted a0 i) v) as []_eqn.
+    assert (In (Loc a0 i) a). apply GE. apply In_spec. now left.
+    eapply widen_inc_l_aux; eauto.
+    apply widen_spec. apply GE. apply In_spec. now left.
+    Case "indirect".
+    pose proof IN as INV. apply widen_inv in INV.
+    destruct INV as [dx [dxInb xdx]]. subst.
+    destruct dx; simpl in *.
+    apply widen_spec. apply GE. apply In_spec. right.
+    exists (Blk a0). split; easy.
+    destruct (AbsPSet.exists_ (is_eq_shifted a0 i) v) as []_eqn.
+    assert (In (Loc a0 i) a). apply GE. apply In_spec. now left.
+    assert (In (Blk a0) (widen a v)). eapply widen_inc_l_aux; eauto.
+    apply In_spec in H0. apply In_spec. right. intuition.
+    exists (Blk a0). split; easy.
+    destruct H1 as [aax [Aaax INaax]]. exists aax. split.
+    etransitivity; eauto. easy.
+    elim (not_loc_above _ _ _ A).
+  Qed.
+
+  Lemma ge_union_l: forall a b s,
+    ge a b ->
+    ge (AbsPSet.union s a) (AbsPSet.union s b).
+  Proof.
+    intros ??? GE x IN. apply In_spec in IN. apply In_spec. intuition.
+    apply F.union_iff in H. intuition.
+    left. apply F.union_iff. intuition.
+    assert (In x a). apply GE. apply In_spec. now left. apply In_spec in H.
+    intuition.
+    left. apply F.union_iff. intuition.
+    destruct H1 as [ax [? ?]]. right. exists ax. intuition.
+    apply F.union_iff. intuition.
+    destruct H as [ax [? ?]].
+    apply F.union_iff in H0. intuition.
+    right. exists ax. intuition. apply F.union_iff. intuition.
+    assert (In x a). apply GE. apply In_spec. right. exists ax; split; easy.
+    apply In_spec in H0. intuition.
+    left. apply F.union_iff. now right.
+    destruct H2 as [aax [Aaax INaax]].
+    right. exists aax. split. easy. apply F.union_iff. now right.
   Qed.
 
   Theorem lub_inc_l: forall a b,
     ge a b ->
     forall v, ge (lub v a) (lub v b).
   Proof with (try solve [repeat intro; subst; reflexivity]).
-    repeat intro. remember (lub v b) as lvb. remember (lub v a) as lva.
-    unfold ge in H.
-    functional induction (In x lvb); functional induction (In x lva); intuition;
-    merge_parents.
-    Case "1".
-    clear H0. unfold lub, lub' in H1.
-    apply F.filter_iff in H1... intuition.
-    apply F.for_all_iff in H3...
-    apply F.union_iff in H0. intuition.
-    left. apply F.filter_iff... intuition.
-    apply F.union_iff. now left.
-    apply F.for_all_iff... repeat intro.
-    apply F.union_iff in H0. intuition.
-    rewrite H3; auto. apply F.union_iff. now left.
-    admit.
-    admit.
-    Case "2".
-    admit.
-    Case "3".
-    admit.
+    unfold lub, lub'. intros a b GE v x IN. apply -> normalize_spec.
+    apply normalize_spec in IN. eapply ge_union_l; eauto. now apply widen_inc_l.
   Qed.
 
   Opaque mem In beq ge lub bot top.
 
   Hint Resolve In_add_spec In_spec eq_refl eq_sym eq_trans beq_correct
     ge_refl ge_trans ge_bot ge_lub_left ge_lub_right In_singleton
-    above_In_singleton not_In_bot ge_top In_top ge_top_eq_top top_ge: ptset.
+    above_In_singleton not_In_bot ge_top In_top ge_top_eq_top: ptset.
 
 End PTSet.
 
@@ -2000,7 +2108,14 @@ Module MkOverlapMap
   Next Obligation.
     constructor.
     apply Raw.MSL.M.FMF.add_in_iff. auto.
-    admit. (* TODO *)
+    refine (O.above_ind _ _); intros x IND px A. simpl.
+    remember (Raw.MSL.M.add O.top L.bot (Raw.MSL.M.empty L.t)) as m;
+    functional induction (Raw.get_rec x m);
+    Raw.MSL.msimpl; try apply L.ge_bot.
+    destruct (O.eq_dec px p).
+    subst. apply L.ge_refl. apply L.eq_refl.
+    apply IND. now apply O.parent_is_above.
+    eapply O.no_lozenge; eauto.
   Qed.
 
   Theorem ge_bot: forall x, ge x bot.
