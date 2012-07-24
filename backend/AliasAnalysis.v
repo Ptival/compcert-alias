@@ -1319,7 +1319,11 @@ Module PTSet
 
   Theorem bot_ge: forall x, ge bot x <-> eq bot x.
   Proof.
-    admit.
+    split; repeat intro.
+    split; repeat intro.
+    now apply ge_bot.
+    now apply H.
+    now apply H.
   Qed.
 
   Opaque mem In beq ge lub bot top.
@@ -2192,14 +2196,6 @@ Module MkOverlapMap
     destruct (Raw.MSL.M.find k m); auto.
   Qed.
 
-  Lemma test: forall m x ax,
-    well_ordered (Some m) ->
-    O.above ax x ->
-    Raw.MSL.ge_k m ax x.
-  Proof.
-    intros.
-  Admitted.
-
   Lemma wf_none: well_formed None.
   Proof.
     constructor. constructor. intros x px A. simpl. apply L.ge_top.
@@ -2208,7 +2204,7 @@ Module MkOverlapMap
   Program Definition lub (m: t) (n: t): t := exist _ (Raw.lub m n) _.
   Next Obligation.
     repeat intro. destruct m as [m [HTm WOm]], n as [n [HTn WOn]]. simpl.
-    destruct m as [m|], n as [n|]; simpl; auto.
+    destruct m as [m|], n as [n|]; simpl; auto using wf_none.
     remember (Raw.MSL.lub m n) as mn.
     constructor.
     Case "has_top".
@@ -2219,28 +2215,13 @@ Module MkOverlapMap
     intros x px A. simpl. subst.
     unfold well_ordered in *. simpl in *.
     pose proof (WOm _ _ A) as GEm. pose proof (WOn _ _ A) as GEn.
-    pose proof Raw.MSL.lub_preserves_ge_k as LUB.
-    specialize (LUB m n x px). feed_all LUB.
-
-    apply L.lub_inc_l.
-    apply L.ge_lub.
-    apply L.lub_bot.
-    apply L.bot_ge.
-
-    apply test. unfold well_ordered. exact WOm. easy.
-    apply test. unfold well_ordered. exact WOn. easy.
-
     apply Raw.hmap_lub_preserves_ge_get_rec.
     apply L.ge_lub.
     apply L.lub_bot.
     apply L.bot_ge.
     apply WOm.
     apply WOn.
-
     easy.
-    apply wf_none.
-    apply wf_none.
-    apply wf_none.
   Qed.
 
   Theorem ge_lub_left: forall x y, ge (lub x y) x.
@@ -2704,6 +2685,19 @@ Ltac merge :=
   | |- _ => idtac
   end.
 
+Lemma above_same_loc: forall a b o o',
+  AbsPH.above (Blk a) (Loc b o) ->
+  AbsPH.above (Blk a) (Loc b o').
+Proof.
+  intros a b o o' A.
+  unfold AbsPH.above in *.
+  rewrite clos_trans_tn1_iff.
+  rewrite clos_trans_tn1_iff in A. remember (Loc b o) as lbo. induction A.
+  left. subst. inv H. now compute.
+  right with (y:=y). subst. inv H. now compute.
+  easy.
+Qed.
+
 Lemma In_unknown_offset:
   forall b o s
     (IN: PTSet.In (Loc b o) s)
@@ -2725,9 +2719,10 @@ Proof.
   intros. destruct x, y; subst; try (intuition; congruence).
   intros. destruct ax; apply PTSet.In_add_spec; simpl in *; intuition.
 
-  admit.
-  admit.
-  admit.
+  right. left. eapply above_same_loc; eauto.
+  elim (not_loc_above _ _ _ H).
+
+  intros x y IN'. destruct y; apply PTSet.In_add_spec; intuition.
 Qed.
 
 Lemma above_loc_same_block: forall ba b o o',
