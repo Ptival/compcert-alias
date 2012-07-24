@@ -2281,15 +2281,16 @@ Module MkOverlapMap
     intros. apply Raw.ge_top.
   Qed.
 
-  Theorem get_ge: forall mmap mmap',
-    ge mmap mmap' ->
-    (forall k, L.ge (get k mmap) (get k mmap')).
+  Theorem get_ge: forall m n,
+    ge m n ->
+    (forall k, L.ge (get k m) (get k n)).
   Proof.
-  Admitted.
-
-  Theorem ge_get_top: forall k, L.ge (get k top) L.top.
-  Proof.
-    intros. simpl. apply L.ge_top.
+    intros m n GE k. unfold get. unfold ge in GE.
+    destruct m as [[m|] [HTm WOm]]; destruct n as [[n|] [HTn WOn]]; simpl in *; try solve [apply L.ge_top].
+    specialize (GE k). unfold Raw.MSL.ge_m in GE.
+    setoid_rewrite Raw.get_rec_equation.
+    destruct (Raw.MSL.M.find k m) as [km|], (Raw.MSL.M.find k n) as [kn|]; auto.
+    unfold get.
   Admitted.
 
   Theorem get_top: forall k,
