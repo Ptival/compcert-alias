@@ -17,11 +17,13 @@ Require Import Relations.
 Require Import RTL.
 Require Import Values.
 
-Require Import AliasLib.
+Require Import AliasFMapAVLPlus.
 Require Import AliasHierarchy.
-Require Import AliasSets.
-Require Import AliasMaps.
 Require Import AliasLattices.
+Require Import AliasLib.
+Require Import AliasMapLattice.
+Require Import AliasMaps.
+Require Import AliasSets.
 
 Lemma fold_left_preserves_prop:
   forall S F (P: S -> Prop) (f: S -> F -> S) l s,
@@ -46,378 +48,6 @@ Proof.
   simpl. apply fold_left_preserves_prop; auto.
   eapply IHl; eauto.
 Qed.
-
-Module FMapAVLPlus(X: OrderedType).
-
-Module M := FMapAVL.Make(X).
-
-Include M.
-
-Module FMF := FMapFacts.WFacts_fun X M.
-
-Section MAP2.
-
-Variable elt elt' elt'' : Type.
-Variable f : key -> option elt -> option elt' -> option elt''.
-Hypothesis f_compat: forall x x' o1 o2, X.eq x x' -> f x o1 o2 = f x' o1 o2.
-
-Definition raw_map2i : Raw.t elt -> Raw.t elt' -> Raw.t elt'' :=
-  Raw.map2_opt
-    (fun k d o => f k (Some d) o)
-    (Raw.map_option (fun k d => f k (Some d) None))
-    (Raw.map_option (fun k d' => f k None (Some d'))).
-
-Lemma map2i_bst:
-  forall m1 m2, Raw.bst m1 -> Raw.bst m2 -> Raw.bst (raw_map2i m1 m2).
-Proof.
-  intros. unfold raw_map2i.
-  apply Raw.Proofs.map2_opt_bst with (f0 := f); auto; intros.
-  apply Raw.Proofs.map_option_bst; auto.
-  apply Raw.Proofs.map_option_bst; auto.
-  apply Raw.Proofs.map_option_find; auto.
-  apply Raw.Proofs.map_option_find; auto.
-Qed.
-
-Definition map2i (m1: t elt) (m2: t elt') : t elt'' :=
-  Bst (map2i_bst m1 m2 m1.(is_bst) m2.(is_bst)).
-
-Lemma map2i_1: forall (m: t elt)(m': t elt') (x:key),
-  In x m \/ In x m' ->
-  find x (map2i m m') = f x (find x m) (find x m').
-Proof.
-  unfold find, map2i, In; intros until x. simpl.
-  do 2 rewrite Raw.Proofs.In_alt. unfold raw_map2i. intros.
-  rewrite Raw.Proofs.map2_opt_1 with (f0 := f); auto; intros.
-  apply Raw.Proofs.map_option_bst; auto.
-  apply Raw.Proofs.map_option_bst; auto.
-  apply Raw.Proofs.map_option_find; auto.
-  apply Raw.Proofs.map_option_find; auto.
-  apply is_bst. apply is_bst.
-Qed.
-
-Lemma map2i_2: forall (m: t elt)(m': t elt') (x:key),
-  In x (map2i m m') -> In x m \/ In x m'.
-Proof.
-  unfold In, map2i; intros until x.
-  do 3 rewrite Raw.Proofs.In_alt. simpl. unfold raw_map2i; intros.
-  eapply Raw.Proofs.map2_opt_2 with (f0 := f); eauto; intros.
-  apply Raw.Proofs.map_option_bst; auto.
-  apply Raw.Proofs.map_option_bst; auto.
-  apply Raw.Proofs.map_option_find; auto.
-  apply Raw.Proofs.map_option_find; auto.
-  apply is_bst. apply is_bst.
-Qed.
-
-Lemma map2i_3: forall x m1 m2,
-  (forall k, f k None None = None) ->
-  find x m1 = None ->
-  find x m2 = None ->
-  find x (map2i m1 m2) = None.
-Proof.
-  intros. destruct (find x (map2i m1 m2)) as []_eqn; [|auto].
-  assert (find x (map2i m1 m2) <> None). congruence.
-  apply FMF.in_find_iff in H2. apply map2i_2 in H2. inv H2.
-  apply FMF.in_find_iff in H3. congruence.
-  apply FMF.in_find_iff in H3. congruence.
-Qed.
-
-Lemma map2i_4: forall m m',
-  (forall k, f k None None = None) ->
-  forall x,
-    find x (map2i m m') = f x (find x m) (find x m').
-Proof.
-  intros ?? H ?. destruct (find x m) as []_eqn.
-  rewrite <- Heqo. apply map2i_1. left. apply FMF.in_find_iff. congruence.
-  destruct (find x m') as []_eqn.
-  rewrite <- Heqo. rewrite <- Heqo0. apply map2i_1.
-  right. apply FMF.in_find_iff. congruence.
-  rewrite H. apply map2i_3; auto.
-Qed.
-
-End MAP2.
-
-Implicit Arguments map2i [elt elt' elt''].
-
-End FMapAVLPlus.
-
-Module Type MergeStrategy (KEY: OrderedType) (VAL: SEMILATTICE).
-  Variable f: KEY.t -> option VAL.t -> option VAL.t -> option VAL.t.
-  Axiom f_compat:
-    forall (x x': KEY.t) (o1: option VAL.t) (o2: option VAL.t),
-      KEY.eq x x' -> f x o1 o2 = f x' o1 o2.
-End MergeStrategy.
-
-Module MapSemiLattice
-  (KEY: OrderedType)
-  (VAL: SEMILATTICE)
-  (*MGS: MergeStrategy(KEY)(VAL)*)
-  <: SEMILATTICE.
-
-  Module M := FMapAVLPlus(KEY).
-
-  Module FMF := FMapFacts.WFacts_fun KEY M.
-
-  Definition t := M.t VAL.t.
-
-  Definition eq (x y: t): Prop :=
-    forall k,
-      match M.find k x, M.find k y with
-      | None, None     => True
-      | Some a, Some b => VAL.eq a b
-      | _, _           => False
-      end.
-
-  Theorem eq_refl: forall x, eq x x.
-  Proof.
-    repeat intro. destruct M.find. apply VAL.eq_refl. auto.
-  Qed.
-
-  Theorem eq_sym: forall x y, eq x y -> eq y x.
-  Proof.
-    repeat intro. unalias. specialize (H k).
-    destruct M.find; destruct M.find; auto. apply VAL.eq_sym. auto.
-  Qed.
-
-  Theorem eq_trans: forall x y z, eq x y -> eq y z -> eq x z.
-  Proof.
-    repeat intro. unalias. specialize (H k). specialize (H0 k).
-    destruct M.find; destruct M.find; destruct M.find; auto.
-    eapply VAL.eq_trans; eauto. contradiction.
-  Qed.
-
-  Definition beq: t -> t -> bool := M.equal VAL.beq.
-
-  Theorem beq_correct: forall x y, beq x y = true -> eq x y.
-  Proof.
-    repeat intro. apply M.equal_2 in H. inv H.
-    destruct (M.find k x) as []_eqn; destruct (M.find k y) as []_eqn; auto.
-    apply VAL.beq_correct. eapply H1; apply FMF.find_mapsto_iff; eauto.
-    apply FMF.not_find_in_iff in Heqo0. elim Heqo0. apply H0.
-    apply FMF.in_find_iff. congruence.
-    apply FMF.not_find_in_iff in Heqo. elim Heqo. apply H0.
-    apply FMF.in_find_iff. congruence.
-  Qed.
-
-  (* Assuming None is the same as B.bot *)
-  Definition ge x y :=
-    forall k,
-      match M.find k x, M.find k y with
-      | None,   None   => True
-      | Some a, Some b => VAL.ge a b
-      | Some _, None   => True
-      | None,   Some b => VAL.ge VAL.bot b
-      end.
-
-  Theorem ge_refl: forall x y, eq x y -> ge x y.
-  Proof.
-    repeat intro. unalias. specialize (H k).
-    destruct (M.find k x) as []_eqn; destruct (M.find k y) as []_eqn; auto.
-    apply VAL.ge_refl. auto. contradiction.
-  Qed.
-
-  Theorem ge_trans: forall x y z, ge x y -> ge y z -> ge x z.
-  Proof.
-    repeat intro. unalias. specialize (H k). specialize (H0 k).
-    destruct (M.find k x) as []_eqn; destruct (M.find k y) as []_eqn;
-    destruct (M.find k z) as []_eqn; auto.
-    eapply VAL.ge_trans; eauto.
-    eapply VAL.ge_trans. apply VAL.ge_bot. auto.
-    eapply VAL.ge_trans. eauto. auto.
-  Qed.
-
-  Definition bot: t := M.empty VAL.t.
-
-  Theorem ge_bot: forall x, ge x bot.
-  Proof.
-    repeat intro.
-    destruct (M.find k x) as []_eqn; rewrite FMF.empty_o; auto.
-  Qed.
-
-  Definition merge (k: KEY.t) o1 o2 :=
-    match o1, o2 with
-    | None, None => None
-    | Some s, None | None, Some s => Some s
-    | Some s1, Some s2 => Some (VAL.lub s1 s2)
-    end.
-
-  Theorem merge_compat:
-    forall x x' o1 o2,
-      KEY.eq x x' -> merge x o1 o2 = merge x' o1 o2.
-  Proof.
-    reflexivity.
-  Qed.
-
-  Definition lub (m: t) (n: t): t :=
-    M.map2i merge merge_compat m n.
-
-  Ltac msimpl :=
-    repeat (unfold not in *; try
-      match goal with
-        | H: M.find _ _ = Some _ |- _ =>
-          apply FMF.find_mapsto_iff in H
-        | H: M.find _ _ = None |- _ =>
-          apply FMF.not_find_in_iff in H
-        | H: M.MapsTo _ _ (M.empty _) |- _ => inversion H
-        | H: M.MapsTo _ _ (M.add _ _ _) |- _ =>
-          apply FMF.add_mapsto_iff in H; simpl in H; intuition; subst; auto
-        | A: M.MapsTo ?x ?s0 ?m,
-          B: M.MapsTo ?x ?s1 ?m |- _ =>
-            assert (s0 = s1) by (
-              apply FMF.find_mapsto_iff in A;
-                apply FMF.find_mapsto_iff in B;
-                  rewrite A in B; inversion_clear B; reflexivity
-            ); subst; clear B
-        | A: M.MapsTo ?x ?s ?m,
-          B: M.In ?x (M.add _ _ ?m) -> False |- _ =>
-            elim B; apply FMF.add_in_iff; right; exists s; exact A
-        | A: M.MapsTo ?x ?s ?m,
-          B: M.In ?x ?m -> False |- _ =>
-            elim B; exists s; exact A
-        | A: M.In ?x ?m -> False,
-          B: M.MapsTo ?x ?s (M.add ?y _ ?m),
-          C: ?x = ?y -> False |- _ =>
-            apply FMF.add_neq_mapsto_iff in B;
-              [elim A; exists s; exact B | ]
-        | A: M.MapsTo ?x ?s ?m,
-          B: M.In ?x (M.mapi _ ?m) -> False |- _ =>
-            elim B; apply FMF.mapi_in_iff; exists s; exact A
-        | A: M.In ?x ?m -> False,
-          B: M.MapsTo ?x ?s (M.mapi _ ?m) |- _ =>
-            elim A; rewrite <- FMF.mapi_in_iff; exists s; apply B
-      end
-    ).
-
-  Theorem ge_lub_left: forall x y, ge (lub x y) x.
-  Proof.
-    repeat intro.
-    destruct (M.find k (lub x y)) as []_eqn, (M.find k x) as []_eqn; msimpl;
-      auto.
-    unfold lub in Heqo.
-    pose proof M.map2i_1. specialize (H _ _ _ merge merge_compat x y k).
-    feed H. left. now exists t1.
-    replace (M.find k x) with (Some t1) in H. simpl in H.
-    destruct (M.find k y) as []_eqn; msimpl.
-    apply VAL.ge_lub_left. apply VAL.ge_refl. apply VAL.eq_refl.
-    destruct (M.find k x) as []_eqn; msimpl; reflexivity.
-    elim Heqo. unfold lub.
-    pose proof M.map2i_1. specialize (H _ _ _ merge merge_compat x y k).
-    feed H. left. now exists t0.
-    replace (M.find k x) with (Some t0) in H. simpl in H.
-    destruct (M.find k y) as []_eqn; msimpl.
-    destruct (M.find k x) as []_eqn; msimpl; reflexivity.
-  Qed.
-
-  Theorem ge_lub_right: forall x y, ge (lub x y) y.
-  Proof.
-    repeat intro.
-    destruct (M.find k (lub x y)) as []_eqn, (M.find k y) as []_eqn; msimpl;
-      auto.
-    unfold lub in Heqo.
-    pose proof M.map2i_1. specialize (H _ _ _ merge merge_compat x y k).
-    feed H. right. now exists t1.
-    replace (M.find k y) with (Some t1) in H.
-    destruct (M.find k x) as []_eqn; simpl in H; msimpl; auto.
-    apply VAL.ge_lub_right. apply VAL.ge_refl. apply VAL.eq_refl.
-    destruct (M.find k y) as []_eqn; msimpl; reflexivity.
-    elim Heqo. unfold lub.
-    pose proof M.map2i_1. specialize (H _ _ _ merge merge_compat x y k).
-    feed H. right. now exists t0.
-    replace (M.find k y) with (Some t0) in H.
-    destruct (M.find k x) as []_eqn; simpl in H; msimpl.
-    destruct (M.find k y) as []_eqn; simpl in H; msimpl; reflexivity.
-  Qed.
-
-End MapSemiLattice.
-
-Module SemiLatticeToLattice (S: SEMILATTICE) <: SEMILATTICE_WITH_TOP.
-
-  Definition t := option S.t.
-
-  Notation Top := None (only parsing).
-
-  Definition eq (x y: t) :=
-    match x, y with
-    | Top,    Top    => True
-    | Some a, Some b => S.eq a b
-    | _,      _      => False
-    end.
-
-  Theorem eq_refl: forall x, eq x x.
-  Proof.
-    destruct x; intuition. apply S.eq_refl.
-  Qed.
-
-  Theorem eq_sym: forall x y, eq x y -> eq y x.
-  Proof.
-    intros. destruct x, y; simpl in *; intuition. apply S.eq_sym. auto.
-  Qed.
-
-  Theorem eq_trans: forall x y z, eq x y -> eq y z -> eq x z.
-  Proof.
-    intros. destruct x, y, z; simpl in *; intuition. eapply S.eq_trans; eauto.
-  Qed.
-
-  Definition beq (x y: t) :=
-    match x, y with
-    | Top,    Top => true
-    | Some a, Some b => S.beq a b
-    | _,      _ => false
-    end.
-
-  Theorem beq_correct: forall x y, beq x y = true -> eq x y.
-  Proof.
-    intros. destruct x, y; simpl in *; intuition. apply S.beq_correct. auto.
-  Qed.
-
-  Definition ge (x y: t) :=
-    match x, y with
-    | Top,    _      => True
-    | _,      Top    => False
-    | Some a, Some b => S.ge a b
-    end.
-
-  Theorem ge_refl: forall x y, eq x y -> ge x y.
-  Proof.
-    intros. destruct x, y; simpl in *; intuition. apply S.ge_refl. auto.
-  Qed.
-
-  Theorem ge_trans: forall x y z, ge x y -> ge y z -> ge x z.
-  Proof.
-    intros. destruct x, y, z; simpl in *; intuition. eapply S.ge_trans; eauto.
-  Qed.
-
-  Definition bot := Some S.bot.
-
-  Theorem ge_bot: forall x, ge x bot.
-  Proof.
-    destruct x; simpl in *; intuition. apply S.ge_bot.
-  Qed.
-
-  Definition lub (x y: t) :=
-    match x, y with
-    | Top,    _      => Top
-    | _,      Top    => Top
-    | Some a, Some b => Some (S.lub a b)
-    end.
-
-  Theorem ge_lub_left: forall x y, ge (lub x y) x.
-  Proof.
-    destruct x, y; simpl in *; intuition. apply S.ge_lub_left.
-  Qed.
-
-  Theorem ge_lub_right: forall x y, ge (lub x y) y.
-  Proof.
-    destruct x, y; simpl in *; intuition. apply S.ge_lub_right.
-  Qed.
-
-  Definition top := @Top S.t.
-
-  Theorem ge_top: forall x, ge top x.
-  Proof.
-    destruct x; simpl in *; intuition.
-  Qed.
-
-End SemiLatticeToLattice.
 
 (* Abstract blocks *)
 
@@ -866,19 +496,23 @@ Ltac merge_parents :=
     end
   ).
 
-Module Type SEMILAT_TOP_LINCL.
+Module Type SEMILATTICE_EXTENDED.
 
   Include SEMILATTICE_WITH_TOP.
 
-  Axiom lub_inc_l: forall a b,
-    ge a b ->
-    forall v, ge (lub v a) (lub v b).
+  Axiom lub_inc_l: forall a b, ge a b -> forall v, ge (lub v a) (lub v b).
 
-End SEMILAT_TOP_LINCL.
+  Axiom ge_lub: forall a b c d, ge a b -> ge c d -> ge (lub a c) (lub b d).
+
+  Axiom lub_bot: forall a b, eq a bot -> eq b bot -> eq (lub a b) bot.
+
+  Axiom bot_ge: forall x, ge bot x <-> eq bot x.
+
+End SEMILATTICE_EXTENDED.
 
 Module PTSet
   <: HSet(AbsPH)
-  <: SEMILAT_TOP_LINCL.
+  <: SEMILATTICE_EXTENDED.
 
   Module AbsPSet := FSetAVL.Make AbsPOT.
 
@@ -1139,19 +773,35 @@ Module PTSet
     exists ax. split. easy. apply F.union_iff. right. easy.
   Qed.
 
-  (* [widen s t] widens s according to t, that is, it returns a set greater
-     than s, according to some criterion on [s] and [t]. *)
-  Definition is_eq_shifted b o l :=
+  (* [implies_widening b o l] is true if the value of l implies that (Loc b o)
+     must or will be widened.
+     This includes:
+     - l = Loc b o', where o' <> O
+     - L = blk b', where b' >= b
+     *)
+  Definition implies_widening b o l :=
     match l with
     | Loc b' o' => andb (AbsBOT.eq_dec b b') (negb (Int.eq o o'))
-    | Blk _     => false
+    (*
+       was | Blk _ => false
+       but this is problematic, as it does not ensure:
+       ge A a -> ge B b -> ge (widen A B) (widen a b)
+       counter-example:
+       a = { Loc x o  }
+       A = { Loc x o  }
+       b = { Loc x o' }
+       B = { Blk x    }
+       widen A B = { Loc x o }
+       widen a b = { Blk x   }
+       *)
+      | Blk b'    => if AbsBOT.eq_dec b' b || AbsPH.above_dec (Blk b') (Blk b) then true else false
     end.
 
   Definition widening widener x :=
     match x with
     | Blk b => Blk b
     | Loc b o =>
-      if AbsPSet.exists_ (is_eq_shifted b o) widener
+      if AbsPSet.exists_ (implies_widening b o) widener
       then Blk b (* widening *)
       else Loc b o
     end.
@@ -1165,7 +815,7 @@ Module PTSet
     intros. apply In_spec. unfold add_widened.
     destruct x as [b|b o]; simpl.
     left. apply F.add_iff. now left.
-    destruct (AbsPSet.exists_ (is_eq_shifted b o) widener) as []_eqn.
+    destruct (AbsPSet.exists_ (implies_widening b o) widener) as []_eqn.
     right. exists (Blk b). split.
     now apply AbsPH.parent_is_above.
     apply F.add_iff. now left.
@@ -1331,7 +981,7 @@ Module PTSet
 
   Lemma widen_inc_l_aux: forall b o s v,
     In (Loc b o) s ->
-    AbsPSet.exists_ (is_eq_shifted b o) v = true ->
+    AbsPSet.exists_ (implies_widening b o) v = true ->
     In (Blk b) (widen s v).
   Proof.
     intros ???? IN EX. unfold widen. rewrite AbsPSet.fold_1.
@@ -1365,7 +1015,7 @@ Module PTSet
     destruct INV as [dx [dxInb xdx]]. subst.
     destruct dx; simpl in *.
     apply widen_spec. apply GE. apply In_spec. now left.
-    destruct (AbsPSet.exists_ (is_eq_shifted a0 i) v) as []_eqn.
+    destruct (AbsPSet.exists_ (implies_widening a0 i) v) as []_eqn.
     assert (In (Loc a0 i) a). apply GE. apply In_spec. now left.
     eapply widen_inc_l_aux; eauto.
     apply widen_spec. apply GE. apply In_spec. now left.
@@ -1375,7 +1025,7 @@ Module PTSet
     destruct dx; simpl in *.
     apply widen_spec. apply GE. apply In_spec. right.
     exists (Blk a0). split; easy.
-    destruct (AbsPSet.exists_ (is_eq_shifted a0 i) v) as []_eqn.
+    destruct (AbsPSet.exists_ (implies_widening a0 i) v) as []_eqn.
     assert (In (Loc a0 i) a). apply GE. apply In_spec. now left.
     assert (In (Blk a0) (widen a v)). eapply widen_inc_l_aux; eauto.
     apply In_spec in H0. apply In_spec. right. intuition.
@@ -1407,12 +1057,269 @@ Module PTSet
     right. exists aax. split. easy. apply F.union_iff. now right.
   Qed.
 
-  Theorem lub_inc_l: forall a b,
-    ge a b ->
-    forall v, ge (lub v a) (lub v b).
+  Theorem lub_inc_l: forall a b, ge a b -> forall v, ge (lub v a) (lub v b).
   Proof with (try solve [repeat intro; subst; reflexivity]).
     unfold lub, lub'. intros a b GE v x IN. apply -> normalize_spec.
     apply normalize_spec in IN. eapply ge_union_l; eauto. now apply widen_inc_l.
+  Qed.
+
+  Theorem In_union: forall x a b,
+    In x (AbsPSet.union a b) <-> In x a \/ In x b.
+  Proof.
+    split; intros.
+    Case "->".
+    apply In_spec in H. destruct H as [H|H].
+    apply F.union_iff in H. intuition.
+    left. apply In_spec. now left.
+    right. apply  In_spec. now left.
+    destruct H as [ax [A B]].
+    apply F.union_iff in B. intuition.
+    left. apply In_spec. right. exists ax. now split.
+    right. apply In_spec. right. exists ax. now split.
+    Case "<-".
+    apply In_spec. destruct H as [H|H].
+    apply In_spec in H. destruct H as [H|[ax [? ?]]].
+    left. apply F.union_iff. now left.
+    right. exists ax. split. easy. apply F.union_iff. now left.
+    apply In_spec in H. destruct H as [H|[ax [? ?]]].
+    left. apply F.union_iff. now right.
+    right. exists ax. split. easy. apply F.union_iff. now right.
+  Qed.
+
+  Theorem widen_ge: forall a A b B,
+    ge A a ->
+    ge B b ->
+    ge (widen A B) (widen a b).
+  Proof.
+    intros a A b B geAa geBb. intros x IN. unfold ge in *.
+    apply In_spec in IN. destruct IN as [IN|[ax[Aax IN]]].
+    Case "x is really in (widen a b) -> x is the widening of some dx".
+    apply widen_inv in IN. destruct IN as [dx[IN ?]]. subst.
+    unfold widening. destruct dx.
+    SCase "dx was a Blk".
+    apply widen_spec. apply geAa. apply In_spec. now left.
+    SCase "dx was a Loc -> x is either the same Loc or the parent Blk".
+    destruct (AbsPSet.exists_ (implies_widening a0 i) b) as []_eqn.
+    SSCase "x is a Blk, there is a Loc for the same block in b".
+    apply In_spec.
+    (* DON'T DO 'left' HERE! IT CAN BE 'right'! *)
+    unfold widen. rewrite AbsPSet.fold_1.
+    assert (INA: In (Loc a0 i) A). apply geAa. apply In_spec. now left.
+    apply In_spec in INA. destruct INA as [INA|[ax [Aax INA]]].
+    SSSCase "(Loc a0 i) is in A".
+    left.
+    eapply fold_left_adds_prop; eauto.
+    apply PTSet.F.elements_iff. eauto.
+    SSSSCase "'add' case".
+    intros. unfold add_widened. apply F.add_iff. unfold widening.
+    destruct (AbsPSet.exists_ (implies_widening a0 i) B) as []_eqn.
+    SSSSSCase "some element of B implies widening (a0, i)".
+    now left.
+    SSSSSCase "no element in B implies widening (a0, i)".
+    exfalso. (* since there is one in b, there must be one in B >= b *)
+    apply F.exists_iff in Heqb0. inv Heqb0. intuition.
+    assert (INB: In x0 B). apply geBb. apply In_spec. now left.
+    (* let's show it *)
+    assert (AbsPSet.Exists (fun x => implies_widening a0 i x = true) B).
+    apply In_spec in INB. destruct INB as [INB|[ax[Aax INB]]].
+    SSSSSSCase "x0 is in B".
+    exists x0. now split.
+    SSSSSSCase "ax >= x0 is in B".
+    exists ax. split. easy. unfold implies_widening. unfold implies_widening in H1.
+    destruct ax.
+    destruct (AbsBOT.eq_dec t0 a0); simpl. easy.
+    destruct (AbsPH.above_dec (@Blk AbsBOT.t t0) (@Blk AbsBOT.t a0)); simpl. easy.
+    destruct x0.
+    destruct (AbsBOT.eq_dec a1 a0); simpl in H1. inv e. contradiction.
+    destruct (AbsPH.above_dec (@Blk AbsBOT.t a1) (@Blk AbsBOT.t a0)); simpl in H1.
+    elim n0. etransitivity. apply Aax. easy.
+    inv H1.
+    destruct (AbsBOT.eq_dec a0 a1); simpl in H1. inv e.
+    destruct (Int.eq i i0); simpl in H1. inv H1.
+    elim n0. eapply AbsPH.no_lozenge. apply Aax. now compute. congruence.
+    congruence.
+    elim (not_loc_above _ _ _ Aax).
+    apply F.exists_iff in H.
+    congruence.
+    repeat intro; now subst.
+    repeat intro; now subst.
+    SSSSCase "'preserve' case".
+    intros. apply F.add_iff. now right.
+    SSSCase "ax >= (Loc a0 i) is in A".
+    eapply fold_left_adds_prop; eauto.
+    apply PTSet.F.elements_iff. eauto.
+    SSSSCase "'add' case".
+    destruct (AbsPH.eq_dec ax (Blk a0)).
+    SSSSSCase "ax = Blk a0 -> left".
+    subst. left. unfold add_widened. apply F.add_iff. unfold widening. now left.
+    SSSSSCase "ax > Blk a0 -> right".
+    right. exists ax. split.
+    eapply AbsPH.no_lozenge; eauto. now compute.
+    apply F.add_iff. unfold widening. destruct ax. now left. elim (not_loc_above _ _ _ Aax).
+    SSSSCase "'preserve' case".
+    intros. destruct H as [?|[aax [? ?]]].
+    left. apply F.add_iff. now right.
+    right. exists aax. split. easy. apply F.add_iff. now right.
+    SSCase "x is a Loc, no widener in b".
+    apply In_spec.
+    unfold widen. rewrite AbsPSet.fold_1.
+    assert (INA: In (Loc a0 i) A). apply geAa. apply In_spec. now left.
+    apply In_spec in INA. destruct INA as [INA|[ax [Aax INA]]].
+    SSSCase "really in A".
+    destruct (AbsPSet.exists_ (implies_widening a0 i) B) as []_eqn.
+    SSSSCase "widening -> right".
+    right.
+    eapply fold_left_adds_prop; eauto.
+    apply PTSet.F.elements_iff. eauto.
+    SSSSSCase "'add' case".
+    intros. exists (Blk a0). split.
+    apply AbsPH.parent_is_above. now compute.
+    unfold add_widened. apply F.add_iff. unfold widening. rewrite Heqb1. now left.
+    SSSSSCase "'preserve' case".
+    intros. destruct H as [ax [? ?]].
+    exists ax. split. easy. apply F.add_iff. now right.
+    SSSSCase "no widening -> left".
+    left.
+    eapply fold_left_adds_prop; eauto.
+    apply PTSet.F.elements_iff. eauto.
+    SSSSSCase "'add' case".
+    intros. apply F.add_iff. unfold widening. rewrite Heqb1. now left.
+    SSSSSCase "'preserve' case".
+    intros. apply F.add_iff. now right.
+    SSSCase "parent in A".
+    right. exists ax. split. easy.
+    eapply fold_left_adds_prop; eauto.
+    apply PTSet.F.elements_iff. eauto.
+    intros. apply F.add_iff. destruct ax. now left. elim (not_loc_above _ _ _ Aax).
+    intros. apply F.add_iff. now right.
+    Case "x has a parent really in (widen a b)".
+    apply In_spec. right. apply widen_inv in IN. destruct IN as [dx[IN ?]]. subst.
+    assert (INA: In dx A). apply geAa. apply In_spec. now left.
+    apply In_spec in INA. destruct INA as [?|[ax[? ?]]].
+    SCase "dx in A".
+    exists (widening B dx). split.
+    unfold widening. destruct dx. easy. unfold widening in Aax. 
+    destruct (AbsPSet.exists_ (implies_widening a0 i) b) as []_eqn;
+    destruct (AbsPSet.exists_ (implies_widening a0 i) B) as []_eqn;
+    try easy.
+    exfalso.
+    apply F.exists_iff in Heqb0. inv Heqb0. intuition.
+    assert (In x0 B). apply geBb. apply In_spec. now left.
+    assert (AbsPSet.Exists (fun x => implies_widening a0 i x = true) B).
+    apply In_spec in H0. destruct H0 as [?|[ax[? ?]]].
+    exists x0. now split.
+    exists ax. split. easy. unfold implies_widening. unfold implies_widening in H2.
+    destruct ax. destruct x0.
+    Ltac finish_it :=
+      repeat (
+        try contradiction;
+        match goal with
+        | H: AbsPH.above (Loc _ _) _ |- _ => elim (not_loc_above _ _ _ H)
+        | H: AbsBOT.eq _ _ |- _ => inv H
+        | F: ~ AbsPH.above ?a ?b,
+          A: AbsPH.above ?a ?x,
+          B: AbsPH.above ?x ?b |- _ => elim F; etransitivity; eauto
+        | A: AbsPH.above ?x (Loc ?b ?o),
+          F: ~ AbsPH.above ?x (Blk ?b)
+          |- _ =>
+          elim F; eapply AbsPH.no_lozenge; [apply A | now compute | congruence]
+        end
+      ).
+    destruct (AbsBOT.eq_dec a1 a0), (AbsPH.above_dec (@Blk AbsBOT.t a1) (@Blk AbsBOT.t a0)),
+      (AbsBOT.eq_dec t0 a0), (AbsPH.above_dec (@Blk AbsBOT.t t0) (@Blk AbsBOT.t a0));
+      simpl in *; try easy; finish_it.
+    destruct (AbsBOT.eq_dec a0 a1), (Int.eq i i0),
+      (AbsBOT.eq_dec t0 a0), (AbsPH.above_dec (@Blk AbsBOT.t t0) (@Blk AbsBOT.t a0));
+      simpl in *; try easy; finish_it.
+    destruct x0.
+    destruct (AbsBOT.eq_dec a1 a0), (AbsPH.above_dec (@Blk AbsBOT.t a1) (@Blk AbsBOT.t a0)),
+      (AbsBOT.eq_dec a0 t0), (Int.eq i i0);
+      simpl in *; try easy; finish_it.
+    destruct (AbsBOT.eq_dec a0 a1), (Int.eq i i1),
+      (AbsBOT.eq_dec a0 t0), (Int.eq i i0);
+      simpl in *; try easy; finish_it.
+    apply F.exists_iff in H3. congruence.
+    repeat intro; now subst.
+    repeat intro; now subst.
+    etransitivity; eauto. now apply AbsPH.parent_is_above.
+    unfold widening. destruct dx.
+    SSCase "dx was a Blk".
+    unfold widen. rewrite AbsPSet.fold_1.
+    eapply fold_left_adds_prop; eauto.
+    apply PTSet.F.elements_iff. eauto.
+    intros. apply F.add_iff. now left.
+    intros. apply F.add_iff. now right.
+    SSCase "dx was a Loc".
+    unfold widen. rewrite AbsPSet.fold_1.
+    eapply fold_left_adds_prop; eauto.
+    apply PTSet.F.elements_iff. eauto.
+    intros. apply F.add_iff. unfold widening. now left.
+    intros. apply F.add_iff. now right.
+    SCase "dx has ancestor in A".
+    exists (widening B ax).
+    split.
+    unfold widening in *. destruct ax, dx.
+    etransitivity; eauto.
+    destruct (AbsPSet.exists_ (implies_widening a0 i) b) as []_eqn.
+    destruct (AbsBOT.eq_dec a0 t0).
+    now inv e.
+    etransitivity. eapply AbsPH.no_lozenge. apply H. now compute. congruence. easy.
+    elim (not_loc_above _ _ _ Aax).
+    elim (not_loc_above _ _ _ H).
+    elim (not_loc_above _ _ _ H).
+    unfold widening. destruct ax.
+    unfold widen. rewrite AbsPSet.fold_1.
+    eapply fold_left_adds_prop; eauto.
+    apply PTSet.F.elements_iff. eauto.
+    intros. apply F.add_iff. now left.
+    intros. apply F.add_iff. now right.
+    unfold widen. rewrite AbsPSet.fold_1.
+    eapply fold_left_adds_prop; eauto.
+    apply PTSet.F.elements_iff. eauto.
+    intros. apply F.add_iff. unfold widening. now left.
+    intros. apply F.add_iff. now right.
+  Qed.
+
+  Theorem ge_lub: forall a b c d, ge a b -> ge c d -> ge (lub a c) (lub b d).
+  Proof.
+    unfold lub, lub'. intros a b c d GEab GEcd x IN. apply -> normalize_spec.
+    apply normalize_spec in IN. unfold ge in *.
+    apply In_union in IN. apply In_union. intuition.
+    right. eapply widen_ge; eauto.
+  Qed.
+
+  Theorem lub_bot: forall a b, eq a bot -> eq b bot -> eq (lub a b) bot.
+  Proof.
+    intros a b abot bbot x. split; intros H.
+    apply In_spec in H. destruct H as [H|[ax[A H]]].
+    unfold lub in H. unfold lub' in H. unfold normalize in H.
+    apply F.filter_iff in H. destruct H as [IN N].
+    apply F.union_iff in IN. destruct IN as [IN|IN].
+    assert (In x a). apply In_spec. now left. now apply abot in H.
+    unfold widen in IN. apply AbsPSet_fold_inv in IN.
+    destruct IN as [ax[IN ?]].
+    assert (In ax b). apply In_spec. now left. apply bbot in H0. apply In_spec in H0. intuition.
+    inv H1. destruct H1 as [?[? ?]]. inv H1.
+    intro. inv H.
+    repeat intro; now subst.
+    unfold lub in H. unfold lub' in H. unfold normalize in H.
+    apply F.filter_iff in H. destruct H as [IN N].
+    apply F.union_iff in IN. destruct IN as [IN|IN].
+    assert (In ax a). apply In_spec. now left. apply abot in H. apply In_spec in H. intuition.
+    inv H0. destruct H0 as [?[? ?]]. inv H0.
+    unfold widen in IN. apply AbsPSet_fold_inv in IN.
+    destruct IN as [aax[IN ?]].
+    assert (In aax b). apply In_spec. now left. apply bbot in H0. apply In_spec in H0. intuition.
+    inv H1. destruct H1 as [?[? ?]]. inv H1.
+    intro. inv H.
+    repeat intro; now subst.
+    apply In_spec in H. destruct H as [H|[?[H ?]]].
+    inv H. inv H0.
+  Qed.
+
+  Theorem bot_ge: forall x, ge bot x <-> eq bot x.
+  Proof.
+    admit.
   Qed.
 
   Opaque mem In beq ge lub bot top.
@@ -1425,6 +1332,7 @@ End PTSet.
 
 Module RegOT <: OrderedType := OrderedTypeEx.Positive_as_OT.
 
+(*
 Module NaiveMergeStrategy (KEY: OrderedType) (VAL: SEMILATTICE)
   <: MergeStrategy(KEY)(VAL).
   Definition f (k: KEY.t) o1 o2 :=
@@ -1442,6 +1350,8 @@ Module NaiveMergeStrategy (KEY: OrderedType) (VAL: SEMILATTICE)
 End NaiveMergeStrategy.
 
 Module RegMapMergeStrategy := NaiveMergeStrategy(RegOT)(PTSet).
+*)
+
 Module RegMapWithoutTop := MapSemiLattice(RegOT)(PTSet).
 
 Module RegMap <: SEMILATTICE_WITH_TOP.
@@ -1472,7 +1382,7 @@ Module RegMap <: SEMILATTICE_WITH_TOP.
     (forall k, PTSet.ge (RegMap.get k rmap) (RegMap.get k rmap')).
   Proof.
     intros. unfold get. destruct rmap, rmap'; auto with ptset.
-    specialize (H k).
+    specialize (H k). unalias.
     destruct (RegMapWithoutTop.M.find k t0);
     destruct (RegMapWithoutTop.M.find k t1);
     auto with ptset.
@@ -1503,7 +1413,7 @@ Module RegMap <: SEMILATTICE_WITH_TOP.
   Theorem ge_add: forall k v m, ge (add k v m) m.
   Proof.
     intros. destruct m; simpl; intuition.
-    unfold RegMapWithoutTop.ge. intros.
+    unfold RegMapWithoutTop.ge. unalias. intros.
     destruct (peq k k0).
     subst. rewrite RegMapWithoutTop.FMF.add_eq_o; [|auto].
     generalize (RegMapWithoutTop.M.find k0 t0); intros s. destruct s; [|auto].
@@ -1526,19 +1436,33 @@ Module MkOverlapMapAux
   (OT: OrderedTypeLogicEq
     with Definition t := O.t
   )
-  (L: SEMILAT_TOP_LINCL).
+  (L: SEMILATTICE_EXTENDED).
 
   (* We need a merge strategy to create a map semilattice from keys and image
      lattice. It defines what to put in the lub of two maps when keys are
      missing from either side. *)
-  Module MergeStrategy := NaiveMergeStrategy(OT)(L).
+  (* Module MergeStrategy := NaiveMergeStrategy(OT)(L). *)
 
   Module MSL := MapSemiLattice(OT)(L).
 
   (* The map semilattice does not have a Top. This adds it as an option on
      the underlying map semilattice type. *)
   Module LAT := SemiLatticeToLattice(MSL).
-  Include LAT.
+
+  Definition t := LAT.t.
+  Definition eq := LAT.eq.
+  Definition eq_refl := LAT.eq_refl.
+  Definition eq_sym := LAT.eq_sym.
+  Definition eq_trans := LAT.eq_trans.
+  Definition beq := LAT.beq.
+  Definition beq_correct := LAT.beq_correct.
+  Definition ge := LAT.ge.
+  Definition ge_refl := LAT.ge_refl.
+  Definition ge_trans := LAT.ge_trans.
+  Definition bot := LAT.bot.
+  Definition ge_bot := LAT.ge_bot.
+  Definition top := LAT.top.
+  Definition ge_top := LAT.ge_top.
 
   Function get_rec (k: O.t) (m: MSL.t) {measure O.measure k}: L.t :=
     match MSL.M.find k m with
@@ -1555,9 +1479,147 @@ Module MkOverlapMapAux
 
   Definition get (k: O.t) (m: t): L.t :=
     match m with
-    | Top    => L.top
-    | Some m => get_rec k m
+    | LAT.Top => L.top
+    | Some m  => get_rec k m
     end.
+
+  Definition merge m n (k: OT.t) (a: option L.t) (b: option L.t): option L.t :=
+    match a, b with
+    | None,   None   => None
+    | Some a, None   => Some (L.lub a (get_rec k n))
+    | None,   Some b => Some (L.lub (get_rec k m) b)
+    | Some a, Some b => Some (L.lub a b)
+    end.
+
+  Theorem merge_compat m n:
+    forall x y a b, OT.eq x y -> merge m n x a b = merge m n y a b.
+  Proof.
+    intros. inv H. reflexivity.
+  Qed.
+
+  Definition hmap_lub (m n: MSL.t): MSL.t :=
+    MSL.M.map2i (merge m n) (merge_compat m n) m n.
+    
+  Definition lub m n :=
+    match m, n with
+    | Some m, Some n => Some (hmap_lub m n)
+    | _,      _      => None
+    end.
+
+  Lemma hmap_lub_preserves_ge_get_rec_right:
+    (forall a b c d : L.t,
+      L.ge a b -> L.ge c d -> L.ge (L.lub a c) (L.lub b d)) ->
+    forall m n a b x,
+      L.ge a (get_rec x m) ->
+      L.ge b (get_rec x n) ->
+      L.ge (L.lub a b) (get_rec x (hmap_lub m n)).
+  Proof.
+    intros C ????. refine (O.above_ind _ _); intros x IND GEa GEb.
+    rewrite get_rec_equation. unfold hmap_lub at 1. rewrite MSL.M.map2i_4.
+    rewrite get_rec_equation in GEa, GEb.
+    destruct (MSL.M.find x m) as [xm|]_eqn; MSL.msimpl;
+    destruct (MSL.M.find x n) as [xn|]_eqn; MSL.msimpl;
+      simpl.
+    now apply C.
+    apply C. easy. destruct (O.parent x) as [px|]_eqn.
+    rewrite get_rec_equation. destruct (MSL.M.find x n) as []_eqn; MSL.msimpl. now rewrite Heqo1.
+    rewrite get_rec_equation. destruct (MSL.M.find x n) as []_eqn; MSL.msimpl. now rewrite Heqo1.
+    apply C.
+    rewrite get_rec_equation. destruct (MSL.M.find x m) as []_eqn; MSL.msimpl. easy. easy.
+    destruct (O.parent x) as [px|]_eqn.
+    apply IND; auto. now apply O.parent_is_above.
+    apply L.ge_bot.
+    simpl; auto.
+  Qed.
+
+  Lemma hmap_lub_preserves_ge_get_rec_left:
+    (forall a b c d : L.t,
+      L.ge a b -> L.ge c d -> L.ge (L.lub a c) (L.lub b d)) ->
+    (forall a b : L.t,
+      L.eq a L.bot -> L.eq b L.bot -> L.eq (L.lub a b) L.bot) ->
+    (forall x : L.t, L.ge L.bot x <-> L.eq L.bot x) ->
+    forall m n a b x,
+      L.ge (get_rec x m) a ->
+      L.ge (get_rec x n) b ->
+      L.ge (get_rec x (hmap_lub m n)) (L.lub a b).
+  Proof with (try solve [now simpl]).
+    intros C D E ????. refine (O.above_ind _ _); intros x IND GEa GEb.
+    rewrite get_rec_equation. unfold hmap_lub at 1. rewrite MSL.M.map2i_4...
+    rewrite get_rec_equation in GEa, GEb. unfold merge.
+    destruct (MSL.M.find x m) as [xm|]_eqn; MSL.msimpl;
+    destruct (MSL.M.find x n) as [xn|]_eqn; MSL.msimpl;
+      simpl.
+    now apply C.
+    destruct (O.parent x) as [px|]_eqn.
+    apply C. easy.
+    rewrite get_rec_equation. destruct (MSL.M.find x n) as []_eqn; MSL.msimpl. now rewrite Heqo1.
+    apply C. easy.
+    rewrite get_rec_equation. destruct (MSL.M.find x n) as []_eqn; MSL.msimpl. now rewrite Heqo1.
+    apply C. rewrite get_rec_equation. destruct (MSL.M.find x m) as []_eqn; MSL.msimpl. easy. easy.
+    destruct (O.parent x) as [px|]_eqn.
+    apply IND; auto. now apply O.parent_is_above.
+    apply L.ge_refl. apply L.eq_sym. apply D.
+    apply L.eq_sym. now apply E.
+    apply L.eq_sym. now apply E.
+  Qed.
+
+  Lemma mapsto_get_rec: forall k v m,
+    MSL.M.MapsTo k v m ->
+    get_rec k m = v.
+  Proof.
+    intros. rewrite get_rec_equation. destruct (MSL.M.find k m) as []_eqn; now MSL.msimpl.
+  Qed.
+
+  Theorem hmap_lub_preserves_ge_get_rec:
+    (forall a b c d : L.t,
+      L.ge a b -> L.ge c d -> L.ge (L.lub a c) (L.lub b d)) ->
+    (forall a b : L.t,
+      L.eq a L.bot -> L.eq b L.bot -> L.eq (L.lub a b) L.bot) ->
+    (forall x : L.t, L.ge L.bot x <-> L.eq L.bot x) ->
+    forall m n,
+      (forall x ax, O.above ax x -> L.ge (get_rec ax m) (get_rec x m)) ->
+      (forall x ax, O.above ax x -> L.ge (get_rec ax n) (get_rec x n)) ->
+      forall x ax,
+        O.above ax x ->
+        L.ge (get_rec ax (hmap_lub m n)) (get_rec x (hmap_lub m n)).
+  Proof with (try solve [now simpl]).
+    intros C D E m n GEm GEn. refine (O.above_ind _ _); intros x INDx ax Aaxx.
+    setoid_rewrite get_rec_equation at 2.
+    unfold hmap_lub at 2. rewrite MSL.M.map2i_4...
+    destruct (MSL.M.find x m) as [xm|]_eqn; MSL.msimpl;
+    destruct (MSL.M.find x n) as [xn|]_eqn; MSL.msimpl;
+      simpl.
+    apply hmap_lub_preserves_ge_get_rec_left; auto. 
+    setoid_rewrite <- (mapsto_get_rec _ _ _ Heqo); eauto.
+    setoid_rewrite <- (mapsto_get_rec _ _ _ Heqo0); eauto.
+    apply hmap_lub_preserves_ge_get_rec_left; auto.
+    setoid_rewrite <- (mapsto_get_rec _ _ _ Heqo); eauto.
+    apply hmap_lub_preserves_ge_get_rec_left; auto.
+    setoid_rewrite <- (mapsto_get_rec _ _ _ Heqo0); eauto.
+    destruct (O.parent x) as [px|]_eqn. destruct (O.eq_dec ax px).
+    subst. apply L.ge_refl. apply L.eq_refl.
+    apply INDx. now apply O.parent_is_above. eapply O.no_lozenge; eauto.
+    apply L.ge_bot.
+  Qed.
+
+  Theorem lub_preserves_ge:
+    (forall a b c d : L.t,
+      L.ge a b -> L.ge c d -> L.ge (L.lub a c) (L.lub b d)) ->
+    (forall a b : L.t,
+      L.eq a L.bot -> L.eq b L.bot -> L.eq (L.lub a b) L.bot) ->
+    (forall x : L.t, L.ge L.bot x <-> L.eq L.bot x) ->
+    forall m n,
+      (forall x ax, O.above ax x -> L.ge (get ax m) (get x m)) ->
+      (forall x ax, O.above ax x -> L.ge (get ax n) (get x n)) ->
+      forall x ax,
+        L.ge (get ax m) (get x m) ->
+        L.ge (get ax n) (get x n) ->
+        O.above ax x ->
+        L.ge (get ax (lub m n)) (get x (lub m n)).
+  Proof.
+    intros. destruct m as [m|], n as [n|]; simpl in *; try solve [apply L.ge_top].
+    apply hmap_lub_preserves_ge_get_rec; auto.
+  Qed.
 
   (* For now, I'll put negb (O.eq_dec key k) because I don't want to rewrite
      the proofs, but it doesn't really matter that key is lubbed. *)
@@ -1569,7 +1631,7 @@ Module MkOverlapMapAux
 
   Definition add (k: O.t) (v: L.t) (m: t): t :=
     match m with
-    | Top    => Top
+    | LAT.Top    => LAT.Top
     | Some m =>
       Some (MSL.M.add k (L.lub v (get k (Some m))) (add_if_overlap k v m))
     end.
@@ -1593,7 +1655,7 @@ Module MkOverlapMapAux
   Theorem ge_add_if_overlap: forall x s m,
     ge (Some (add_if_overlap x s m)) (Some m).
   Proof.
-    repeat intro. simpl. unfold add_if_overlap.
+    repeat intro. unalias. simpl. unfold add_if_overlap.
     destruct (MSL.M.find k m) as []_eqn.
     apply MSL.FMF.find_mapsto_iff in Heqo. eapply MSL.M.mapi_1 in Heqo.
     destruct Heqo as [y [_ MT]].
@@ -1659,13 +1721,6 @@ Module MkOverlapMapAux
     remember (MSL.M.add k (L.lub v (get_rec k m)) (add_if_overlap k v m)) as m'.
     functional induction (get_rec k m'); MSL_simpl; elim e;
       apply MSL.M.FMF.add_in_iff; auto.
-  Qed.
-
-  Lemma mapsto_get_rec: forall k v m,
-    MSL.M.MapsTo k v m ->
-    get_rec k m = v.
-  Proof.
-    intros. functional induction (get_rec k m); MSL_simpl. auto.
   Qed.
 
   Lemma eq_get_rec_parent: forall k p m,
@@ -2026,7 +2081,7 @@ Module MkOverlapMap
   (OT: OrderedTypeLogicEq
     with Definition t := O.t
   )
-  (L: SEMILAT_TOP_LINCL)
+  (L: SEMILATTICE_EXTENDED)
   <: OverlapMap(O)(L)
   <: SEMILATTICE_WITH_TOP.
   Module Raw := MkOverlapMapAux(O)(OT)(L).
@@ -2121,7 +2176,7 @@ Module MkOverlapMap
   Theorem ge_bot: forall x, ge x bot.
   Proof.
     intros. unfold ge, bot. destruct x as [m [HT WO]]. simpl in *.
-    destruct m as [m|]; auto. simpl in *. unfold Raw.MSL.ge.
+    destruct m as [m|]; auto. simpl in *. unfold Raw.MSL.ge. unalias.
     intros k.
     destruct (Raw.MSL.M.find k (
       Raw.MSL.M.add O.top L.bot (Raw.MSL.M.empty _))
@@ -2137,12 +2192,55 @@ Module MkOverlapMap
     destruct (Raw.MSL.M.find k m); auto.
   Qed.
 
+  Lemma test: forall m x ax,
+    well_ordered (Some m) ->
+    O.above ax x ->
+    Raw.MSL.ge_k m ax x.
+  Proof.
+    intros.
+  Admitted.
+
+  Lemma wf_none: well_formed None.
+  Proof.
+    constructor. constructor. intros x px A. simpl. apply L.ge_top.
+  Qed.
+
   Program Definition lub (m: t) (n: t): t := exist _ (Raw.lub m n) _.
   Next Obligation.
-    repeat intro. destruct m as [m WFm], n as [n WFn]. simpl.
+    repeat intro. destruct m as [m [HTm WOm]], n as [n [HTn WOn]]. simpl.
     destruct m as [m|], n as [n|]; simpl; auto.
     remember (Raw.MSL.lub m n) as mn.
-    admit.
+    constructor.
+    Case "has_top".
+    simpl. subst. unfold Raw.MSL.lub. apply Raw.MSL.M.map2i_5.
+    intros. destruct a, b; simpl in *; try solve [congruence]; easy.
+    left. apply HTm.
+    Case "well_ordered".
+    intros x px A. simpl. subst.
+    unfold well_ordered in *. simpl in *.
+    pose proof (WOm _ _ A) as GEm. pose proof (WOn _ _ A) as GEn.
+    pose proof Raw.MSL.lub_preserves_ge_k as LUB.
+    specialize (LUB m n x px). feed_all LUB.
+
+    apply L.lub_inc_l.
+    apply L.ge_lub.
+    apply L.lub_bot.
+    apply L.bot_ge.
+
+    apply test. unfold well_ordered. exact WOm. easy.
+    apply test. unfold well_ordered. exact WOn. easy.
+
+    apply Raw.hmap_lub_preserves_ge_get_rec.
+    apply L.ge_lub.
+    apply L.lub_bot.
+    apply L.bot_ge.
+    apply WOm.
+    apply WOn.
+
+    easy.
+    apply wf_none.
+    apply wf_none.
+    apply wf_none.
   Qed.
 
   Theorem ge_lub_left: forall x y, ge (lub x y) x.
