@@ -508,6 +508,8 @@ Module Type SEMILATTICE_EXTENDED.
 
   Axiom bot_ge: forall x, ge bot x <-> eq bot x.
 
+  Axiom ge_antisym: forall a b, ge a b -> ge b a -> eq a b.
+
 End SEMILATTICE_EXTENDED.
 
 Module PTSet
@@ -1326,6 +1328,12 @@ Module PTSet
     now apply H.
   Qed.
 
+  Theorem ge_antisym: forall a b, ge a b -> ge b a -> eq a b.
+  Proof.
+    intros a b GEab GEba k. split; intros IN.
+    now apply GEba. now apply GEab.
+  Qed.
+
   Opaque mem In beq ge lub bot top.
 
   Hint Resolve In_add_spec In_spec eq_refl eq_sym eq_trans beq_correct
@@ -1454,19 +1462,17 @@ Module MkOverlapMapAux
   Module LAT := SemiLatticeToLattice(MSL).
 
   Definition t := LAT.t.
-  Definition eq := LAT.eq.
-  Definition eq_refl := LAT.eq_refl.
-  Definition eq_sym := LAT.eq_sym.
-  Definition eq_trans := LAT.eq_trans.
-  Definition beq := LAT.beq.
-  Definition beq_correct := LAT.beq_correct.
+
+(*
   Definition ge := LAT.ge.
   Definition ge_refl := LAT.ge_refl.
   Definition ge_trans := LAT.ge_trans.
+*)
+
   Definition bot := LAT.bot.
-  Definition ge_bot := LAT.ge_bot.
+(*  Definition ge_bot := LAT.ge_bot.*)
   Definition top := LAT.top.
-  Definition ge_top := LAT.ge_top.
+(*  Definition ge_top := LAT.ge_top.*)
 
   Function get_rec (k: O.t) (m: MSL.t) {measure O.measure k}: L.t :=
     match MSL.M.find k m with
@@ -1486,6 +1492,168 @@ Module MkOverlapMapAux
     | LAT.Top => L.top
     | Some m  => get_rec k m
     end.
+
+  Theorem get_equation: forall k m,
+    get k m =
+    match m with
+    | None => L.top
+    | Some m' =>
+      match MSL.M.find k m' with
+      | Some s => s
+      | None =>
+        match O.parent k with
+        | Some p => get p m
+        | None => L.bot
+        end
+      end
+    end.
+  Proof.
+    intros k m. destruct m as [m|]. simpl. apply get_rec_equation. now simpl.
+  Qed.
+
+  Definition eq m n := forall k, L.eq (get k m) (get k n).
+
+  Theorem eq_refl: forall m, eq m m.
+  Proof.
+    intros m k. apply L.eq_refl.
+  Qed.
+
+  Definition eq_sym: forall m n, eq m n -> eq n m.
+  Proof.
+    intros m n EQ k. now apply L.eq_sym.
+  Qed.
+
+  Definition eq_trans: forall m n o, eq m n -> eq n o -> eq m o.
+  Proof.
+    intros m n o EQmn EQno k. eapply L.eq_trans; eauto.
+  Qed.
+
+  Definition elements (m: t) :=
+    match m with
+    | LAT.Top => nil
+    | Some m  => map (@fst O.t L.t) (MSL.M.elements m)
+    end.
+
+  Require Import ListSet.
+
+  Definition union_elements m n :=
+    set_union O.eq_dec (elements m) (elements n).
+
+  Definition beq_always m n :=
+    match m, n with
+    | None,   None   => true
+    | Some a, Some b => forallb (fun elt => L.beq (get_rec elt a) (get_rec elt b)) (union_elements m n)
+    | Some x, None
+    | None,   Some x =>
+      negb (MSL.M.is_empty x) && forallb (fun elt => L.beq (get_rec elt x) L.top) (elements (Some x))
+    end.
+
+  Definition beq_has_top m n :=
+    forallb (fun elt => L.beq (get elt m) (get elt n)) (union_elements m n).
+
+  Theorem not_in_elements: forall k m,
+    ~ In k (elements m) ->
+    match m with
+    | None   => True
+    | Some m => ~ MSL.M.In k m
+    end.
+  Proof.
+    intros k m NIN. destruct m as [m|]; auto. simpl in NIN. intro IN. elim NIN. clear NIN.
+    apply MSL.M.FMF.elements_in_iff in IN. destruct IN as [e IN].
+    generalize dependent (MSL.M.elements m). induction l.
+    easy.
+    intros. inv IN.
+    left. inv H0. simpl in *. now subst.
+    right. now apply IHl.
+  Qed.
+
+  Definition has_top (m: t): Prop :=
+    match m with
+    | None => True
+    | Some m => MSL.M.In O.top m
+    end.
+
+  Definition beq_has_top_correct: forall m n, has_top m -> has_top n -> beq_has_top m n = true -> eq m n.
+  Proof.
+    intros m n HTm HTn BEQ. unfold eq. refine (O.above_ind _ _). intros k IND.
+    unfold beq_has_top in BEQ.
+    destruct (In_dec O.eq_dec k (union_elements m n)).
+    apply forallb_forall with (x := k) in BEQ. now apply L.beq_correct. easy.
+
+    assert (NINm: ~ In k (elements m)).
+    intro. elim n0. now apply set_union_intro1.
+    assert (NINn: ~ In k (elements n)).
+    intro. elim n0. now apply set_union_intro2.
+    pose proof (not_in_elements _ _ NINm) as M.
+    pose proof (not_in_elements _ _ NINn) as N.
+
+    setoid_rewrite get_equation.
+    destruct m as [m|].
+    destruct n as [n|].
+    destruct (MSL.M.find k m) as [km|]_eqn, (MSL.M.find k n) as [kn|]_eqn; MSL.msimpl.
+    destruct (O.parent k) as [pk|]_eqn.
+    apply IND. now apply O.parent_is_above.
+    apply L.eq_refl.
+    destruct (MSL.M.find k m) as [km|]_eqn; MSL.msimpl.
+    destruct (O.parent k) as [pk|]_eqn.
+    apply IND. now apply O.parent_is_above.
+    apply O.no_parent_is_top in Heqo0. subst. elim M. apply HTm.
+
+    destruct n as [n|].
+    destruct (MSL.M.find k n) as [kn|]_eqn; MSL.msimpl.
+    destruct (O.parent k) as [pk|]_eqn.
+    apply IND. now apply O.parent_is_above.
+    apply O.no_parent_is_top in Heqo0. subst. elim N. apply HTn.
+
+    apply L.eq_refl.
+  Qed.
+
+  Definition ge m n :=
+    forall k, L.ge (get k m) (get k n).
+
+  Theorem ge_refl: forall m n, eq m n -> ge m n.
+  Proof.
+    intros m n EQ k. destruct m as [m|], n as [n|]; simpl in *.
+    revert k. refine (O.above_ind _ _). intros k IND.
+    setoid_rewrite get_rec_equation. pose proof (EQ k) as EQk.
+    simpl in EQk. setoid_rewrite get_rec_equation in EQk.
+    destruct (MSL.M.find k m) as [km|]_eqn, (MSL.M.find k n) as [kn|]_eqn.
+    now apply L.ge_refl. destruct (O.parent k) as [pk|]_eqn.
+    now apply L.ge_refl. now apply L.ge_refl. now apply L.ge_refl.
+    destruct (O.parent k) as [pk|]_eqn.
+    apply IND. now apply O.parent_is_above. apply L.ge_bot.
+    apply L.ge_refl. apply EQ.
+    apply L.ge_refl. apply EQ.
+    apply L.ge_top.
+  Qed.
+
+  Theorem ge_trans: forall m n o, ge m n -> ge n o -> ge m o.
+  Proof.
+    intros m n o GEmn GEno k.
+    eapply L.ge_trans; eauto.
+  Qed.
+
+  Theorem ge_top: forall m, ge top m.
+  Proof.
+    intros m k. simpl. apply L.ge_top.
+  Qed.
+
+  Lemma get_rec_bot: forall k, get_rec k MSL.bot = L.bot.
+  Proof.
+    refine (O.above_ind _ _). intros k IND. rewrite get_rec_equation.
+    destruct (MSL.M.find k MSL.bot) as []_eqn.
+    inv Heqo.
+    destruct (O.parent k) as [pk|]_eqn.
+    apply IND. now apply O.parent_is_above.
+    easy.
+  Qed.
+
+  Theorem ge_bot: forall m, ge m bot.
+  Proof.
+    intros m k. destruct m as [m|]; simpl. rewrite get_rec_bot.
+    apply L.ge_bot.
+    apply L.ge_top.
+  Qed.
 
   Definition merge m n (k: OT.t) (a: option L.t) (b: option L.t): option L.t :=
     match a, b with
@@ -1652,8 +1820,9 @@ Module MkOverlapMapAux
   Theorem ge_add_if_overlap: forall x s m,
     ge (Some (add_if_overlap x s m)) (Some m).
   Proof.
-    repeat intro. unalias. simpl. unfold add_if_overlap.
-    destruct (MSL.M.find k m) as []_eqn.
+    repeat intro. simpl. revert k. refine (O.above_ind _ _). intros k IND.
+    unfold add_if_overlap. setoid_rewrite get_rec_equation.
+    destruct (MSL.M.find k m) as [km|]_eqn.
     apply MSL.FMF.find_mapsto_iff in Heqo. eapply MSL.M.mapi_1 in Heqo.
     destruct Heqo as [y [_ MT]].
     apply MSL.FMF.find_mapsto_iff in MT. rewrite MT.
@@ -1661,7 +1830,14 @@ Module MkOverlapMapAux
     apply L.ge_refl. apply L.eq_refl.
     apply L.ge_lub_right. apply L.ge_refl. apply L.eq_refl.
     apply L.ge_refl. apply L.eq_refl.
-    destruct (MSL.M.find k (MSL.M.mapi (lub_if_overlap x s) m)); exact I.
+    destruct (MSL.M.find k (MSL.M.mapi (lub_if_overlap x s) m)) as [klub|]_eqn.
+    exfalso.
+    assert (MSL.M.In k (MSL.M.mapi (lub_if_overlap x s) m)).
+    apply MSL.M.FMF.in_find_iff. congruence.
+    apply MSL.M.FMF.mapi_in_iff in H. apply MSL.M.FMF.in_find_iff in H. congruence.
+    destruct (O.parent k) as [pk|]_eqn.
+    apply IND. now apply O.parent_is_above.
+    apply L.ge_bot.
   Qed.
 
   Ltac MSL_simpl :=
@@ -2071,7 +2247,7 @@ Module MkOverlapMapAux
     apply L.ge_top.
   Qed.
 
-  Theorem ge_lub_left: forall a b, MSL.ge (hmap_lub a b) a.
+  Theorem MSLge_lub_left: forall a b, MSL.ge (hmap_lub a b) a.
   Proof.
     intros a b k. unfold MSL.ge_m.
     destruct (MSL.M.find k (hmap_lub a b)) as [kab|]_eqn;
@@ -2090,7 +2266,30 @@ Module MkOverlapMapAux
     left. apply MSL.M.FMF.in_find_iff. congruence.
   Qed.
 
-  Theorem ge_lub_right: forall a b, MSL.ge (hmap_lub a b) b.
+  Theorem ge_lub_left: forall a b, ge (lub a b) a.
+  Proof.
+    intros a b k. destruct a as [a|], b as [b|]; simpl.
+    revert k. refine (O.above_ind _ _). intros k IND.
+    setoid_rewrite get_rec_equation.
+    pose proof (MSLge_lub_left a b k) as GE. unfold MSL.ge_m in GE.
+    destruct
+      (MSL.M.find (elt:=L.t) k (hmap_lub a b)) as [klub|]_eqn,
+      (MSL.M.find (elt:=L.t) k a) as [ka|]_eqn.
+    easy.
+    unfold hmap_lub in Heqo. rewrite MSL.M.map2i_4 in Heqo. rewrite Heqo0 in Heqo. simpl in Heqo.
+    destruct (MSL.M.find k b) as [kb|]_eqn; inv Heqo. rewrite get_rec_equation. rewrite Heqo0.
+    destruct (O.parent k). apply L.ge_lub_left. apply L.ge_bot. now simpl.
+    unfold hmap_lub in Heqo. rewrite MSL.M.map2i_4 in Heqo. rewrite Heqo0 in Heqo. simpl in Heqo.
+    destruct (MSL.M.find k b) as [kb|]_eqn; inv Heqo. now simpl.
+    destruct (O.parent k) as [pk|]_eqn.
+    apply IND. now apply O.parent_is_above.
+    apply L.ge_bot.
+    apply L.ge_top.
+    apply L.ge_top.
+    apply L.ge_top.
+  Qed.
+
+  Theorem MSLge_lub_right: forall a b, MSL.ge (hmap_lub a b) b.
   Proof.
     intros a b k. unfold MSL.ge_m.
     destruct (MSL.M.find k (hmap_lub a b)) as [kab|]_eqn;
@@ -2107,6 +2306,29 @@ Module MkOverlapMapAux
     rewrite MSL.M.map2i_1 in Heqo.
     rewrite Heqo0 in Heqo. now destruct (MSL.M.find k a).
     right. apply MSL.M.FMF.in_find_iff. congruence.
+  Qed.
+
+  Theorem ge_lub_right: forall a b, ge (lub a b) b.
+  Proof.
+    intros a b k. destruct a as [a|], b as [b|]; simpl.
+    revert k. refine (O.above_ind _ _). intros k IND.
+    setoid_rewrite get_rec_equation.
+    pose proof (MSLge_lub_right a b k) as GE. unfold MSL.ge_m in GE.
+    destruct
+      (MSL.M.find (elt:=L.t) k (hmap_lub a b)) as [klub|]_eqn,
+      (MSL.M.find (elt:=L.t) k b) as [kb|]_eqn.
+    easy.
+    unfold hmap_lub in Heqo. rewrite MSL.M.map2i_4 in Heqo. rewrite Heqo0 in Heqo. simpl in Heqo.
+    destruct (MSL.M.find k a) as [ka|]_eqn; inv Heqo. rewrite get_rec_equation. rewrite Heqo0.
+    destruct (O.parent k). apply L.ge_lub_right. apply L.ge_bot. now simpl.
+    unfold hmap_lub in Heqo. rewrite MSL.M.map2i_4 in Heqo. rewrite Heqo0 in Heqo. simpl in Heqo.
+    destruct (MSL.M.find k a) as [ka|]_eqn; inv Heqo. now simpl.
+    destruct (O.parent k) as [pk|]_eqn.
+    apply IND. now apply O.parent_is_above.
+    apply L.ge_bot.
+    apply L.ge_top.
+    apply L.ge_top.
+    apply L.ge_top.
   Qed.
 
 End MkOverlapMapAux.
@@ -2180,18 +2402,27 @@ Module MkOverlapMap
   Theorem eq_trans: forall m n o, eq m n -> eq n o -> eq m o.
   Proof. intros. eapply Raw.eq_trans; eauto. Qed.
 
-  Definition beq (m: t) (n: t): bool := Raw.beq (proj1_sig m) (proj1_sig n).
+  Definition beq (m: t) (n: t): bool := Raw.beq_has_top (proj1_sig m) (proj1_sig n).
 
   Theorem beq_correct: forall m n, beq m n = true -> eq m n.
+  Proof.
+    intros. apply Raw.beq_has_top_correct.
+    destruct m as [m [HT WO]]. apply HT.
+    destruct n as [n [HT WO]]. apply HT.
+    exact H.
+  Qed.
 
-  Proof. intros. apply Raw.beq_correct. exact H. Qed.
   Definition ge (m: t) (n: t): Prop := Raw.ge (proj1_sig m) (proj1_sig n).
 
   Theorem ge_refl: forall m n, eq m n -> ge m n.
-  Proof. intros. apply Raw.ge_refl. exact H. Qed.
+  Proof.
+    intros. now apply Raw.ge_refl.
+  Qed.
 
   Theorem ge_trans: forall m n o, ge m n -> ge n o -> ge m o.
-  Proof. intros. eapply Raw.ge_trans; eauto. Qed.
+  Proof.
+    intros. eapply Raw.ge_trans; eauto.
+  Qed.
 
   Program Definition bot: t :=
     exist _ (Some (Raw.MSL.M.add O.top L.bot (Raw.MSL.M.empty _))) _.
@@ -2208,23 +2439,19 @@ Module MkOverlapMap
     eapply O.no_lozenge; eauto.
   Qed.
 
-  Theorem ge_bot: forall x, ge x bot.
+  Theorem ge_bot: forall m, ge m bot.
   Proof.
-    intros. unfold ge, bot. destruct x as [m [HT WO]]. simpl in *.
-    destruct m as [m|]; auto. simpl in *. unfold Raw.MSL.ge. unalias.
-    intros k.
-    destruct (Raw.MSL.M.find k (
-      Raw.MSL.M.add O.top L.bot (Raw.MSL.M.empty _))
-    ) as []_eqn.
-    destruct (Raw.MSL.M.find k m) as []_eqn; Raw.MSL_simpl.
-    apply Raw.MSL.M.FMF.add_mapsto_iff in Heqo.
-    intuition; subst.
-    apply L.ge_bot. apply Raw.MSL.M.FMF.empty_mapsto_iff in H1; contradiction.
-    destruct (O.eq_dec k O.top).
-    subst. contradiction.
-    apply Raw.MSL.M.FMF.add_neq_mapsto_iff in Heqo; auto.
-    apply Raw.MSL.M.FMF.empty_mapsto_iff in Heqo; contradiction.
-    destruct (Raw.MSL.M.find k m); auto.
+    intros m k. destruct m as [[m|] [HT WO]]; simpl.
+    replace (Raw.get_rec k (Raw.MSL.M.add O.top L.bot (Raw.MSL.M.empty L.t))) with L.bot.
+    apply L.ge_bot. revert k. refine (O.above_ind _ _). intros k IND.
+    setoid_rewrite Raw.get_rec_equation.
+    destruct (Raw.MSL.M.find k
+      (Raw.MSL.M.add O.top L.bot (Raw.MSL.M.empty L.t))) as [v|]_eqn.
+    rewrite Raw.MSL.M.FMF.add_o in Heqo. destruct (OT.eq_dec O.top k).
+    congruence. now compute in Heqo.
+    destruct (O.parent k) as [pk|]_eqn.
+    apply IND. now apply O.parent_is_above. easy.
+    apply L.ge_top.
   Qed.
 
   Lemma wf_none: well_formed None.
@@ -2257,16 +2484,12 @@ Module MkOverlapMap
 
   Theorem ge_lub_left: forall x y, ge (lub x y) x.
   Proof.
-    destruct x as [x [HTx WOx]], y as [y [HTy WOy]]. unfold ge, lub; simpl.
-    destruct x as [x|], y as [y|]; simpl in *; auto. unfold well_ordered in *.
-    apply Raw.ge_lub_left.
+    destruct x as [x [HTx WOx]], y as [y [HTy WOy]]. unfold ge. simpl. apply Raw.ge_lub_left.
   Qed.
 
   Theorem ge_lub_right: forall x y, ge (lub x y) y.
   Proof.
-    destruct x as [x [HTx WOx]], y as [y [HTy WOy]]. unfold ge, lub; simpl.
-    destruct x as [x|], y as [y|]; simpl in *; auto. unfold well_ordered in *.
-    apply Raw.ge_lub_right.
+    destruct x as [x [HTx WOx]], y as [y [HTy WOy]]. unfold ge. simpl. apply Raw.ge_lub_right.
   Qed.
 
   Program Definition top: t := exist _ Raw.top _.
@@ -2281,18 +2504,6 @@ Module MkOverlapMap
     intros. apply Raw.ge_top.
   Qed.
 
-  Theorem get_ge: forall m n,
-    ge m n ->
-    (forall k, L.ge (get k m) (get k n)).
-  Proof.
-    intros m n GE k. unfold get. unfold ge in GE.
-    destruct m as [[m|] [HTm WOm]]; destruct n as [[n|] [HTn WOn]]; simpl in *; try solve [apply L.ge_top].
-    specialize (GE k). unfold Raw.MSL.ge_m in GE.
-    setoid_rewrite Raw.get_rec_equation.
-    destruct (Raw.MSL.M.find k m) as [km|], (Raw.MSL.M.find k n) as [kn|]; auto.
-    unfold get.
-  Admitted.
-
   Theorem get_top: forall k,
     get k top = L.top.
   Proof.
@@ -2303,12 +2514,24 @@ Module MkOverlapMap
     eq mmap top ->
     (forall k, L.ge (get k mmap) L.top).
   Proof.
-  Admitted.
+    intros mmap EQ k. destruct mmap as [m [HT WO]].
+    unfold get; unfold eq in EQ; destruct m as [m|]; simpl in *.
+    unfold Raw.eq in EQ. apply L.ge_refl. apply EQ.
+    apply L.ge_top.
+  Qed.
 
   Theorem ge_add: forall k v m,
     ge (add k v m) m.
   Proof.
-  Admitted.
+    intros kadd v m k. simpl. apply Raw.get_add.
+  Qed.
+
+  Theorem ge_top_eq_top: forall m, ge m top -> eq top m.
+  Proof.
+    intros. unfold ge, eq in *. simpl in *. destruct m as [[m|][HT WO]]; simpl in *; auto.
+    intros k. specialize (H k). simpl in *. apply L.ge_antisym. apply L.ge_top. easy.
+    apply Raw.eq_refl.
+  Qed.
 
 End MkOverlapMap.
 
@@ -2982,8 +3205,8 @@ Lemma memsat_ge:
 Proof.
   repeat intro. unalias. specialize (MSAT _ _ _ LOAD).
   destruct (abs b), v; auto. destruct (abs b0).
-  eapply MemMap.get_ge; eauto.
-  eapply PTSet.ge_trans; eauto. apply MemMap.get_ge. auto.
+  now apply GE.
+  eapply PTSet.ge_trans; eauto. now apply GE.
 Qed.
 
 Lemma load_valid_block:
@@ -3372,9 +3595,9 @@ Proof.
   destruct v; auto.
   destruct (abs b) as []_eqn.
   SSSSSSSCase "abs b = Some".
-  eapply MemMap.get_ge; eauto.
+  now apply MGE'.
   SSSSSSSCase "abs b = None".
-  eapply PTSet.ge_trans; eauto. apply MemMap.get_ge; auto.
+  eapply PTSet.ge_trans; eauto. now apply MGE'.
   SSSSSSCase "Didn't overlap offset o, for another reason".
   simpl in LOAD.
   erewrite Mem.load_store_other in LOAD; eauto; [|right; left; omega]. merge.
@@ -3382,18 +3605,18 @@ Proof.
   destruct v; auto.
   destruct (abs b) as []_eqn.
   SSSSSSSCase "abs b = Some".
-  eapply MemMap.get_ge; eauto.
+  now apply MGE'.
   SSSSSSSCase "abs b = None".
-  eapply PTSet.ge_trans; eauto. apply MemMap.get_ge; auto.
+  eapply PTSet.ge_trans; eauto. now apply MGE'.
   SSSSSCase "Didn't store in b0".
   simpl in LOAD. erewrite Mem.load_store_other in LOAD; eauto. merge.
   destruct (abs b0) as []_eqn; [|contradiction].
   destruct v; auto.
   destruct (abs b1) as []_eqn.
   SSSSSSCase "abs b1 = Some".
-  eapply MemMap.get_ge; eauto.
+  now apply MGE'.
   SSSSSSCase "abs b1 = None".
-  eapply PTSet.ge_trans; eauto. apply MemMap.get_ge; auto.
+  eapply PTSet.ge_trans; eauto. now apply MGE'.
   SSCase "Ibuiltin".
   assert (RGE': RegMap.ge rmap' rmap) by (
   destruct ef; repeat (
@@ -3516,9 +3739,9 @@ Proof.
   destruct v; auto.
   destruct (abs b) as []_eqn.
   SSSSSSSSCase "abs b = Some".
-  eapply MemMap.get_ge; eauto.
+  now apply MGE'.
   SSSSSSSSCase "abs b = None".
-  eapply PTSet.ge_trans; eauto. apply MemMap.get_ge; auto.
+  eapply PTSet.ge_trans; eauto. now apply MGE'.
   SSSSSSSCase "Didn't overlap offset o, for another reason".
   simpl in LOAD.
   erewrite Mem.load_store_other in LOAD; eauto; [|right; left; omega]. merge.
@@ -3526,18 +3749,18 @@ Proof.
   destruct v; auto.
   destruct (abs b) as []_eqn.
   SSSSSSSSCase "abs b = Some".
-  eapply MemMap.get_ge; eauto.
+  now apply MGE'.
   SSSSSSSSCase "abs b = None".
-  eapply PTSet.ge_trans; eauto. apply MemMap.get_ge; auto.
+  eapply PTSet.ge_trans; eauto. now apply MGE'.
   SSSSSSCase "Didn't store in b0".
   simpl in LOAD. erewrite Mem.load_store_other in LOAD; eauto. merge.
   destruct (abs b0) as []_eqn; [|contradiction].
   destruct v; auto.
   destruct (abs b1) as []_eqn.
   SSSSSSSCase "abs b1 = Some".
-  eapply MemMap.get_ge; eauto.
+  now apply MGE'.
   SSSSSSSCase "abs b1 = None".
-  eapply PTSet.ge_trans; eauto. apply MemMap.get_ge; auto.
+  eapply PTSet.ge_trans; eauto. now apply MGE'.
   SSSCase "EF_vload_global".
   exists abs. constructor; auto.
   SSSSCase "ok_abs_result".
@@ -3614,26 +3837,26 @@ Proof.
   erewrite Mem.load_store_other in LOAD; eauto; [|right; right; omega]. merge.
   destruct (abs b) as []_eqn.
   SSSSSSSSCase "abs b = Some".
-  eapply MemMap.get_ge; eauto.
+  now apply MGE'.
   SSSSSSSSCase "abs b = None".
-  eapply PTSet.ge_trans; eauto. apply MemMap.get_ge; auto.
+  eapply PTSet.ge_trans; eauto. now apply MGE'.
   SSSSSSSCase "Didn't overlap offset o, for another reason".
   simpl in LOAD.
   erewrite Mem.load_store_other in LOAD; eauto; [|right; left; omega]. merge.
   destruct (abs b) as []_eqn.
   SSSSSSSSCase "abs b = Some".
-  eapply MemMap.get_ge; eauto.
+  now apply MGE'.
   SSSSSSSSCase "abs b = None".
-  eapply PTSet.ge_trans; eauto. apply MemMap.get_ge; auto.
+  eapply PTSet.ge_trans; eauto. now apply MGE'.
   SSSSSSCase "Didn't store in b0".
   simpl in LOAD. erewrite Mem.load_store_other in LOAD; eauto. merge.
   destruct (abs b0) as []_eqn; [|contradiction].
   destruct v; auto.
   destruct (abs b1) as []_eqn.
   SSSSSSSCase "abs b1 = Some".
-  eapply MemMap.get_ge; eauto.
+  now apply MGE'.
   SSSSSSSCase "abs b1 = None".
-  eapply PTSet.ge_trans; eauto. apply MemMap.get_ge; auto.
+  eapply PTSet.ge_trans; eauto. now apply MGE'.
   SSSCase "EF_malloc".
   exists (fun x =>
     if zeq x b
@@ -3764,9 +3987,9 @@ Proof.
   specialize (MSAT b o v). feed MSAT. simpl. erewrite <- Mem.load_storebytes_other; eauto.
   destruct (abs b); [|contradiction]. destruct v; auto. destruct (abs b0).
   SSSSSSSCase "abs b0 = Some".
-  eapply MemMap.get_ge. apply ge_add_ptset_to_image. auto.
+  now apply MGE'.
   SSSSSSSCase "abs b0 = None".
-  eapply PTSet.ge_trans. eapply MemMap.get_ge. eapply ge_add_ptset_to_image. auto.
+  eapply PTSet.ge_trans. apply ge_add_ptset_to_image. auto.
   SSSCase "EF_annot".
   exists abs. constructor; auto.
   SSSSCase "ok_abs_result".
@@ -3976,7 +4199,7 @@ Proof.
   eapply PTSet.ge_trans. apply RegMap.get_ge; eauto.
   eapply PTSet.ge_trans. apply RegMap.get_add_same. auto with ptset.
   SSSSSCase "mem".
-  auto. (*?*)
+  pose proof MemMap.ge_top_eq_top. apply MemMap.eq_sym. now apply H.
   SSSSCase "Kildall failed".
   econstructor.
   SSSSSCase "result".
