@@ -6,8 +6,9 @@ open Lens
 open Library
 
 type log_entry =
-  | DEBUG of string
-  | ERROR of string
+  | DEBUG   of string
+  | ERROR   of string
+  | INFO    of string
   | WARNING of string
 
 type byte_chunk_desc =
@@ -16,16 +17,26 @@ type byte_chunk_desc =
   | ELF_shtab
   | ELF_section_strtab
   | ELF_symbol_strtab
-  | Symtab_data of elf32_sym
-  | Symtab_function of elf32_sym
-  | Data_symbol of elf32_sym
-  | Function_symbol of elf32_sym
+  | Symtab_data        of elf32_sym
+  | Symtab_function    of elf32_sym
+  | Data_symbol        of elf32_sym
+  | Function_symbol    of elf32_sym
   | Zero_symbol
-  | Stub of string
+  | Stub               of string
   | Jumptable
-  | Float_literal of float
+  | Float_literal      of float
   | Padding
-  | Unknown of string
+  | Unknown            of string
+
+(* This type specifies whether its argument was inferred by the tool or provided
+   via a config file. *)
+type 'a inferrable =
+  | Inferred of 'a
+  | Provided of 'a
+
+let from_inferrable = function
+| Inferred(x) -> x
+| Provided(x) -> x
 
 (** This framework is carried along while analyzing the whole ELF file.
 *)
@@ -40,11 +51,14 @@ type e_framework = {
   chkd_data_syms: bool array;
   (** The mapping from CompCert sections to ELF sections will be inferred along
       the way. This way, we can check things without prior knowledge of the
-      linker script. *)
-  section_map: string StringMap.t;
+      linker script. The set holds conflicts for the mapping, if more than one
+      mapping is inferred. These are reported once, at the end. *)
+  section_map: (string inferrable * StringSet.t) StringMap.t;
   (** We will assign a virtual address to each register that can act as an SDA
       base register. *)
-  sda_map: int32 IntMap.t;
+  sda_map: (int32 inferrable) IntMap.t;
+  (** Contains the symbols that we expect to be missing from the .sdump files *)
+  missing_syms: StringSet.t;
 }
 
 module PosOT = struct
@@ -136,7 +150,7 @@ let stub_ident_to_vaddr = {
 let add_range (start: int32) (length: int32) (align: int) (bcd: byte_chunk_desc)
     (efw: e_framework): e_framework =
   assert (0l <= start && 0l < length);
-  let stop = Int32.(sub (add start length) 1l) in
+  let stop = Safe32.(start + length - 1l) in
   {
     efw with
       chkd_bytes_list =
@@ -155,7 +169,7 @@ let add_range (start: int32) (length: int32) (align: int) (bcd: byte_chunk_desc)
 (* external ( >>> ) : 'a -> ('a -> 'b) -> 'b = "%revapply" *)
 let ( >>> ) (a: 'a) (f: 'a -> 'b): 'b = f a
 
-let ( >>? ) (a: 'a or_err) (f: 'a -> 'b): 'b or_err =
+let ( >>^ ) (a: 'a or_err) (f: 'a -> 'b): 'b or_err =
   match a with
   | ERR(s) -> ERR(s)
   | OK(x) -> OK(f x)
@@ -175,10 +189,18 @@ let ( ^%=? ) (lens: ('a, 'b) Lens.t) (transf: 'b -> 'b or_err)
 (** Finally, some printers.
 *)
 
-let string_of_log_entry show_debug = function
-| DEBUG(s)   -> if show_debug then s else ""
-| ERROR(s)   -> "ERROR: " ^ s
-| WARNING(s) -> "WARNING: " ^ s
+let format_logtype = Printf.sprintf "%10s"
+
+let string_of_log_entry show_debug entry =
+  match entry with
+  | DEBUG(s)   -> if show_debug then (format_logtype "DEBUG: ") ^ s else ""
+  | ERROR(s)   -> (format_logtype "ERROR: ") ^ s
+  | INFO(s)    -> (format_logtype "INFO: ") ^ s
+  | WARNING(s) -> (format_logtype "WARNING: ") ^ s
+
+let fatal s = failwith ((format_logtype "FATAL: ") ^ s)
+
+let verbose_elfmap = ref false
 
 let string_of_byte_chunk_desc = function
 | ELF_header -> "ELF header"
@@ -195,6 +217,4 @@ let string_of_byte_chunk_desc = function
 | Jumptable -> "Jump table"
 | Float_literal(f) -> "Float literal: " ^ string_of_float f
 | Padding -> "Padding"
-| Unknown(s) -> "   ???   " ^ s
-
-
+| Unknown(s) -> "???" ^ (if !verbose_elfmap then s else "")

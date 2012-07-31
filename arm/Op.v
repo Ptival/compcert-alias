@@ -342,17 +342,6 @@ Definition type_of_addressing (addr: addressing) : list typ :=
   | Ainstack _ => nil
   end.
 
-Definition type_of_chunk (c: memory_chunk) : typ :=
-  match c with
-  | Mint8signed => Tint
-  | Mint8unsigned => Tint
-  | Mint16signed => Tint
-  | Mint16unsigned => Tint
-  | Mint32 => Tint
-  | Mfloat32 => Tfloat
-  | Mfloat64 => Tfloat
-  end.
-
 (** Weak type soundness results for [eval_operation]:
   the result values, when defined, are always of the type predicted
   by [type_of_operation]. *)
@@ -383,7 +372,8 @@ Proof with (try exact I).
   generalize (S s v1). destruct v0; destruct (eval_shift s v1); simpl; intuition. destruct (zeq b0 b)...
   destruct v0...
   destruct v0; destruct v1...
-  destruct v0; destruct v1; simpl in H0; inv H0. destruct (Int.eq i0 Int.zero); inv H2...
+  destruct v0; destruct v1; simpl in H0; inv H0.
+    destruct (Int.eq i0 Int.zero || Int.eq i (Int.repr Int.min_signed) && Int.eq i0 Int.mone); inv H2...
   destruct v0; destruct v1; simpl in H0; inv H0. destruct (Int.eq i0 Int.zero); inv H2...
   destruct v0; destruct v1...
   generalize (S s v1). destruct v0; destruct (eval_shift s v1); simpl; tauto.
@@ -492,22 +482,20 @@ Definition negate_condition (cond: condition): condition :=
   end.
 
 Lemma eval_negate_condition:
-  forall (cond: condition) (vl: list val) (b: bool) (m: mem),
-  eval_condition cond vl m = Some b ->
-  eval_condition (negate_condition cond) vl m = Some (negb b).
+  forall cond vl m,
+  eval_condition (negate_condition cond) vl m = option_map negb (eval_condition cond vl m).
 Proof.
-  intros. 
-  destruct cond; simpl in H; FuncInv; simpl.
-  rewrite Val.negate_cmp_bool; rewrite H; auto.
-  rewrite Val.negate_cmpu_bool; rewrite H; auto.
-  rewrite Val.negate_cmp_bool; rewrite H; auto.
-  rewrite Val.negate_cmpu_bool; rewrite H; auto.
-  rewrite Val.negate_cmp_bool; rewrite H; auto.
-  rewrite Val.negate_cmpu_bool; rewrite H; auto.
-  rewrite H; auto.
-  destruct (Val.cmpf_bool c v v0); simpl in H; inv H. rewrite negb_elim; auto. 
-  rewrite H; auto.
-  destruct (Val.cmpf_bool c v (Vfloat Float.zero)); simpl in H; inv H. rewrite negb_elim; auto. 
+  intros. destruct cond; simpl.
+  repeat (destruct vl; auto). apply Val.negate_cmp_bool.
+  repeat (destruct vl; auto). apply Val.negate_cmpu_bool.
+  repeat (destruct vl; auto). apply Val.negate_cmp_bool.
+  repeat (destruct vl; auto). apply Val.negate_cmpu_bool.
+  repeat (destruct vl; auto). apply Val.negate_cmp_bool.
+  repeat (destruct vl; auto). apply Val.negate_cmpu_bool.
+  repeat (destruct vl; auto). 
+  repeat (destruct vl; auto). destruct (Val.cmpf_bool c v v0); auto. destruct b; auto.
+  repeat (destruct vl; auto). 
+  repeat (destruct vl; auto). destruct (Val.cmpf_bool c v (Vfloat Float.zero)); auto. destruct b; auto.
 Qed.
 
 (** Shifting stack-relative references.  This is used in [Stacking]. *)
@@ -843,7 +831,7 @@ Proof.
 
   inv H4; inv H2; simpl; auto.
   inv H4; inv H3; simpl in H1; inv H1. simpl. 
-    destruct (Int.eq i0 Int.zero); inv H2. TrivialExists.
+    destruct (Int.eq i0 Int.zero || Int.eq i (Int.repr Int.min_signed) && Int.eq i0 Int.mone); inv H2. TrivialExists.
   inv H4; inv H3; simpl in H1; inv H1. simpl. 
     destruct (Int.eq i0 Int.zero); inv H2. TrivialExists.
 

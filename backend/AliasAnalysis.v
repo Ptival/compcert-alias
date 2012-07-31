@@ -1924,13 +1924,13 @@ Module MkOverlapMapAux
     SCase "ax = k".
     subst. erewrite eq_get_add_same; eauto. now apply L.lub_inc_l.
     SCase "ax <> k".
-    generalize dependent ax. refine (O.above_ind _ _); intros ? IND A GE NXK.
+    generalize dependent ax. refine (O.above_ind _ _); intros ax IND A GE NXK.
     simpl.
     remember (MSL.M.add k (L.lub v (get_rec k m)) (add_if_overlap k v m)) as m'.
-    functional induction (get_rec x m'); MSL_simpl.
+    functional induction (get_rec ax m'); MSL_simpl.
     SSCase "1".
     apply MSL.M.FMF.add_mapsto_iff in e.
-    destruct e as [? | [_ MT]]; intuition; subst. now apply L.lub_inc_l.
+    destruct e as [? | [_ MT]]; intuition; subst.
     apply MSL.M.FMF.mapi_inv in MT.
     destruct MT as [x [? [? [? MT]]]]. subst.
     simpl in GE. erewrite mapsto_get_rec in GE; eauto.
@@ -2232,7 +2232,6 @@ Module MkOverlapMapAux
     unfold lub_if_overlap.
     destruct (O.overlap_dec y k), (O.eq_dec y k); simpl; subst; intuition.
     apply L.ge_lub_left.
-    elim n0. now apply symmetry.
     SCase "2".
     apply O.no_parent_is_top in e0. subst. elim e.
     rewrite MSL.M.FMF.add_in_iff. right. apply MSL.M.FMF.mapi_in_iff.
@@ -2661,22 +2660,24 @@ Definition addr_image addr args rmap :=
 
 Definition transf_op op args dst rmap :=
   match op with
+    | Oindirectsymbol i =>
+      RegMap.add dst (PTSet.singleton (Loc (Just (Globals (Some i))) Int.zero)) rmap
     | Olea addr =>
       match addr_image addr args rmap with
         | None   => rmap (*!*)
         | Some s => RegMap.add dst s rmap
       end
-    | Omove     =>
+    | Omove =>
       match args with
         | r::nil => RegMap.add dst (RegMap.get r rmap) rmap
         | _      => rmap (*!*)
       end
-    | Osub      =>
+    | Osub =>
       match args with
         | r::_::nil => RegMap.add dst (unknown_offset (RegMap.get r rmap)) rmap
         | _         => rmap (*!*)
       end
-    | _         => rmap
+    | _ => rmap
   end.
 
 Definition transf_builtin ef args dst n (result: Result.t) :=
@@ -3459,6 +3460,8 @@ Proof.
     end.
 
   destruct op; simpl in *; repeat (crunch_eval; regsat_tac).
+  SSSSSCase "Oindirectsymbol".
+  apply PTSet.In_singleton.
   SSSSSCase "Osub".
   eapply In_unknown_offset; eauto.
   apply unknown_offset_top; auto.

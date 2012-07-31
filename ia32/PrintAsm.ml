@@ -20,6 +20,8 @@ open AST
 open Memdata
 open Asm
 
+module StringSet = Set.Make(String)
+
 (* Recognition of target ABI and asm syntax *)
 
 type target = ELF | MacOS | Cygwin
@@ -149,7 +151,7 @@ let name_of_section_ELF = function
   | Section_literal -> ".section	.rodata.cst8,\"aM\",@progbits,8"
   | Section_jumptable -> ".text"
   | Section_user(s, wr, ex) ->
-       sprintf ".section	%s,\"a%s%s\",@progbits"
+       sprintf ".section	\"%s\",\"a%s%s\",@progbits"
                s (if wr then "w" else "") (if ex then "x" else "")
 
 let name_of_section_MacOS = function
@@ -160,7 +162,7 @@ let name_of_section_MacOS = function
   | Section_literal -> ".literal8"
   | Section_jumptable -> ".const"
   | Section_user(s, wr, ex) ->
-       sprintf ".section	%s, %s, %s"
+       sprintf ".section	\"%s\", %s, %s"
                (if wr then "__DATA" else "__TEXT") s
                (if ex then "regular, pure_instructions" else "regular")
 
@@ -172,7 +174,7 @@ let name_of_section_Cygwin = function
   | Section_literal -> ".section	.rdata,\"dr\""
   | Section_jumptable -> ".text"
   | Section_user(s, wr, ex) ->
-       sprintf ".section	%s, \"%s\"\n"
+       sprintf ".section	\"%s\", \"%s\"\n"
              s (if ex then "xr" else if wr then "d" else "dr")
 
 let name_of_section =
@@ -361,7 +363,7 @@ let print_builtin_vload_common oc chunk addr res =
       fprintf oc "	movl	%a, %a\n" addressing addr ireg res
   | Mfloat32, FR res ->
       fprintf oc "	cvtss2sd %a, %a\n" addressing addr freg res
-  | Mfloat64, FR res ->
+  | (Mfloat64 | Mfloat64al32), FR res ->
       fprintf oc "	movsd	%a, %a\n" addressing addr freg res
   | _ ->
       assert false
@@ -404,7 +406,7 @@ let print_builtin_vstore_common oc chunk addr src =
   | Mfloat32, FR src ->
       fprintf oc "	cvtsd2ss %a, %%xmm7\n" freg src;
       fprintf oc "	movss	%%xmm7, %a\n" addressing addr
-  | Mfloat64, FR src ->
+  | (Mfloat64 | Mfloat64al32), FR src ->
       fprintf oc "	movsd	%a, %a\n" freg src addressing addr
   | _ ->
       assert false
@@ -499,6 +501,7 @@ let print_builtin_inline oc name args res =
 
 let float_literals : (int * int64) list ref = ref []
 let jumptables : (int * label list) list ref = ref []
+let indirect_symbols : StringSet.t ref = ref StringSet.empty
 
 (* Reminder on AT&T syntax: op source, dest *)
 
@@ -508,6 +511,13 @@ let print_instruction oc = function
       fprintf oc "	movl	%a, %a\n" ireg r1 ireg rd
   | Pmov_ri(rd, n) ->
       fprintf oc "	movl	$%ld, %a\n" (camlint_of_coqint n) ireg rd
+  | Pmov_ra(rd, id) ->
+      if target = MacOS then begin
+        let id = extern_atom id in
+        indirect_symbols := StringSet.add id !indirect_symbols;
+        fprintf oc "	movl	L%a$non_lazy_ptr, %a\n" raw_symbol id ireg rd
+      end else
+        fprintf oc "	movl	$%a, %a\n" symbol id ireg rd
   | Pmov_rm(rd, a) ->
       fprintf oc "	movl	%a, %a\n" addressing a ireg rd
   | Pmov_mr(a, r1) ->
@@ -519,9 +529,9 @@ let print_instruction oc = function
   | Pmovsd_ff(rd, r1) ->
       fprintf oc "	movapd	%a, %a\n" freg r1 freg rd
   | Pmovsd_fi(rd, n) ->
-      let b = Int64.bits_of_float n in
+      let b = camlint64_of_coqint (Floats.Float.bits_of_double n) in
       let lbl = new_label() in
-      fprintf oc "	movsd	%a, %a %s %.18g\n" label lbl freg rd comment n;
+      fprintf oc "	movsd	%a, %a %s %.18g\n" label lbl freg rd comment (camlfloat_of_coqfloat n);
       float_literals := (lbl, b) :: !float_literals
   | Pmovsd_fm(rd, a) ->
       fprintf oc "	movsd	%a, %a\n" addressing a freg rd
@@ -591,18 +601,8 @@ let print_instruction oc = function
       fprintf oc "	xorl	%%edx, %%edx\n";
       fprintf oc "	divl	%a\n" ireg r1
   | Pidiv(r1) ->
-      let lbl1 = new_label() in
-      let lbl2 = new_label() in
-      fprintf oc "	cmpl	$-1, %a\n" ireg r1;
-      fprintf oc "	je	%a\n" label lbl1;
       fprintf oc "	cltd\n";
-      fprintf oc "	idivl	%a\n" ireg r1;
-      fprintf oc "	jmp	%a\n" label lbl2;
-      (* Division by -1 can cause an overflow trap if dividend = min_int.
-         Force x div (-1) = -x and x mod (-1) = 0. *)
-      fprintf oc "%a:	negl	%a\n" label lbl1 ireg EAX;
-      fprintf oc "	xorl	%a, %a\n" ireg EDX ireg EDX;
-      fprintf oc "%a:\n" label lbl2
+      fprintf oc "	idivl	%a\n" ireg r1
   | Pand_rr(rd, r1) ->
       fprintf oc "	andl	%a, %a\n" ireg r1 ireg rd
   | Pand_ri(rd, n) ->
@@ -747,7 +747,9 @@ let print_function oc name code =
     | [t;l;j] -> (t, l, j)
     |    _    -> (Section_text, Section_literal, Section_jumptable) in
   section oc text;
-  print_align oc 16;
+  let alignment =
+    match !Clflags.option_falignfunctions with Some n -> n | None -> 16 in
+  print_align oc alignment;
   if not (C2C.atom_is_static name) then
     fprintf oc "	.globl %a\n" symbol name;
   fprintf oc "%a:\n" symbol name;
@@ -782,9 +784,13 @@ let print_init oc = function
   | Init_int32 n ->
       fprintf oc "	.long	%ld\n" (camlint_of_coqint n)
   | Init_float32 n ->
-      fprintf oc "	.long	%ld %s %.18g\n" (Int32.bits_of_float n) comment n
+      fprintf oc "	.long	%ld %s %.18g\n"
+	(camlint_of_coqint (Floats.Float.bits_of_single n))
+	comment (camlfloat_of_coqfloat n)
   | Init_float64 n ->
-      fprintf oc "	.quad	%Ld %s %.18g\n" (Int64.bits_of_float n) comment n
+      fprintf oc "	.quad	%Ld %s %.18g\n"
+	(camlint64_of_coqint (Floats.Float.bits_of_double n))
+	comment (camlfloat_of_coqfloat n)
   | Init_space n ->
       let n = camlint_of_z n in
       if n > 0l then fprintf oc "	.space	%ld\n" n
@@ -826,6 +832,7 @@ let print_var oc (name, v) =
 
 let print_program oc p =
   need_masks := false;
+  indirect_symbols := StringSet.empty;
   List.iter (print_var oc) p.prog_vars;
   List.iter (print_fundef oc) p.prog_funct;
   if !need_masks then begin
@@ -835,4 +842,13 @@ let print_program oc p =
                raw_symbol "__negd_mask";
     fprintf oc "%a:	.quad   0x7FFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF\n"
                raw_symbol "__absd_mask"
+  end;
+  if target = MacOS then begin
+    fprintf oc "	.section __IMPORT,__pointers,non_lazy_symbol_pointers\n";
+    StringSet.iter
+      (fun s ->
+        fprintf oc "L%a$non_lazy_ptr:\n" raw_symbol s;
+        fprintf oc "	.indirect_symbol %a\n" raw_symbol s;
+        fprintf oc "	.long	0\n")
+      !indirect_symbols
   end

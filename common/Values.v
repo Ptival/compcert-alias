@@ -218,14 +218,20 @@ Definition mul (v1 v2: val): val :=
 Definition divs (v1 v2: val): option val :=
   match v1, v2 with
   | Vint n1, Vint n2 =>
-      if Int.eq n2 Int.zero then None else Some(Vint(Int.divs n1 n2))
+      if Int.eq n2 Int.zero
+      || Int.eq n1 (Int.repr Int.min_signed) && Int.eq n2 Int.mone
+      then None
+      else Some(Vint(Int.divs n1 n2))
   | _, _ => None
   end.
 
 Definition mods (v1 v2: val): option val :=
   match v1, v2 with
   | Vint n1, Vint n2 =>
-      if Int.eq n2 Int.zero then None else Some(Vint(Int.mods n1 n2))
+      if Int.eq n2 Int.zero
+      || Int.eq n1 (Int.repr Int.min_signed) && Int.eq n2 Int.mone
+      then None
+      else Some(Vint(Int.mods n1 n2))
   | _, _ => None
   end.
 
@@ -423,7 +429,7 @@ Definition load_result (chunk: memory_chunk) (v: val) :=
   | Mint32, Vint n => Vint n
   | Mint32, Vptr b ofs => Vptr b ofs
   | Mfloat32, Vfloat f => Vfloat(Float.singleoffloat f)
-  | Mfloat64, Vfloat f => Vfloat f
+  | (Mfloat64 | Mfloat64al32), Vfloat f => Vfloat f
   | _, _ => Vundef
   end.
 
@@ -656,7 +662,8 @@ Theorem mods_divs:
   mods x y = Some z -> exists v, divs x y = Some v /\ z = sub x (mul v y).
 Proof.
   intros. destruct x; destruct y; simpl in *; try discriminate.
-  destruct (Int.eq i0 Int.zero); inv H. 
+  destruct (Int.eq i0 Int.zero
+        || Int.eq i (Int.repr Int.min_signed) && Int.eq i0 Int.mone); inv H.
   exists (Vint (Int.divs i i0)); split; auto. 
   simpl. rewrite Int.mods_divs. auto.
 Qed.
@@ -679,7 +686,8 @@ Theorem divs_pow2:
   shrx x (Vint logn) = Some y.
 Proof.
   intros; destruct x; simpl in H1; inv H1.
-  destruct (Int.eq n Int.zero); inv H3. 
+  destruct (Int.eq n Int.zero
+         || Int.eq i (Int.repr Int.min_signed) && Int.eq n Int.mone); inv H3.
   simpl. rewrite H0. decEq. decEq. symmetry. apply Int.divs_pow2. auto.
 Qed.
 
@@ -738,6 +746,11 @@ Theorem xor_assoc: forall x y z, xor (xor x y) z = xor x (xor y z).
 Proof.
   destruct x; destruct y; destruct z; simpl; auto.
   decEq. apply Int.xor_assoc.
+Qed.
+
+Theorem not_xor: forall x, notint x = xor x (Vint Int.mone).
+Proof.
+  destruct x; simpl; auto. 
 Qed.
 
 Theorem shl_mul: forall x y, mul x (shl Vone y) = shl x y.
@@ -1154,4 +1167,27 @@ Proof.
   inv H. destruct v2; econstructor. unfold inject_id; reflexivity. rewrite Int.add_zero; auto.
   constructor.
 Qed.
+
+(** Composing two memory injections *)
+
+Definition compose_meminj (f f': meminj) : meminj :=
+  fun b =>
+    match f b with
+    | None => None
+    | Some(b', delta) =>
+        match f' b' with
+        | None => None
+        | Some(b'', delta') => Some(b'', delta + delta')
+        end
+    end.
+
+Lemma val_inject_compose:
+  forall f f' v1 v2 v3,
+  val_inject f v1 v2 -> val_inject f' v2 v3 ->
+  val_inject (compose_meminj f f') v1 v3.
+Proof.
+  intros. inv H; auto; inv H0; auto. econstructor.
+  unfold compose_meminj; rewrite H1; rewrite H3; eauto. 
+  rewrite Int.add_assoc. decEq. unfold Int.add. apply Int.eqm_samerepr. auto with ints.
+Qed. 
 

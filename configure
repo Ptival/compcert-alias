@@ -21,7 +21,6 @@ target=''
 usage='Usage: ./configure [options] target
 
 Supported targets:
-  ppc-macosx       (PowerPC, MacOS X)
   ppc-linux        (PowerPC, Linux)
   ppc-eabi         (PowerPC, EABI with GNU/Unix tools)
   ppc-eabi-diab    (PowerPC, EABI with Diab tools)
@@ -62,18 +61,9 @@ done
 # Per-target configuration
 
 cchecklink=false
+has_runtime_lib=false
 
 case "$target" in
-  powerpc-macosx|ppc-macosx)
-    arch="powerpc"
-    variant="macosx"
-    system="macosx"
-    cc="${toolprefix}gcc -arch ppc"
-    cprepro="${toolprefix}gcc -arch ppc -U__GNUC__ -U__BLOCKS__ -E"
-    casm="${toolprefix}gcc -arch ppc -c"
-    clinker="${toolprefix}gcc -arch ppc"
-    libmath=""
-    need_stdlib_wrapper="true";;
   powerpc-linux|ppc-linux|powerpc-eabi|ppc-eabi)
     arch="powerpc"
     variant="eabi"
@@ -83,7 +73,6 @@ case "$target" in
     casm="${toolprefix}gcc -c"
     clinker="${toolprefix}gcc"
     libmath="-lm"
-    need_stdlib_wrapper="false"
     cchecklink=true;;
   powerpc-eabi-diab|ppc-eabi-diab)
     arch="powerpc"
@@ -94,7 +83,6 @@ case "$target" in
     casm="${toolprefix}das"
     clinker="${toolprefix}dcc"
     libmath="-lm"
-    need_stdlib_wrapper="false"
     cchecklink=true;;
   arm-linux)
     arch="arm"
@@ -104,8 +92,7 @@ case "$target" in
     cprepro="${toolprefix}gcc -U__GNUC__ '-D__REDIRECT(name,proto,alias)=name proto' '-D__REDIRECT_NTH(name,proto,alias)=name proto' -E"
     casm="${toolprefix}gcc -c"
     clinker="${toolprefix}gcc"
-    libmath="-lm"
-    need_stdlib_wrapper="false";;
+    libmath="-lm";;
   ia32-linux)
     arch="ia32"
     variant="standard"
@@ -114,8 +101,7 @@ case "$target" in
     cprepro="${toolprefix}gcc -m32 -U__GNUC__ -E"
     casm="${toolprefix}gcc -m32 -c"
     clinker="${toolprefix}gcc -m32"
-    libmath="-lm"
-    need_stdlib_wrapper="false";;
+    libmath="-lm";;
   ia32-bsd)
     arch="ia32"
     variant="standard"
@@ -124,8 +110,7 @@ case "$target" in
     cprepro="${toolprefix}gcc -m32 -U__GNUC__ -E"
     casm="${toolprefix}gcc -m32 -c"
     clinker="${toolprefix}gcc -m32"
-    libmath="-lm"
-    need_stdlib_wrapper="false";;
+    libmath="-lm";;
   ia32-macosx)
     arch="ia32"
     variant="standard"
@@ -134,8 +119,7 @@ case "$target" in
     cprepro="${toolprefix}gcc -arch i386 -U__GNUC__ -U__BLOCKS__ -E"
     casm="${toolprefix}gcc -arch i386 -c"
     clinker="${toolprefix}gcc -arch i386"
-    libmath=""
-    need_stdlib_wrapper="true";;
+    libmath="";;
   ia32-cygwin)
     arch="ia32"
     variant="standard"
@@ -144,8 +128,7 @@ case "$target" in
     cprepro="${toolprefix}gcc -m32 -U__GNUC__ -E"
     casm="${toolprefix}gcc -m32 -c"
     clinker="${toolprefix}gcc -m32"
-    libmath="-lm"
-    need_stdlib_wrapper="false";;
+    libmath="-lm";;
   manual)
     ;;
   "")
@@ -188,7 +171,7 @@ CPREPRO=$cprepro
 CASM=$casm
 CLINKER=$clinker
 LIBMATH=$libmath
-NEED_STDLIB_WRAPPER=$need_stdlib_wrapper
+HAS_RUNTIME_LIB=$has_runtime_lib
 CCHECKLINK=$cchecklink
 EOF
 else
@@ -201,7 +184,6 @@ cat >> Makefile.config <<'EOF'
 ARCH=
 
 # Target ABI
-# VARIANT=macosx   # for PowerPC / MacOS X
 # VARIANT=eabi     # for PowerPC / Linux and other SVR4 or EABI platforms
 # VARIANT=linux    # for ARM
 # VARIANT=standard # for IA32
@@ -236,11 +218,8 @@ CLINKER=gcc
 # Math library.  Set to empty under MacOS X
 LIBMATH=-lm
 
-# Do we need the thin wrapper around standard library and standard includes
-# defined in directory runtime/ ?
-# NEED_STDLIB_WRAPPER=true  # for MacOS X
-# NEED_STDLIB_WRAPPER=false # for other systems
-NEED_STDLIB_WRAPPER=
+# Obsolete; do not change
+HAS_RUNTIME_LIB=false
 EOF
 fi
 
@@ -269,8 +248,8 @@ CompCert configuration:
     Assembler..................... $casm
     Linker........................ $clinker
     Math library.................. $libmath
-    Needs wrapper around stdlib... $need_stdlib_wrapper
     Binaries installed in......... $bindirexp
+    Runtime library provided...... $has_runtime_lib
     Library files installed in.... $libdirexp
     cchecklink tool supported..... $cchecklink
 

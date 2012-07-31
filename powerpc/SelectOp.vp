@@ -119,6 +119,8 @@ Nondetfunction add (e1: expr) (e2: expr) :=
   match e1, e2 with
   | Eop (Ointconst n1) Enil, t2 =>
       addimm n1 t2
+  | t1, Eop (Ointconst n2) Enil =>
+      addimm n2 t1
   | Eop (Oaddimm n1) (t1:::Enil), Eop (Oaddimm n2) (t2:::Enil) =>
       addimm (Int.add n1 n2) (Eop Oadd (t1:::t2:::Enil))
   | Eop (Oaddimm n1) (t1:::Enil), t2 =>
@@ -127,8 +129,6 @@ Nondetfunction add (e1: expr) (e2: expr) :=
       Eop Oadd (Eop (Oaddrsymbol s (Int.add n1 n2)) Enil ::: t2 ::: Enil)
   | Eop (Oaddrstack n1) Enil, Eop (Oaddimm n2) (t2:::Enil) =>
       Eop Oadd (Eop (Oaddrstack (Int.add n1 n2)) Enil ::: t2 ::: Enil)
-  | t1, Eop (Ointconst n2) Enil =>
-      addimm n2 t1
   | t1, Eop (Oaddimm n2) (t2:::Enil) =>
       addimm n2 (Eop Oadd (t1:::t2:::Enil))
   | _, _ =>
@@ -179,12 +179,6 @@ Definition shlimm (e1: expr) (n2: int) :=
   else
     Eop Oshl (e1:::Eop (Ointconst n2) Enil:::Enil).
 
-Definition shrimm (e1: expr) (n2: int) :=
-  if Int.eq n2 Int.zero then
-    e1
-  else
-    Eop (Oshrimm n2) (e1:::Enil).
-
 Definition shruimm (e1: expr) (n2: int) :=
   if Int.eq n2 Int.zero then
     e1
@@ -192,6 +186,19 @@ Definition shruimm (e1: expr) (n2: int) :=
     rolm e1 (Int.sub Int.iwordsize n2) (Int.shru Int.mone n2)
   else
     Eop Oshru (e1:::Eop (Ointconst n2) Enil:::Enil).
+
+Nondetfunction shrimm (e1: expr) (n2: int) :=
+  if Int.eq n2 Int.zero then
+    e1
+  else
+    match e1 with
+    | Eop (Oandimm mask1) (t1:::Enil) =>
+        if Int.lt mask1 Int.zero
+        then Eop (Oshrimm n2) (e1:::Enil)
+        else shruimm e1 n2
+    | _ =>
+        Eop (Oshrimm n2) (e1:::Enil)
+    end.
 
 (** ** Integer multiply *)
 
@@ -304,6 +311,8 @@ Nondetfunction xor (e1: expr) (e2: expr) :=
   match e1, e2 with
   | Eop (Ointconst n1) Enil, t2 => xorimm n1 t2
   | t1, Eop (Ointconst n2) Enil => xorimm n2 t1
+  | Eop Onot (t1:::Enil), t2 => Eop Onxor (t1:::t2:::Enil)
+  | t1, Eop Onot (t2:::Enil) => Eop Onxor (t1:::t2:::Enil)
   | _, _ => Eop Oxor (e1:::e2:::Enil)
   end.
 
@@ -415,11 +424,11 @@ Definition cast16signed (e: expr) := Eop Ocast16signed (e ::: Enil).
 Definition intoffloat (e: expr) := Eop Ointoffloat (e ::: Enil).
 
 Definition intuoffloat (e: expr) :=
-  let f := Eop (Ofloatconst (Float.floatofintu Float.ox8000_0000)) Enil in
   Elet e
-    (Econdition (CEcond (Ccompf Clt) (Eletvar O ::: f ::: Enil))
-      (intoffloat (Eletvar O))
-      (addimm Float.ox8000_0000 (intoffloat (subf (Eletvar O) f)))).
+  (Elet (Eop (Ofloatconst (Float.floatofintu Float.ox8000_0000)) Enil)
+    (Econdition (CEcond (Ccompf Clt) (Eletvar 1 ::: Eletvar 0 ::: Enil))
+      (intoffloat (Eletvar 1))
+      (addimm Float.ox8000_0000 (intoffloat (subf (Eletvar 1) (Eletvar 0))))))%nat.
 
 Definition floatofintu (e: expr) :=
   subf (Eop Ofloatofwords (Eop (Ointconst Float.ox4330_0000) Enil ::: e ::: Enil))

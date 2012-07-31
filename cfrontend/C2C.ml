@@ -390,9 +390,9 @@ let rec convertExpr env e =
         unsupported "'long long' integer literal";
       Eval(Vint(convertInt i), ty)
   | C.EConst(C.CFloat(f, k, _)) ->
-      if k = C.FLongDouble then
+      if k = C.FLongDouble && not !Clflags.option_flongdouble then
         unsupported "'long double' floating-point literal";
-      Eval(Vfloat(f), ty)
+      Eval(Vfloat(coqfloat_of_camlfloat f), ty)
   | C.EConst(C.CStr s) ->
       let ty = typeStringLiteral s in
       Evalof(Evar(name_for_string_literal env s, ty), ty)
@@ -954,5 +954,11 @@ let atom_sections a =
 let atom_is_small_data a ofs =
   try
     (Hashtbl.find decl_atom a).a_small_data
+  with Not_found ->
+    false
+
+let atom_is_inline a =
+  try
+    (Hashtbl.find decl_atom a).a_inline
   with Not_found ->
     false

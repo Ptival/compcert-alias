@@ -91,11 +91,13 @@ Nondetfunction eval_static_addressing (addr: addressing) (vl: list approx) :=
   | _, _ => Unknown
   end.
 
+Parameter propagate_float_constants: unit -> bool.
+
 Nondetfunction eval_static_operation (op: operation) (vl: list approx) :=
   match op, vl with
   | Omove, v1::nil => v1
   | Ointconst n, nil => I n
-  | Ofloatconst n, nil => F n
+  | Ofloatconst n, nil => if propagate_float_constants tt then F n else Unknown
   | Ocast8signed, I n1 :: nil => I(Int.sign_ext 8 n1)
   | Ocast8unsigned, I n1 :: nil => I(Int.zero_ext 8 n1)
   | Ocast16signed, I n1 :: nil => I(Int.sign_ext 16 n1)
@@ -105,9 +107,15 @@ Nondetfunction eval_static_operation (op: operation) (vl: list approx) :=
   | Osub, G s1 n1 :: I n2 :: nil => G s1 (Int.sub n1 n2)
   | Omul, I n1 :: I n2 :: nil => I(Int.mul n1 n2)
   | Omulimm n, I n1 :: nil => I(Int.mul n1 n)
-  | Odiv, I n1 :: I n2 :: nil => if Int.eq n2 Int.zero then Unknown else I(Int.divs n1 n2)
+  | Odiv, I n1 :: I n2 :: nil =>
+      if Int.eq n2 Int.zero then Unknown else
+      if Int.eq n1 (Int.repr Int.min_signed) && Int.eq n2 Int.mone then Unknown
+      else I(Int.divs n1 n2)
   | Odivu, I n1 :: I n2 :: nil => if Int.eq n2 Int.zero then Unknown else I(Int.divu n1 n2)
-  | Omod, I n1 :: I n2 :: nil => if Int.eq n2 Int.zero then Unknown else I(Int.mods n1 n2)
+  | Omod, I n1 :: I n2 :: nil =>
+      if Int.eq n2 Int.zero then Unknown else
+      if Int.eq n1 (Int.repr Int.min_signed) && Int.eq n2 Int.mone then Unknown
+      else I(Int.mods n1 n2)
   | Omodu, I n1 :: I n2 :: nil => if Int.eq n2 Int.zero then Unknown else I(Int.modu n1 n2)
   | Oand, I n1 :: I n2 :: nil => I(Int.and n1 n2)
   | Oandimm n, I n1 :: nil => I(Int.and n1 n)
@@ -132,7 +140,7 @@ Nondetfunction eval_static_operation (op: operation) (vl: list approx) :=
   | Odivf, F n1 :: F n2 :: nil => F(Float.div n1 n2)
   | Osingleoffloat, F n1 :: nil => F(Float.singleoffloat n1)
   | Ointoffloat, F n1 :: nil => eval_static_intoffloat n1
-  | Ofloatofint, I n1 :: nil => F(Float.floatofint n1)
+  | Ofloatofint, I n1 :: nil => if propagate_float_constants tt then F(Float.floatofint n1) else Unknown
   | Ocmp c, vl => eval_static_condition_val c vl
   | _, _ => Unknown
   end.
@@ -209,7 +217,7 @@ Nondetfunction addr_strength_reduction
 Definition make_addimm (n: int) (r: reg) :=
   if Int.eq n Int.zero
   then (Omove, r :: nil)
-  else (Oaddimm n, r :: nil).
+  else (Olea (Aindexed n), r :: nil).
 
 Definition make_shlimm (n: int) (r: reg) :=
   if Int.eq n Int.zero

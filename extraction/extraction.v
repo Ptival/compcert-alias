@@ -10,9 +10,13 @@
 (*                                                                     *)
 (* *********************************************************************)
 
+Require Wfsimpl.
 Require Iteration.
 Require Floats.
 Require RTLgen.
+Require Inlining.
+Require ConstpropOp.
+Require Constprop.
 Require Coloring.
 Require Allocation.
 Require Compiler.
@@ -22,26 +26,8 @@ Require Initializers.
 Require Import ExtrOcamlBasic.
 Require Import ExtrOcamlString.
 
-(* Float *)
-Extract Inlined Constant Floats.float => "float".
-Extract Constant Floats.Float.zero   => "0.".
-Extract Constant Floats.Float.neg => "( ~-. )".
-Extract Constant Floats.Float.abs => "abs_float".
-Extract Constant Floats.Float.singleoffloat => "Floataux.singleoffloat".
-Extract Constant Floats.Float.intoffloat => "Floataux.intoffloat".
-Extract Constant Floats.Float.intuoffloat => "Floataux.intuoffloat".
-Extract Constant Floats.Float.floatofint => "Floataux.floatofint".
-Extract Constant Floats.Float.floatofintu => "Floataux.floatofintu".
-Extract Constant Floats.Float.add => "( +. )".
-Extract Constant Floats.Float.sub => "( -. )".
-Extract Constant Floats.Float.mul => "( *. )".
-Extract Constant Floats.Float.div => "( /. )".
-Extract Constant Floats.Float.cmp => "Floataux.cmp".
-Extract Constant Floats.Float.eq_dec => "fun (x: float) (y: float) -> x = y".
-Extract Constant Floats.Float.bits_of_double => "Floataux.bits_of_double".
-Extract Constant Floats.Float.double_of_bits => "Floataux.double_of_bits".
-Extract Constant Floats.Float.bits_of_single => "Floataux.bits_of_single".
-Extract Constant Floats.Float.single_of_bits => "Floataux.single_of_bits".
+(* Wfsimpl *)
+Extraction Inline Wfsimpl.Fix Wfsimpl.Fixm.
 
 (* Memdata *)
 Extract Constant Memdata.big_endian => "Memdataaux.big_endian".
@@ -53,8 +39,6 @@ Extraction NoInline Memory.Mem.valid_pointer.
 Extraction Inline Errors.bind Errors.bind2.
 
 (* Iteration *)
-Extract Constant Iteration.dependent_description' =>
-  "fun x -> assert false".
 
 Extract Constant Iteration.GenIter.iterate =>
   "let rec iter f a =
@@ -66,8 +50,18 @@ Extract Constant RTLgen.compile_switch => "RTLgenaux.compile_switch".
 Extract Constant RTLgen.more_likely => "RTLgenaux.more_likely".
 Extraction Inline RTLgen.ret RTLgen.error RTLgen.bind RTLgen.bind2.
 
+(* Inlining *)
+Extract Inlined Constant Inlining.should_inline => "Inliningaux.should_inline".
+Extraction Inline Inlining.ret Inlining.bind.
+
 (* RTLtyping *)
 Extract Constant RTLtyping.infer_type_environment => "RTLtypingaux.infer_type_environment".
+
+(* Constprop *)
+Extract Constant ConstpropOp.propagate_float_constants =>
+  "fun _ -> !Clflags.option_ffloatconstprop >= 1".
+Extract Constant Constprop.generate_float_constants =>
+  "fun _ -> !Clflags.option_ffloatconstprop >= 2".
 
 (* Coloring *)
 Extract Constant Coloring.graph_coloring => "Coloringaux.graph_coloring".
@@ -83,6 +77,7 @@ Extract Constant Compiler.print_Clight => "PrintClight.print_if".
 Extract Constant Compiler.print_Cminor => "PrintCminor.print_if".
 Extract Constant Compiler.print_RTL => "PrintRTL.print_rtl".
 Extract Constant Compiler.print_RTL_tailcall => "PrintRTL.print_tailcall".
+Extract Constant Compiler.print_RTL_inline => "PrintRTL.print_inlining".
 Extract Constant Compiler.print_RTL_constprop => "PrintRTL.print_constprop".
 Extract Constant Compiler.print_RTL_cse => "PrintRTL.print_cse".
 Extract Constant Compiler.print_LTLin => "PrintLTLin.print_if".
@@ -97,6 +92,13 @@ Load extractionMachdep.
 
 (* Avoid name clashes *)
 Extraction Blacklist List String Int.
+
+(* Cutting the dependancy to R. *)
+Extract Inlined Constant Fcore_defs.F2R => "fun _ -> assert false".
+Extract Inlined Constant Fappli_IEEE.FF2R => "fun _ -> assert false".
+Extract Inlined Constant Fappli_IEEE.B2R => "fun _ -> assert false".
+Extract Inlined Constant Fappli_IEEE.round_mode => "fun _ -> assert false".
+Extract Inlined Constant Fcalc_bracket.inbetween_loc => "fun _ -> assert false".
 
 (* Go! *)
 Cd "extraction".

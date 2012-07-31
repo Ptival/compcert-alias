@@ -12,6 +12,8 @@
 
 (* Interpreting CompCert C sources *)
 
+type caml_float = float
+
 open Format
 open Camlcoq
 open Datatypes
@@ -48,7 +50,7 @@ let print_id_ofs p (id, ofs) =
 
 let print_eventval p = function
   | EVint n -> fprintf p "%ld" (camlint_of_coqint n)
-  | EVfloat f -> fprintf p "%F" f
+  | EVfloat f -> fprintf p "%F" (camlfloat_of_coqfloat f)
   | EVptr_global(id, ofs) -> fprintf p "&%a" print_id_ofs (id, ofs)
 
 let print_eventval_list p = function
@@ -145,24 +147,9 @@ let mem_of_state = function
 
 (* Comparing memory states *)
 
-let rec compare_Z_range lo hi f =
-  if coq_Zcompare lo hi = Lt then begin
-    let c = f lo in if c <> 0 then c else compare_Z_range (coq_Zsucc lo) hi f
-  end else 0
-
-let compare_mem m1 m2 =
-  if m1 == m2 then 0 else
-  let c = compare m1.Mem.nextblock m2.Mem.nextblock in if c <> 0 then c else
-  compare_Z_range Z0 m1.Mem.nextblock (fun b ->
-    let ((lo, hi) as bnds) = m1.Mem.bounds b in
-    let c = compare bnds (m2.Mem.bounds b) in if c <> 0 then c else
-    let contents1 = m1.Mem.mem_contents b and contents2 = m2.Mem.mem_contents b in
-    if contents1 == contents2 then 0 else
-    let c = compare_Z_range lo hi (fun ofs ->
-               compare (contents1 ofs) (contents2 ofs)) in if c <> 0 then c else
-    let access1 = m1.Mem.mem_access b and access2 = m2.Mem.mem_access b in
-    if access1 == access2 then 0 else
-    compare_Z_range lo hi (fun ofs -> compare (access1 ofs) (access2 ofs)))
+let compare_mem m1 m2 = (* should permissions be taken into account? *)
+  Pervasives.compare (m1.Mem.nextblock, m1.Mem.mem_contents)
+                     (m2.Mem.nextblock, m1.Mem.mem_contents)
 
 (* Comparing continuations *)
 
@@ -289,7 +276,7 @@ let extract_string ge m id ofs =
 let re_conversion = Str.regexp
   "%[-+0# ]*[0-9]*\\(\\.[0-9]*\\)?\\([lhjzt]\\|hh\\)?\\([aAcdeEfgGinopsuxX%]\\)"
 
-external format_float: string -> float -> string
+external format_float: string -> caml_float -> string
   = "caml_format_float"
 external format_int32: string -> int32 -> string
   = "caml_int32_format"
@@ -324,7 +311,7 @@ let do_printf ge m fmt args =
             Buffer.add_string b (format_int32 pat (camlint_of_coqint i));
             scan pos' args'
         | EVfloat f :: args', ('f'|'e'|'E'|'g'|'G'|'a') ->
-            Buffer.add_string b (format_float pat f);
+            Buffer.add_string b (format_float pat (camlfloat_of_coqfloat f));
             scan pos' args'
         | EVptr_global(id, ofs) :: args', 's' ->
             Buffer.add_string b
@@ -364,8 +351,9 @@ and world_vload chunk id ofs =
     | Mint16signed -> EVint(coqint_of_camlint(Int32.sub (Random.int32 0x10000l) 0x8000l))
     | Mint16unsigned -> EVint(coqint_of_camlint(Random.int32 0x10000l))
     | Mint32 -> EVint(coqint_of_camlint(Random.int32 0x7FFF_FFFFl))
-    | Mfloat32 -> EVfloat(Floats.Float.singleoffloat(Random.float 1.0))
-    | Mfloat64 -> EVfloat(Random.float 1.0)
+    | Mfloat32 -> EVfloat(
+	Floats.Float.singleoffloat(coqfloat_of_camlfloat(Random.float 1.0)))
+    | Mfloat64 | Mfloat64al32 -> EVfloat(coqfloat_of_camlfloat(Random.float 1.0))
   in Some(res, world)
 
 and world_vstore chunk id ofs v =

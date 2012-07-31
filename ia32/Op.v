@@ -69,6 +69,7 @@ Inductive operation : Type :=
   | Omove: operation                    (**r [rd = r1] *)
   | Ointconst: int -> operation         (**r [rd] is set to the given integer constant *)
   | Ofloatconst: float -> operation     (**r [rd] is set to the given float constant *)
+  | Oindirectsymbol: ident -> operation (**r [rd] is set to the address of the symbol *)
 (*c Integer arithmetic: *)
   | Ocast8signed: operation             (**r [rd] is 8-bit sign extension of [r1] *)
   | Ocast8unsigned: operation           (**r [rd] is 8-bit zero extension of [r1] *)
@@ -193,6 +194,7 @@ Definition eval_operation
   | Omove, v1::nil => Some v1
   | Ointconst n, nil => Some (Vint n)
   | Ofloatconst n, nil => Some (Vfloat n)
+  | Oindirectsymbol id, nil => Some (symbol_address genv id Int.zero)
   | Ocast8signed, v1 :: nil => Some (Val.sign_ext 8 v1)
   | Ocast8unsigned, v1 :: nil => Some (Val.zero_ext 8 v1)
   | Ocast16signed, v1 :: nil => Some (Val.sign_ext 16 v1)
@@ -276,6 +278,7 @@ Definition type_of_operation (op: operation) : list typ * typ :=
   | Omove => (nil, Tint)   (* treated specially *)
   | Ointconst _ => (nil, Tint)
   | Ofloatconst _ => (nil, Tfloat)
+  | Oindirectsymbol _ => (nil, Tint)
   | Ocast8signed => (Tint :: nil, Tint)
   | Ocast8unsigned => (Tint :: nil, Tint)
   | Ocast16signed => (Tint :: nil, Tint)
@@ -353,6 +356,7 @@ Proof with (try exact I).
   congruence.
   exact I.
   exact I.
+  unfold symbol_address; destruct (Genv.find_symbol genv i)...
   destruct v0...
   destruct v0...
   destruct v0...
@@ -361,9 +365,11 @@ Proof with (try exact I).
   destruct v0; destruct v1... simpl. destruct (zeq b b0)...
   destruct v0; destruct v1...
   destruct v0...
+  destruct v0; destruct v1; simpl in *; inv H0.
+    destruct (Int.eq i0 Int.zero || Int.eq i (Int.repr Int.min_signed) && Int.eq i0 Int.mone); inv H2...
   destruct v0; destruct v1; simpl in *; inv H0. destruct (Int.eq i0 Int.zero); inv H2...
-  destruct v0; destruct v1; simpl in *; inv H0. destruct (Int.eq i0 Int.zero); inv H2...
-  destruct v0; destruct v1; simpl in *; inv H0. destruct (Int.eq i0 Int.zero); inv H2...
+  destruct v0; destruct v1; simpl in *; inv H0.
+    destruct (Int.eq i0 Int.zero || Int.eq i (Int.repr Int.min_signed) && Int.eq i0 Int.mone); inv H2...
   destruct v0; destruct v1; simpl in *; inv H0. destruct (Int.eq i0 Int.zero); inv H2...
   destruct v0; destruct v1...
   destruct v0...
@@ -446,20 +452,18 @@ Definition negate_condition (cond: condition): condition :=
   end.
 
 Lemma eval_negate_condition:
-  forall cond vl m b,
-  eval_condition cond vl m = Some b ->
-  eval_condition (negate_condition cond) vl m = Some (negb b).
+  forall cond vl m,
+  eval_condition (negate_condition cond) vl m = option_map negb (eval_condition cond vl m).
 Proof.
-  intros. 
-  destruct cond; simpl in H; FuncInv; simpl.
-  rewrite Val.negate_cmp_bool; rewrite H; auto.
-  rewrite Val.negate_cmpu_bool; rewrite H; auto.
-  rewrite Val.negate_cmp_bool; rewrite H; auto.
-  rewrite Val.negate_cmpu_bool; rewrite H; auto.
-  rewrite H; auto.
-  destruct (Val.cmpf_bool c v v0); simpl in H; inv H. rewrite negb_elim; auto. 
-  rewrite H0; auto.
-  rewrite <- H0. rewrite negb_elim; auto.
+  intros. destruct cond; simpl.
+  repeat (destruct vl; auto). apply Val.negate_cmp_bool.
+  repeat (destruct vl; auto). apply Val.negate_cmpu_bool.
+  repeat (destruct vl; auto). apply Val.negate_cmp_bool.
+  repeat (destruct vl; auto). apply Val.negate_cmpu_bool.
+  repeat (destruct vl; auto). 
+  repeat (destruct vl; auto). destruct (Val.cmpf_bool c v v0); auto. destruct b; auto.
+  destruct vl; auto. destruct v; auto. destruct vl; auto. 
+  destruct vl; auto. destruct v; auto. destruct vl; auto. simpl. rewrite negb_involutive. auto.
 Qed.
 
 (** Shifting stack-relative references.  This is used in [Stacking]. *)
@@ -539,6 +543,7 @@ Definition two_address_op (op: operation) : bool :=
   | Omove => false
   | Ointconst _ => false
   | Ofloatconst _ => false
+  | Oindirectsymbol _ => false
   | Ocast8signed => false
   | Ocast8unsigned => false
   | Ocast16signed => false
@@ -691,6 +696,7 @@ Lemma eval_operation_preserved:
 Proof.
   intros.
   unfold eval_operation; destruct op; auto.
+  unfold symbol_address. rewrite agree_on_symbols. auto.
   apply eval_addressing_preserved.
 Qed.
 
@@ -839,12 +845,12 @@ Proof.
     rewrite Int.sub_shifted. auto.
   inv H4; inv H2; simpl; auto.
   inv H4; simpl; auto.
+  inv H4; inv H3; simpl in H1; inv H1. simpl.
+    destruct (Int.eq i0 Int.zero || Int.eq i (Int.repr Int.min_signed) && Int.eq i0 Int.mone); inv H2. TrivialExists.
   inv H4; inv H3; simpl in H1; inv H1. simpl. 
     destruct (Int.eq i0 Int.zero); inv H2. TrivialExists.
-  inv H4; inv H3; simpl in H1; inv H1. simpl. 
-    destruct (Int.eq i0 Int.zero); inv H2. TrivialExists.
-  inv H4; inv H3; simpl in H1; inv H1. simpl. 
-    destruct (Int.eq i0 Int.zero); inv H2. TrivialExists.
+  inv H4; inv H3; simpl in H1; inv H1. simpl.
+    destruct (Int.eq i0 Int.zero || Int.eq i (Int.repr Int.min_signed) && Int.eq i0 Int.mone); inv H2. TrivialExists.
   inv H4; inv H3; simpl in H1; inv H1. simpl. 
     destruct (Int.eq i0 Int.zero); inv H2. TrivialExists.
   inv H4; inv H2; simpl; auto.

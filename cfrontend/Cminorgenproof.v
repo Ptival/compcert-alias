@@ -150,10 +150,10 @@ Proof.
 Qed.
 
 Lemma perm_freelist:
-  forall fbl m m' b ofs p,
+  forall fbl m m' b ofs k p,
   Mem.free_list m fbl = Some m' ->
-  Mem.perm m' b ofs p ->
-  Mem.perm m b ofs p.
+  Mem.perm m' b ofs k p ->
+  Mem.perm m b ofs k p.
 Proof.
   induction fbl; simpl; intros until p.
   congruence.
@@ -177,7 +177,7 @@ Lemma free_list_freeable:
   forall l m m',
   Mem.free_list m l = Some m' ->
   forall b lo hi,
-  In (b, lo, hi) l -> Mem.range_perm m b lo hi Freeable.
+  In (b, lo, hi) l -> Mem.range_perm m b lo hi Cur Freeable.
 Proof.
   induction l; simpl; intros.
   contradiction.
@@ -187,18 +187,6 @@ Proof.
   destruct H0. inv H. 
   eauto with mem.
   red; intros. eapply Mem.perm_free_3; eauto. exploit IHl; eauto.
-Qed.
-
-Lemma bounds_freelist:
-  forall b l m m',
-  Mem.free_list m l = Some m' -> Mem.bounds m' b = Mem.bounds m b.
-Proof.
-  induction l; simpl; intros.
-  inv H; auto.
-  revert H. destruct a as [[b' lo'] hi'].
-  caseEq (Mem.free m b' lo' hi'); try congruence.
-  intros m1 FREE1 FREE2.
-  transitivity (Mem.bounds m1 b). eauto. eapply Mem.bounds_free; eauto.
 Qed.
 
 Lemma nextblock_storev:
@@ -324,8 +312,8 @@ Record match_env (f: meminj) (cenv: compilenv)
 
 (** The sizes of blocks appearing in [e] agree with their types *)
     me_bounds:
-      forall id b lv,
-      PTree.get id e = Some(b, lv) -> Mem.bounds m b = (0, sizeof lv)
+      forall id b lv ofs p,
+      PTree.get id e = Some(b, lv) -> Mem.perm m b ofs Max p -> 0 <= ofs < sizeof lv
   }.
 
 Hint Resolve me_low_high.
@@ -351,7 +339,7 @@ Proof.
   rewrite <- H4. eapply Mem.load_store_other; eauto. 
   left. congruence.
   (* bounds *)
-  intros. rewrite (Mem.bounds_store _ _ _ _ _ _ H0). eauto. 
+  intros. eauto with mem. 
 Qed.
 
 (** Preservation by assignment to a Csharpminor variable that is 
@@ -385,9 +373,9 @@ Proof.
     assert (b0 = b) by congruence. subst.
     assert (chunk0 = chunk) by congruence. subst.
     econstructor. eauto. 
-    eapply Mem.load_store_same; eauto. apply val_normalized_has_type; auto. auto. 
+    eapply Mem.load_store_same; eauto. auto. 
     rewrite PTree.gss. reflexivity.
-    red in H0. rewrite H0. auto. 
+    red in H0. rewrite H0. auto.
     (* a different variable *)
     econstructor; eauto.
     rewrite <- H6. eapply Mem.load_store_other; eauto. 
@@ -403,7 +391,7 @@ Proof.
   (* temps *)
   intros. rewrite PTree.gso. auto. unfold for_temp, for_var; congruence. 
   (* bounds *)
-  intros. rewrite (Mem.bounds_store _ _ _ _ _ _ H2). eauto. 
+  intros. eauto with mem. 
 Qed.
 
 (** Preservation by assignment to a Csharpminor temporary and the
@@ -442,16 +430,14 @@ Lemma match_env_invariant:
   (forall b ofs chunk v, 
      lo <= b < hi -> Mem.load chunk m1 b ofs = Some v ->
      Mem.load chunk m2 b ofs = Some v) ->
-  (forall b,
-     lo <= b < hi -> Mem.bounds m2 b = Mem.bounds m1 b) ->
+  (forall b ofs p,
+     lo <= b < hi -> Mem.perm m2 b ofs Max p -> Mem.perm m1 b ofs Max p) ->
   match_env f cenv e le m1 te sp lo hi ->
   match_env f cenv e le m2 te sp lo hi.
 Proof.
   intros. inv H1. constructor; eauto.
   (* vars *)
   intros. geninv (me_vars0 id); econstructor; eauto.
-  (* bounds *)
-  intros. rewrite H0. eauto. eauto.
 Qed.
 
 (** [match_env] is insensitive to the Cminor values of stack-allocated data. *)
@@ -551,10 +537,10 @@ Proof.
   exploit Mem.alloc_result; eauto. unfold block; omega.
 (* bounds *)
   intros. rewrite PTree.gsspec in H.
-  rewrite (Mem.bounds_alloc _ _ _ _ _ ALLOC). 
+  exploit Mem.perm_alloc_inv. eexact ALLOC. eauto. 
   destruct (peq id0 id). 
-  inv H. apply dec_eq_true.
-  rewrite dec_eq_false. eauto. 
+  inv H. rewrite zeq_true. auto. 
+  rewrite zeq_false. eauto. 
   apply Mem.valid_not_valid_diff with m1.
   exploit me_bounded0; eauto. intros [A B]. auto. 
   eauto with mem.
@@ -599,7 +585,8 @@ Proof.
   intros. eapply me_incr0; eauto. rewrite <- OTHER; eauto. 
   exploit Mem.alloc_result; eauto. unfold block in *; omega.
 (* bounds *)
-  intros. rewrite (Mem.bounds_alloc_other _ _ _ _ _ ALLOC). eauto.
+  intros. exploit Mem.perm_alloc_inv. eexact ALLOC. eauto. 
+  rewrite zeq_false. eauto. 
   exploit me_bounded0; eauto.
 Qed.
 
@@ -634,7 +621,7 @@ Lemma match_env_external_call:
   mem_unchanged_on (loc_unmapped f1) m1 m2 ->
   inject_incr f1 f2 ->
   inject_separated f1 f2 m1 m1' ->
-  (forall b, Mem.valid_block m1 b -> Mem.bounds m2 b = Mem.bounds m1 b) ->
+  (forall b ofs p, Mem.valid_block m1 b -> Mem.perm m2 b ofs Max p -> Mem.perm m1 b ofs Max p) ->
   hi <= Mem.nextblock m1 -> sp < Mem.nextblock m1' ->
   match_env f2 cenv e le m2 te sp lo hi.
 Proof.
@@ -661,7 +648,7 @@ Proof.
   instantiate (1 := b). red; omega. intros. 
   apply me_incr0 with b delta. congruence. auto.
 (* bounds *)
-  intros. rewrite BOUNDS; eauto. 
+  intros. eapply me_bounds0; eauto. eapply BOUNDS; eauto. 
   red. exploit me_bounded0; eauto. omega.
 Qed.
 
@@ -704,13 +691,12 @@ Inductive match_globalenvs (f: meminj) (bound: Z): Prop :=
   that are not images of C#minor local variable blocks.
 *)
 
-Definition padding_freeable (f: meminj) (m: mem) (tm: mem) (sp: block) (sz: Z) : Prop :=
+Definition padding_freeable (f: meminj) (e: Csharpminor.env) (tm: mem) (sp: block) (sz: Z) : Prop :=
   forall ofs, 
   0 <= ofs < sz ->
-  Mem.perm tm sp ofs Freeable
-  \/ exists b, exists delta, 
-       f b = Some(sp, delta) 
-       /\ Mem.low_bound m b + delta <= ofs < Mem.high_bound m b + delta.
+  Mem.perm tm sp ofs Cur Freeable
+  \/ exists id, exists b, exists lv, exists delta,
+     e!id = Some(b, lv) /\ f b = Some(sp, delta) /\ delta <= ofs < delta + sizeof lv.
 
 Inductive match_callstack (f: meminj) (m: mem) (tm: mem):
                           callstack -> Z -> Z -> Prop :=
@@ -724,7 +710,7 @@ Inductive match_callstack (f: meminj) (m: mem) (tm: mem):
         (BOUND: hi <= bound)
         (TBOUND: sp < tbound)
         (MENV: match_env f cenv e le m te sp lo hi)
-        (PERM: padding_freeable f m tm sp tf.(fn_stackspace))
+        (PERM: padding_freeable f e tm sp tf.(fn_stackspace))
         (MCS: match_callstack f m tm cs lo sp),
       match_callstack f m tm (Frame cenv tf e le te sp lo hi :: cs) bound tbound.
 
@@ -742,22 +728,20 @@ Qed.
     generalize those for [match_env]. *)
 
 Lemma padding_freeable_invariant:
-  forall f1 m1 tm1 sp sz cenv e le te lo hi f2 m2 tm2,
-  padding_freeable f1 m1 tm1 sp sz ->
+  forall f1 m1 tm1 sp sz cenv e le te lo hi f2 tm2,
+  padding_freeable f1 e tm1 sp sz ->
   match_env f1 cenv e le m1 te sp lo hi ->
-  (forall ofs, Mem.perm tm1 sp ofs Freeable -> Mem.perm tm2 sp ofs Freeable) ->
-  (forall b, b < hi -> Mem.bounds m2 b = Mem.bounds m1 b) ->
+  (forall ofs, Mem.perm tm1 sp ofs Cur Freeable -> Mem.perm tm2 sp ofs Cur Freeable) ->
   (forall b, b < hi -> f2 b = f1 b) ->
-  padding_freeable f2 m2 tm2 sp sz.
+  padding_freeable f2 e tm2 sp sz.
 Proof.
   intros; red; intros.
-  exploit H; eauto. intros [A | [b [delta [A B]]]].
+  exploit H; eauto. intros [A | [id [b [lv [delta [A [B C]]]]]]].
   left; auto. 
-  exploit me_inv; eauto. intros [id [lv C]]. 
-  exploit me_bounded; eauto. intros [D E]. 
-  right; exists b; exists delta. split.
-  rewrite H3; auto. 
-  rewrite H2; auto.
+  exploit me_bounded; eauto. intros [D E].
+  right; exists id; exists b; exists lv; exists delta; split.
+  auto.
+  rewrite H2; auto. 
 Qed.
 
 Lemma match_callstack_store_mapped:
@@ -775,7 +759,6 @@ Proof.
   eapply match_env_store_mapped; eauto. congruence.
   eapply padding_freeable_invariant; eauto. 
   intros; eauto with mem.
-  intros. eapply Mem.bounds_store; eauto.
 Qed.
 
 Lemma match_callstack_storev_mapped:
@@ -800,21 +783,17 @@ Lemma match_callstack_invariant:
     hi <= bound ->
     match_env f cenv e le m te sp lo hi ->
     match_env f cenv e le m' te sp lo hi) ->
-  (forall b,
-    b < bound -> Mem.bounds m' b = Mem.bounds m b) ->
-  (forall b ofs p,
-    b < tbound -> Mem.perm tm b ofs p -> Mem.perm tm' b ofs p) ->
+  (forall b ofs k p,
+    b < tbound -> Mem.perm tm b ofs k p -> Mem.perm tm' b ofs k p) ->
   match_callstack f m' tm' cs bound tbound.
 Proof.
   induction 1; intros.
   econstructor; eauto.
   constructor; auto.
-  eapply padding_freeable_invariant; eauto. 
-  intros. apply H1. omega.
+  eapply padding_freeable_invariant; eauto.
   eapply IHmatch_callstack; eauto. 
   intros. eapply H0; eauto. inv MENV; omega.
   intros. apply H1; auto. inv MENV; omega. 
-  intros. apply H2; auto. omega. 
 Qed.
 
 Lemma match_callstack_store_local:
@@ -828,14 +807,11 @@ Lemma match_callstack_store_local:
 Proof.
   intros. inv H3. constructor; auto.
   eapply match_env_store_local; eauto.
-  eapply padding_freeable_invariant; eauto.
-  intros. eapply Mem.bounds_store; eauto.
   eapply match_callstack_invariant; eauto.
   intros. apply match_env_invariant with m1; auto.
   intros. rewrite <- H6. eapply Mem.load_store_other; eauto. 
-  left. inv MENV. exploit me_bounded0; eauto. unfold block in *; omega. 
-  intros. eapply Mem.bounds_store; eauto.
-  intros. eapply Mem.bounds_store; eauto.
+  left. inv MENV. exploit me_bounded0; eauto. unfold block in *; omega.
+  intros. eauto with mem.
 Qed.
 
 (** A variant of [match_callstack_store_local] where the Cminor environment
@@ -923,11 +899,9 @@ Proof.
   assert ({tm' | Mem.free tm sp 0 (fn_stackspace tf) = Some tm'}).
   apply Mem.range_perm_free.
   red; intros.
-  exploit PERM; eauto. intros [A | [b [delta [A B]]]].
+  exploit PERM; eauto. intros [A | [id [b [lv [delta [A [B C]]]]]]]. 
   auto.
-  exploit me_inv0; eauto. intros [id [lv C]]. 
-  exploit me_bounds0; eauto. intro D. rewrite D in B; simpl in B.
-  assert (Mem.range_perm m b 0 (sizeof lv) Freeable). 
+  assert (Mem.range_perm m b 0 (sizeof lv) Cur Freeable). 
   eapply free_list_freeable; eauto. eapply in_blocks_of_env; eauto.
   replace ofs with ((ofs - delta) + delta) by omega. 
   eapply Mem.perm_inject; eauto. apply H0. omega. 
@@ -943,15 +917,13 @@ Proof.
   intros. exploit in_blocks_of_env_inv; eauto. 
   intros [id [lv [A [B C]]]]. 
   exploit me_bounded0; eauto. unfold block; omega.
-  intros. eapply bounds_freelist; eauto.
-  intros. eapply bounds_freelist; eauto.
+  intros. eapply perm_freelist; eauto.
   intros. eapply Mem.perm_free_1; eauto. left; unfold block; omega.
   eapply Mem.free_inject; eauto.
   intros. exploit me_inv0; eauto. intros [id [lv A]]. 
   exists 0; exists (sizeof lv); split.
   eapply in_blocks_of_env; eauto.
-  exploit me_bounds0; eauto. intro B. 
-  exploit Mem.perm_in_bounds; eauto. rewrite B; simpl. auto.
+  eapply me_bounds0; eauto. eapply Mem.perm_max. eauto. 
 Qed.
 
 (** Preservation of [match_callstack] by allocations. *)
@@ -975,7 +947,6 @@ Proof.
   constructor; auto.
   eapply match_env_alloc_other; eauto. omega. destruct (f2 b); auto. destruct p; omega.
   eapply padding_freeable_invariant; eauto. 
-  intros. eapply Mem.bounds_alloc_other; eauto. unfold block; omega.
   intros. apply H1. unfold block; omega.
   apply IHmatch_callstack. 
   inv MENV; omega. 
@@ -1004,9 +975,12 @@ Proof.
   constructor.
   omega. auto. 
   eapply match_env_alloc_same; eauto.
-  eapply padding_freeable_invariant; eauto. 
-  intros. eapply Mem.bounds_alloc_other; eauto. unfold block in *; omega.
-  intros. apply OTHER. unfold block in *; omega. 
+  red; intros. exploit PERM; eauto. intros [A | [id' [b' [lv' [delta' [A [B C]]]]]]].
+  left; auto.
+  right; exists id'; exists b'; exists lv'; exists delta'.
+  split. rewrite PTree.gso; auto. congruence. 
+  split. apply INCR; auto. 
+  auto.
   eapply match_callstack_alloc_below; eauto.
   inv MENV. unfold block in *; omega.
   inv ACOND. auto. omega. omega.
@@ -1059,43 +1033,42 @@ Qed.
 
 (** Decidability of the predicate "this is not a padding location" *)
 
-Definition is_reachable (f: meminj) (m: mem) (sp: block) (ofs: Z) : Prop :=
-  exists b, exists delta, 
-  f b = Some(sp, delta)
-  /\ Mem.low_bound m b + delta <= ofs < Mem.high_bound m b + delta.
+Definition is_reachable (f: meminj) (e: Csharpminor.env) (sp: block) (ofs: Z) : Prop :=
+  exists id, exists b, exists lv, exists delta,
+  e!id = Some(b, lv) /\ f b = Some(sp, delta) /\ delta <= ofs < delta + sizeof lv.
 
 Lemma is_reachable_dec:
-  forall f cenv e le m te sp lo hi ofs,
-  match_env f cenv e le m te sp lo hi ->
-  {is_reachable f m sp ofs} + {~is_reachable f m sp ofs}.
+  forall f e sp ofs, is_reachable f e sp ofs \/ ~is_reachable f e sp ofs.
 Proof.
-  intros.
-  set (P := fun (b: block) =>
-       match f b with
-       | None => False
-       | Some(b', delta) =>
-           b' = sp /\ Mem.low_bound m b + delta <= ofs < Mem.high_bound m b + delta
-       end).
-  assert ({forall b, Intv.In b (lo, hi) -> ~P b} + {exists b, Intv.In b (lo, hi) /\ P b}).
-  apply Intv.forall_dec. intro b. unfold P. 
-  destruct (f b) as [[b' delta] | ]. 
-  destruct (eq_block b' sp).
-  destruct (zle (Mem.low_bound m b + delta) ofs).
-  destruct (zlt ofs (Mem.high_bound m b + delta)).
-  right; auto.
-  left; intuition.
-  left; intuition.
-  left; intuition.
-  left; intuition.
-  inv H. destruct H0.
-  right; red; intros [b [delta [A [B C]]]].
-  elim (n b). 
-  exploit me_inv0; eauto. intros [id [lv D]]. exploit me_bounded0; eauto. 
-  red. rewrite A. auto. 
-  left. destruct e0 as [b [A B]]. red in B; revert B.
-  case_eq (f b). intros [b' delta] EQ [C [D E]]. subst b'. 
-  exists b; exists delta. auto. 
-  tauto. 
+  intros. 
+  set (pred := fun id_b_lv : ident * (block * var_kind) =>
+                 match id_b_lv with
+                 | (id, (b, lv)) =>
+                      match f b with
+                           | None => false
+                           | Some(sp', delta) =>
+                               if eq_block sp sp'
+                               then zle delta ofs && zlt ofs (delta + sizeof lv)
+                               else false
+                      end
+                 end).
+  destruct (List.existsb pred (PTree.elements e)) as []_eqn.
+  rewrite List.existsb_exists in Heqb. 
+  destruct Heqb as [[id [b lv]] [A B]].
+  simpl in B. destruct (f b) as [[sp' delta] |]_eqn; try discriminate.
+  destruct (eq_block sp sp'); try discriminate.
+  destruct (andb_prop _ _ B). 
+  left; red. exists id; exists b; exists lv; exists delta.
+  split. apply PTree.elements_complete; auto. 
+  split. congruence.
+  split; eapply proj_sumbool_true; eauto.
+  right; red. intros [id [b [lv [delta [A [B C]]]]]].
+  assert (existsb pred (PTree.elements e) = true).
+  rewrite List.existsb_exists. exists (id, (b, lv)); split.
+  apply PTree.elements_correct; auto. 
+  simpl. rewrite B. rewrite dec_eq_true.
+  unfold proj_sumbool. destruct C. rewrite zle_true; auto. rewrite zlt_true; auto. 
+  congruence.
 Qed.
 
 (** Preservation of [match_callstack] by external calls. *)
@@ -1106,14 +1079,14 @@ Lemma match_callstack_external_call:
   mem_unchanged_on (loc_out_of_reach f1 m1) m1' m2' ->
   inject_incr f1 f2 ->
   inject_separated f1 f2 m1 m1' ->
-  (forall b, Mem.valid_block m1 b -> Mem.bounds m2 b = Mem.bounds m1 b) ->
+  (forall b ofs p, Mem.valid_block m1 b -> Mem.perm m2 b ofs Max p -> Mem.perm m1 b ofs Max p) ->
   forall cs bound tbound,
   match_callstack f1 m1 m1' cs bound tbound ->
   bound <= Mem.nextblock m1 -> tbound <= Mem.nextblock m1' ->
   match_callstack f2 m2 m2' cs bound tbound.
 Proof.
   intros until m2'. 
-  intros UNMAPPED OUTOFREACH INCR SEPARATED BOUNDS.
+  intros UNMAPPED OUTOFREACH INCR SEPARATED MAXPERMS.
   destruct OUTOFREACH as [OUTOFREACH1 OUTOFREACH2].
   induction 1; intros.
 (* base case *)
@@ -1127,18 +1100,16 @@ Proof.
   eapply match_env_external_call; eauto. omega. omega. 
   (* padding-freeable *)
   red; intros.
-  destruct (is_reachable_dec _ _ _ _ _ _ _ _ _ ofs MENV).
-  destruct i as [b [delta [A B]]].
-  right; exists b; exists delta; split.
-  apply INCR; auto. rewrite BOUNDS. auto. 
-  exploit me_inv; eauto. intros [id [lv C]].
-  exploit me_bounded; eauto. intros. red; omega.
+  destruct (is_reachable_dec f1 e sp ofs).
+  destruct H3 as [id [b [lv [delta [A [B C]]]]]].
+  right; exists id; exists b; exists lv; exists delta.
+  split. auto. split. apply INCR; auto. auto.
   exploit PERM; eauto. intros [A|A]; try contradiction. left.
-  apply OUTOFREACH1; auto. red; intros. 
-  assert ((ofs < Mem.low_bound m1 b0 + delta \/ ofs >= Mem.high_bound m1 b0 + delta)
-          \/ Mem.low_bound m1 b0 + delta <= ofs < Mem.high_bound m1 b0 + delta)
-  by omega. destruct H4; auto.
-  elim n. exists b0; exists delta; auto.
+  apply OUTOFREACH1; auto. red; intros.
+  red; intros; elim H3.
+  exploit me_inv; eauto. intros [id [lv B]].
+  exploit me_bounds; eauto. intros C.
+  red. exists id; exists b0; exists lv; exists delta. intuition omega. 
   (* induction *)
   eapply IHmatch_callstack; eauto. inv MENV; omega. omega.
 Qed.
@@ -1488,11 +1459,13 @@ Proof.
     rewrite zeq_true. rewrite Int.sub_shifted. auto.
   inv H; inv H0; inv H1; TrivialExists.
   inv H0; try discriminate; inv H1; try discriminate. simpl in *. 
-    destruct (Int.eq i0 Int.zero); inv H. TrivialExists.
+    destruct (Int.eq i0 Int.zero
+      || Int.eq i (Int.repr Int.min_signed) && Int.eq i0 Int.mone); inv H; TrivialExists.
   inv H0; try discriminate; inv H1; try discriminate. simpl in *. 
     destruct (Int.eq i0 Int.zero); inv H. TrivialExists.
   inv H0; try discriminate; inv H1; try discriminate. simpl in *. 
-    destruct (Int.eq i0 Int.zero); inv H. TrivialExists.
+    destruct (Int.eq i0 Int.zero
+      || Int.eq i (Int.repr Int.min_signed) && Int.eq i0 Int.mone); inv H; TrivialExists.
   inv H0; try discriminate; inv H1; try discriminate. simpl in *. 
     destruct (Int.eq i0 Int.zero); inv H. TrivialExists.
   inv H; inv H0; inv H1; TrivialExists.
@@ -1561,108 +1534,128 @@ Qed.
 
 (** Correctness of [make_store]. *)
 
-Inductive val_lessdef_upto (n: Z): val -> val -> Prop :=
+Inductive val_lessdef_upto (m: int): val -> val -> Prop :=
   | val_lessdef_upto_base:
-      forall v1 v2, Val.lessdef v1 v2 -> val_lessdef_upto n v1 v2
+      forall v1 v2, Val.lessdef v1 v2 -> val_lessdef_upto m v1 v2
   | val_lessdef_upto_int:
-      forall n1 n2, Int.zero_ext n n1 = Int.zero_ext n n2 -> val_lessdef_upto n (Vint n1) (Vint n2).
+      forall n1 n2, Int.and n1 m = Int.and n2 m -> val_lessdef_upto m (Vint n1) (Vint n2).
 
 Hint Resolve val_lessdef_upto_base.
 
-Remark val_lessdef_upto_zero_ext:
-  forall n n' v1 v2,
-  0 < n < Z_of_nat Int.wordsize -> n <= n' < Z_of_nat Int.wordsize ->
-  val_lessdef_upto n v1 v2 ->
-  val_lessdef_upto n (Val.zero_ext n' v1) v2.
-Proof.
-  intros. inv H1. inv H2. 
-  destruct v2; simpl; auto. 
-  apply val_lessdef_upto_int. apply Int.zero_ext_narrow; auto. 
-  simpl; auto.
-  apply val_lessdef_upto_int. rewrite <- H2. apply Int.zero_ext_narrow; auto.
-Qed.
- 
-Remark val_lessdef_upto_sign_ext:
-  forall n n' v1 v2,
-  0 < n < Z_of_nat Int.wordsize -> n <= n' < Z_of_nat Int.wordsize ->
-  val_lessdef_upto n v1 v2 ->
-  val_lessdef_upto n (Val.sign_ext n' v1) v2.
-Proof.
-  intros. inv H1. inv H2. 
-  destruct v2; simpl; auto. 
-  apply val_lessdef_upto_int. apply Int.zero_sign_ext_narrow; auto. 
-  simpl; auto.
-  apply val_lessdef_upto_int. rewrite <- H2. apply Int.zero_sign_ext_narrow; auto.
-Qed.
-
 Remark val_lessdef_upto_and:
-  forall n v1 v2 m,
-  0 < n < Z_of_nat Int.wordsize ->
-  Int.eq (Int.and m (Int.repr (two_p n - 1))) (Int.repr (two_p n - 1)) = true ->
-  val_lessdef_upto n v1 v2 ->
-  val_lessdef_upto n (Val.and v1 (Vint m)) v2.
+  forall m v1 v2 p,
+  val_lessdef_upto m v1 v2 -> Int.and p m = m ->
+  val_lessdef_upto m (Val.and v1 (Vint p)) v2.
 Proof.
-  intros. set (p := Int.repr (two_p n - 1)) in *.
-  generalize (Int.eq_spec (Int.and m p) p). rewrite H0; intros.
-  inv H1. inv H3. 
-  destruct v2; simpl; auto. 
-  apply val_lessdef_upto_int. repeat rewrite Int.zero_ext_and; auto.
-  rewrite Int.and_assoc. congruence.
-  simpl; auto.
-  apply val_lessdef_upto_int. rewrite <- H3. repeat rewrite Int.zero_ext_and; auto.
-  rewrite Int.and_assoc. congruence.
+  intros. inversion H; clear H.
+  inversion H1. destruct v2; simpl; auto. 
+  apply val_lessdef_upto_int. rewrite Int.and_assoc. congruence.
+  simpl. auto. 
+  simpl. apply val_lessdef_upto_int. rewrite Int.and_assoc. congruence. 
 Qed.
 
-Lemma eval_uncast_int8:
-  forall sp te tm a x,
-  eval_expr tge sp te tm a x ->
-  exists v, eval_expr tge sp te tm (uncast_int8 a) v /\ val_lessdef_upto 8 x v.
+Remark val_lessdef_upto_zero_ext:
+  forall m v1 v2 p,
+  val_lessdef_upto m v1 v2 -> Int.and (Int.repr (two_p p - 1)) m = m -> 0 < p < 32 ->
+  val_lessdef_upto m (Val.zero_ext p v1) v2.
 Proof.
-  intros until a. functional induction (uncast_int8 a); intros.
+  intros. inversion H; clear H.
+  inversion H2. destruct v2; simpl; auto.
+  apply val_lessdef_upto_int. rewrite Int.zero_ext_and; auto. 
+  rewrite Int.and_assoc. rewrite H0. auto. 
+  simpl; auto.
+  simpl. apply val_lessdef_upto_int. rewrite Int.zero_ext_and; auto.
+  rewrite Int.and_assoc. rewrite H0. auto.
+Qed.
+
+Remark val_lessdef_upto_sign_ext:
+  forall m v1 v2 p,
+  val_lessdef_upto m v1 v2 -> Int.and (Int.repr (two_p p - 1)) m = m -> 0 < p < 32 ->
+  val_lessdef_upto m (Val.sign_ext p v1) v2.
+Proof.
+  intros.
+  assert (A: forall x, Int.and (Int.sign_ext p x) m = Int.and x m).
+    intros. transitivity (Int.and (Int.zero_ext p (Int.sign_ext p x)) m).
+    rewrite Int.zero_ext_and; auto. rewrite Int.and_assoc. congruence.
+    rewrite Int.zero_ext_sign_ext.
+    rewrite Int.zero_ext_and; auto. rewrite Int.and_assoc. congruence.
+  inversion H; clear H.
+  inversion H2. destruct v2; simpl; auto.
+  apply val_lessdef_upto_int. auto. 
+  simpl; auto.
+  simpl. apply val_lessdef_upto_int. rewrite A. auto. 
+Qed.
+
+Remark val_lessdef_upto_shru:
+  forall m v1 v2 p,
+  val_lessdef_upto (Int.shl m p) v1 v2 -> Int.shru (Int.shl m p) p = m ->
+  val_lessdef_upto m (Val.shru v1 (Vint p)) (Val.shru v2 (Vint p)).
+Proof.
+  intros. inversion H; clear H.
+  inversion H1; simpl; auto.
+  simpl. destruct (Int.ltu p Int.iwordsize); auto. apply val_lessdef_upto_int.
+  rewrite <- H0. repeat rewrite Int.and_shru. congruence.
+Qed.
+
+Remark val_lessdef_upto_shr:
+  forall m v1 v2 p,
+  val_lessdef_upto (Int.shl m p) v1 v2 -> Int.shru (Int.shl m p) p = m ->
+  val_lessdef_upto m (Val.shr v1 (Vint p)) (Val.shr v2 (Vint p)).
+Proof.
+  intros. inversion H; clear H.
+  inversion H1; simpl; auto.
+  simpl. destruct (Int.ltu p Int.iwordsize); auto. apply val_lessdef_upto_int.
+  repeat rewrite Int.shr_and_shru_and; auto.
+  rewrite <- H0. repeat rewrite Int.and_shru. congruence.
+Qed.
+
+Lemma eval_uncast_int:
+  forall m sp te tm a x,
+  eval_expr tge sp te tm a x ->
+  exists v, eval_expr tge sp te tm (uncast_int m a) v /\ val_lessdef_upto m x v.
+Proof.
+  assert (EQ: forall p q, Int.eq p q = true -> p = q).
+    intros. generalize (Int.eq_spec p q). rewrite H; auto.   
+  intros until a. functional induction (uncast_int m a); intros.
   (* cast8unsigned *)
   inv H. simpl in H4; inv H4. exploit IHe; eauto. intros [v [A B]].
   exists v; split; auto. apply val_lessdef_upto_zero_ext; auto. 
-  compute; auto. split. omega. compute; auto.
+  compute; auto.
+  exists x; auto. 
   (* cast8signed *)
   inv H. simpl in H4; inv H4. exploit IHe; eauto. intros [v [A B]].
   exists v; split; auto. apply val_lessdef_upto_sign_ext; auto. 
-  compute; auto. split. omega. compute; auto.
+  compute; auto.
+  exists x; auto. 
   (* cast16unsigned *)
   inv H. simpl in H4; inv H4. exploit IHe; eauto. intros [v [A B]].
   exists v; split; auto. apply val_lessdef_upto_zero_ext; auto. 
-  compute; auto. split. omega. compute; auto.
+  compute; auto.
+  exists x; auto. 
   (* cast16signed *)
   inv H. simpl in H4; inv H4. exploit IHe; eauto. intros [v [A B]].
   exists v; split; auto. apply val_lessdef_upto_sign_ext; auto. 
-  compute; auto. split. omega. compute; auto.
+  compute; auto.
+  exists x; auto. 
   (* and *)
-  inv H. inv H5. simpl in H0. inv H0. simpl in H6. inv H6. exploit IHe; eauto. intros [v [A B]].
-  exists v; split; auto. apply val_lessdef_upto_and; auto. compute; auto.
-  (* and 2 *)
-  exists x; split; auto.
-  (* default *)
-  exists x; split; auto.
-Qed.
-
-Lemma eval_uncast_int16:
-  forall sp te tm a x,
-  eval_expr tge sp te tm a x ->
-  exists v, eval_expr tge sp te tm (uncast_int16 a) v /\ val_lessdef_upto 16 x v.
-Proof.
-  intros until a. functional induction (uncast_int16 a); intros.
-  (* cast16unsigned *)
-  inv H. simpl in H4; inv H4. exploit IHe; eauto. intros [v [A B]].
-  exists v; split; auto. apply val_lessdef_upto_zero_ext; auto. 
-  compute; auto. split. omega. compute; auto.
-  (* cast16signed *)
-  inv H. simpl in H4; inv H4. exploit IHe; eauto. intros [v [A B]].
-  exists v; split; auto. apply val_lessdef_upto_sign_ext; auto. 
-  compute; auto. split. omega. compute; auto.
-  (* and *)
-  inv H. inv H5. simpl in H0. inv H0. simpl in H6. inv H6. exploit IHe; eauto. intros [v [A B]].
-  exists v; split; auto. apply val_lessdef_upto_and; auto. compute; auto.
-  (* and 2 *)
-  exists x; split; auto.
+  inv H. simpl in H6; inv H6. inv H5. simpl in H0. inv H0.
+  exploit IHe; eauto. intros [v [A B]].
+  exists v; split; auto. apply val_lessdef_upto_and; auto.
+  exists x; auto.
+  (* shru *)
+  inv H. simpl in H6; inv H6. inv H5. simpl in H0. inv H0.
+  exploit IHe; eauto. intros [v [A B]].
+  exists (Val.shru v (Vint n)); split.
+  econstructor. eauto. econstructor. simpl; reflexivity. auto. 
+  apply val_lessdef_upto_shru; auto.
+  exists x; auto.
+  (* shr *)
+  inv H. simpl in H6; inv H6. inv H5. simpl in H0. inv H0.
+  exploit IHe; eauto. intros [v [A B]].
+  exists (Val.shr v (Vint n)); split.
+  econstructor. eauto. econstructor. simpl; reflexivity. auto. 
+  apply val_lessdef_upto_shr; auto.
+  exists x; auto.
   (* default *)
   exists x; split; auto.
 Qed.
@@ -1727,21 +1720,31 @@ Proof.
     intros. apply val_content_inject_base. inv H1. auto. inv H0. auto.
   destruct chunk; simpl.
   (* int8signed *)
-  exploit eval_uncast_int8; eauto. intros [v' [A B]].
+  exploit (eval_uncast_int (Int.repr 255)); eauto. intros [v' [A B]].
   exists v'; split; auto.
-  inv B; auto. inv H0; auto. constructor. apply Int.sign_ext_equal_if_zero_equal; auto. compute; auto.
+  inv B; auto. inv H0; auto. constructor.
+  assert (0 < 8 < Z_of_nat Int.wordsize) by (compute; auto).
+  apply Int.sign_ext_equal_if_zero_equal; auto.
+  repeat rewrite Int.zero_ext_and; auto.
   (* int8unsigned *)
-  exploit eval_uncast_int8; eauto. intros [v' [A B]].
+  exploit (eval_uncast_int (Int.repr 255)); eauto. intros [v' [A B]].
   exists v'; split; auto.
-  inv B; auto. inv H0; auto. constructor. auto.
+  inv B; auto. inv H0; auto. constructor.
+  assert (0 < 8 < Z_of_nat Int.wordsize) by (compute; auto).
+  repeat rewrite Int.zero_ext_and; auto.
   (* int16signed *)
-  exploit eval_uncast_int16; eauto. intros [v' [A B]].
+  exploit (eval_uncast_int (Int.repr 65535)); eauto. intros [v' [A B]].
   exists v'; split; auto.
-  inv B; auto. inv H0; auto. constructor. apply Int.sign_ext_equal_if_zero_equal; auto. compute; auto.
+  inv B; auto. inv H0; auto. constructor.
+  assert (0 < 16 < Z_of_nat Int.wordsize) by (compute; auto).
+  apply Int.sign_ext_equal_if_zero_equal; auto.
+  repeat rewrite Int.zero_ext_and; auto.
   (* int16unsigned *)
-  exploit eval_uncast_int16; eauto. intros [v' [A B]].
+  exploit (eval_uncast_int (Int.repr 65535)); eauto. intros [v' [A B]].
   exists v'; split; auto.
-  inv B; auto. inv H0; auto. constructor. auto.
+  inv B; auto. inv H0; auto. constructor.
+  assert (0 < 16 < Z_of_nat Int.wordsize) by (compute; auto).
+  repeat rewrite Int.zero_ext_and; auto.
   (* int32 *)
   exists va; auto.
   (* float32 *)
@@ -1749,6 +1752,8 @@ Proof.
   exists v'; split; auto.
   inv B; auto. inv H0; auto. constructor. auto.
   (* float64 *)
+  exists va; auto.
+  (* float64al32 *)
   exists va; auto.
 Qed.
 
@@ -1812,23 +1817,33 @@ Proof.
     exists v'; split. econstructor; eauto. auto.
   destruct op; auto; simpl in H0; inv H0.
 (* cast8unsigned *)
-  exploit eval_uncast_int8; eauto. intros [v1 [A B]].
+  exploit (eval_uncast_int (Int.repr 255)); eauto. intros [v1 [A B]].
   exists (Val.zero_ext 8 v1); split. econstructor; eauto. 
-  inv B. apply Val.zero_ext_lessdef; auto. simpl. rewrite H0; auto. 
+  inv B. apply Val.zero_ext_lessdef; auto. simpl.
+  assert (0 < 8 < Z_of_nat Int.wordsize) by (compute; auto).
+  repeat rewrite Int.zero_ext_and; auto. change (two_p 8 - 1) with 255. rewrite H0. auto. 
 (* cast8signed *)
-  exploit eval_uncast_int8; eauto. intros [v1 [A B]].
+  exploit (eval_uncast_int (Int.repr 255)); eauto. intros [v1 [A B]].
   exists (Val.sign_ext 8 v1); split. econstructor; eauto. 
   inv B. apply Val.sign_ext_lessdef; auto. simpl.
-  exploit Int.sign_ext_equal_if_zero_equal; eauto. compute; auto. intro EQ; rewrite EQ; auto.
+  assert (0 < 8 < Z_of_nat Int.wordsize) by (compute; auto).
+  replace (Int.sign_ext 8 n2) with (Int.sign_ext 8 n1). auto.
+  apply Int.sign_ext_equal_if_zero_equal; auto.
+  repeat rewrite Int.zero_ext_and; auto.
 (* cast16unsigned *)
-  exploit eval_uncast_int16; eauto. intros [v1 [A B]].
+  exploit (eval_uncast_int (Int.repr 65535)); eauto. intros [v1 [A B]].
   exists (Val.zero_ext 16 v1); split. econstructor; eauto. 
-  inv B. apply Val.zero_ext_lessdef; auto. simpl. rewrite H0; auto. 
+  inv B. apply Val.zero_ext_lessdef; auto. simpl.
+  assert (0 < 16 < Z_of_nat Int.wordsize) by (compute; auto).
+  repeat rewrite Int.zero_ext_and; auto. change (two_p 16 - 1) with 65535. rewrite H0. auto. 
 (* cast16signed *)
-  exploit eval_uncast_int16; eauto. intros [v1 [A B]].
+  exploit (eval_uncast_int (Int.repr 65535)); eauto. intros [v1 [A B]].
   exists (Val.sign_ext 16 v1); split. econstructor; eauto. 
   inv B. apply Val.sign_ext_lessdef; auto. simpl.
-  exploit Int.sign_ext_equal_if_zero_equal; eauto. compute; auto. intro EQ; rewrite EQ; auto.
+  assert (0 < 16 < Z_of_nat Int.wordsize) by (compute; auto).
+  replace (Int.sign_ext 16 n2) with (Int.sign_ext 16 n1). auto.
+  apply Int.sign_ext_equal_if_zero_equal; auto.
+  repeat rewrite Int.zero_ext_and; auto.
 (* singleoffloat *)
   exploit eval_uncast_float32; eauto. intros [v1 [A B]].
   exists (Val.singleoffloat v1); split. econstructor; eauto. 
@@ -2056,8 +2071,7 @@ Lemma var_set_self_correct_array:
   val_inject f v tv ->
   Mem.inject f m tm ->
   PTree.get id e = Some(b, Varray sz al) ->
-  extcall_memcpy_sem sz (Zmin al 4) ge
-                             (Vptr b Int.zero :: v :: nil) m E0 Vundef m' ->
+  extcall_memcpy_sem sz al ge (Vptr b Int.zero :: v :: nil) m E0 Vundef m' ->
   te!(for_var id) = Some tv ->
   exists f', exists tm',
     star step tge (State fn a k (Vptr sp Int.zero) te tm)
@@ -2074,7 +2088,7 @@ Proof.
   (* var_stack_array *)
   unfold var_set_self in VS. rewrite <- H in VS. inv VS.
   exploit match_callstack_match_globalenvs; eauto. intros [hi' MG].
-  assert (external_call (EF_memcpy sz0 (Zmin al0 4)) ge (Vptr b0 Int.zero :: v :: nil) m E0 Vundef m').
+  assert (external_call (EF_memcpy sz0 al0) ge (Vptr b0 Int.zero :: v :: nil) m E0 Vundef m').
     assumption.
   exploit external_call_mem_inject; eauto. 
   eapply inj_preserves_globals; eauto.
@@ -2091,7 +2105,7 @@ Proof.
   split. auto.
   split. apply match_callstack_incr_bound with (Mem.nextblock m) (Mem.nextblock tm).
   eapply match_callstack_external_call; eauto.
-  intros. eapply external_call_bounds; eauto.
+  intros. eapply external_call_max_perm; eauto.
   omega. omega.
   eapply external_call_nextblock_incr; eauto.
   eapply external_call_nextblock_incr; eauto.
@@ -2189,8 +2203,9 @@ Lemma match_callstack_alloc_variable:
   forall atk id lv cenv sz cenv' sz' tm sp e tf m m' b te le lo cs f tv,
   assign_variable atk (id, lv) (cenv, sz) = (cenv', sz') ->
   Mem.valid_block tm sp ->
-  Mem.bounds tm sp = (0, tf.(fn_stackspace)) ->
-  Mem.range_perm tm sp 0 tf.(fn_stackspace) Freeable ->
+  (forall ofs k p,
+    Mem.perm tm sp ofs k p -> 0 <= ofs < tf.(fn_stackspace)) ->
+  Mem.range_perm tm sp 0 tf.(fn_stackspace) Cur Freeable ->
   tf.(fn_stackspace) <= Int.max_unsigned ->
   Mem.alloc m 0 (sizeof lv) = (m', b) ->
   match_callstack f m tm 
@@ -2198,7 +2213,8 @@ Lemma match_callstack_alloc_variable:
                   (Mem.nextblock m) (Mem.nextblock tm) ->
   Mem.inject f m tm ->
   0 <= sz -> sz' <= tf.(fn_stackspace) ->
-  (forall b delta, f b = Some(sp, delta) -> Mem.high_bound m b + delta <= sz) ->
+  (forall b delta ofs k p,
+     f b = Some(sp, delta) -> Mem.perm m b ofs k p -> ofs + delta < sz) ->
   e!id = None ->
   te!(for_var id) = Some tv ->
   exists f',
@@ -2207,8 +2223,8 @@ Lemma match_callstack_alloc_variable:
   /\ match_callstack f' m' tm
                      (Frame cenv' tf (PTree.set id (b, lv) e) le te sp lo (Mem.nextblock m') :: cs)
                      (Mem.nextblock m') (Mem.nextblock tm)
-  /\ (forall b delta,
-      f' b = Some(sp, delta) -> Mem.high_bound m' b + delta <= sz').
+  /\ (forall b delta ofs k p,
+      f' b = Some(sp, delta) -> Mem.perm m' b ofs k p -> ofs + delta < sz').
 Proof.
   intros until tv. intros ASV VALID BOUNDS PERMS NOOV ALLOC MCS INJ LO HI RANGE E TE.
   generalize ASV. unfold assign_variable. 
@@ -2222,23 +2238,22 @@ Proof.
     generalize (align_le sz (size_chunk chunk) SIZEPOS). fold ofs. intro SZOFS.
     exploit Mem.alloc_left_mapped_inject.
       eauto. eauto. eauto. 
-      instantiate (1 := ofs). omega. 
-      right; rewrite BOUNDS; simpl. omega.
-      intros. apply Mem.perm_implies with Freeable; auto with mem.
+      instantiate (1 := ofs). omega.
+      intros. exploit BOUNDS; eauto. omega. 
+      intros. apply Mem.perm_implies with Freeable; auto with mem. apply Mem.perm_cur. 
       apply PERMS. rewrite LV in H1. simpl in H1. omega.
       rewrite LV; simpl. rewrite Zminus_0_r. unfold ofs. 
       apply inj_offset_aligned_var.
-      intros. generalize (RANGE _ _ H1). omega. 
+      intros. generalize (RANGE _ _ _ _ _ H1 H2). omega. 
     intros [f1 [MINJ1 [INCR1 [SAME OTHER]]]].
     exists f1; split. auto. split. auto. split. 
     eapply match_callstack_alloc_left; eauto.
     rewrite <- LV; auto. 
     rewrite SAME; constructor.
-    intros. rewrite (Mem.bounds_alloc _ _ _ _ _ ALLOC). 
-    destruct (eq_block b0 b); simpl.
+    intros. exploit Mem.perm_alloc_inv; eauto. destruct (zeq b0 b).
     subst b0. assert (delta = ofs) by congruence. subst delta.  
     rewrite LV. simpl. omega.
-    rewrite OTHER in H1; eauto. generalize (RANGE _ _ H1). omega. 
+    intro. rewrite OTHER in H1; eauto. generalize (RANGE _ _ _ _ _ H1 H3). omega. 
   (* 1.2 info = Var_local chunk *)
     intro EQ; injection EQ; intros; clear EQ. subst sz'. rewrite <- H0.
     exploit Mem.alloc_left_unmapped_inject; eauto.
@@ -2247,8 +2262,7 @@ Proof.
     eapply match_callstack_alloc_left; eauto. 
     rewrite <- LV; auto.
     rewrite SAME; constructor.
-    intros. rewrite (Mem.bounds_alloc _ _ _ _ _ ALLOC). 
-    destruct (eq_block b0 b); simpl.
+    intros. exploit Mem.perm_alloc_inv; eauto. destruct (zeq b0 b).
     subst b0. congruence.
     rewrite OTHER in H; eauto.
   (* 2 info = Var_stack_array ofs *)
@@ -2259,29 +2273,29 @@ Proof.
   exploit Mem.alloc_left_mapped_inject. eauto. eauto. eauto. 
     instantiate (1 := ofs). 
     generalize Int.min_signed_neg. omega.
-    right; rewrite BOUNDS; simpl. generalize Int.min_signed_neg. omega.
-    intros. apply Mem.perm_implies with Freeable; auto with mem.
+    intros. exploit BOUNDS; eauto. generalize Int.min_signed_neg. omega.
+    intros. apply Mem.perm_implies with Freeable; auto with mem. apply Mem.perm_cur.
     apply PERMS. rewrite LV in H3. simpl in H3. omega.
     rewrite LV; simpl. rewrite Zminus_0_r. unfold ofs. 
     apply inj_offset_aligned_array'.
-    intros. generalize (RANGE _ _ H3). omega. 
+    intros. generalize (RANGE _ _ _ _ _ H3 H4). omega. 
   intros [f1 [MINJ1 [INCR1 [SAME OTHER]]]].
   exists f1; split. auto. split. auto. split. 
   subst cenv'. eapply match_callstack_alloc_left; eauto.
   rewrite <- LV; auto. 
   rewrite SAME; constructor.
-  intros. rewrite (Mem.bounds_alloc _ _ _ _ _ ALLOC). 
-  destruct (eq_block b0 b); simpl.
+  intros. exploit Mem.perm_alloc_inv; eauto. destruct (zeq b0 b).
   subst b0. assert (delta = ofs) by congruence. subst delta. 
   rewrite LV. simpl. omega.
-  rewrite OTHER in H3; eauto. generalize (RANGE _ _ H3). omega. 
+  intro. rewrite OTHER in H3; eauto. generalize (RANGE _ _ _ _ _ H3 H5). omega. 
 Qed.
 
 Lemma match_callstack_alloc_variables_rec:
   forall tm sp cenv' tf le te lo cs atk,
   Mem.valid_block tm sp ->
-  Mem.bounds tm sp = (0, tf.(fn_stackspace)) ->
-  Mem.range_perm tm sp 0 tf.(fn_stackspace) Freeable ->
+  (forall ofs k p,
+    Mem.perm tm sp ofs k p -> 0 <= ofs < tf.(fn_stackspace)) ->
+  Mem.range_perm tm sp 0 tf.(fn_stackspace) Cur Freeable ->
   tf.(fn_stackspace) <= Int.max_unsigned ->
   forall e m vars e' m',
   alloc_variables e m vars e' m' ->
@@ -2292,8 +2306,8 @@ Lemma match_callstack_alloc_variables_rec:
                   (Mem.nextblock m) (Mem.nextblock tm) ->
   Mem.inject f m tm ->
   0 <= sz ->
-  (forall b delta,
-     f b = Some(sp, delta) -> Mem.high_bound m b + delta <= sz) ->
+  (forall b delta ofs k p,
+     f b = Some(sp, delta) -> Mem.perm m b ofs k p -> ofs + delta < sz) ->
   (forall id lv, In (id, lv) vars -> te!(for_var id) <> None) ->
   list_norepet (List.map (@fst ident var_kind) vars) ->
   (forall id lv, In (id, lv) vars -> e!id = None) ->
@@ -2395,8 +2409,7 @@ Proof.
   intros. 
   unfold build_compilenv in H. 
   eapply match_callstack_alloc_variables_rec; eauto with mem.
-  eapply Mem.bounds_alloc_same; eauto.
-  red; intros; eauto with mem.
+  red; intros. eapply Mem.perm_alloc_2; eauto. 
   eapply match_callstack_alloc_right; eauto.
   eapply Mem.alloc_right_inject; eauto. omega. 
   intros. elim (Mem.valid_not_valid_diff tm sp sp); eauto with mem.
@@ -3257,7 +3270,7 @@ Proof.
                  (Mem.nextblock m') (Mem.nextblock tm')).
     apply match_callstack_incr_bound with (Mem.nextblock m) (Mem.nextblock tm).
     eapply match_callstack_external_call; eauto.
-    intros. eapply external_call_bounds; eauto.
+    intros. eapply external_call_max_perm; eauto.
     omega. omega. 
     eapply external_call_nextblock_incr; eauto.
     eapply external_call_nextblock_incr; eauto.
@@ -3414,7 +3427,7 @@ Opaque PTree.set.
   econstructor; eauto.
   apply match_callstack_incr_bound with (Mem.nextblock m) (Mem.nextblock tm).
   eapply match_callstack_external_call; eauto.
-  intros. eapply external_call_bounds; eauto.
+  intros. eapply external_call_max_perm; eauto.
   omega. omega.
   eapply external_call_nextblock_incr; eauto.
   eapply external_call_nextblock_incr; eauto.

@@ -116,7 +116,7 @@ let name_of_section_ELF = function
   | Section_literal -> ".text"
   | Section_jumptable -> ".text"
   | Section_user(s, wr, ex) ->
-       sprintf ".section	%s,\"a%s%s\",%%progbits"
+       sprintf ".section	\"%s\",\"a%s%s\",%%progbits"
                s (if wr then "w" else "") (if ex then "x" else "")
 
 let section oc sec =
@@ -137,7 +137,7 @@ let distance_to_emit_constants () =
 let float_labels = (Hashtbl.create 39 : (int64, int) Hashtbl.t)
 
 let label_float f =
-  let bf = Int64.bits_of_float f in
+  let bf = camlint64_of_coqint(Floats.Float.bits_of_double f) in
   try
     Hashtbl.find float_labels bf
   with Not_found ->
@@ -343,7 +343,7 @@ let print_builtin_vload oc chunk args res =
     | Mfloat32, [IR addr], FR res ->
         fprintf oc "	flds	%a, [%a, #0]\n" freg_single res ireg addr;
         fprintf oc "	fcvtds	%a, %a\n" freg res freg_single res; 2
-    | Mfloat64, [IR addr], FR res ->
+    | (Mfloat64 | Mfloat64al32), [IR addr], FR res ->
         fprintf oc "	fldd	%a, [%a, #0]\n" freg res ireg addr; 1
     | _ ->
         assert false
@@ -363,7 +363,7 @@ let print_builtin_vstore oc chunk args =
     | Mfloat32, [IR addr; FR src] ->
         fprintf oc "	fcvtsd	%a, %a\n" freg_single FR6 freg src;
         fprintf oc "	fsts	%a, [%a, #0]\n" freg_single FR6 ireg addr; 2
-    | Mfloat64, [IR addr; FR src] ->
+    | (Mfloat64 | Mfloat64al32), [IR addr; FR src] ->
         fprintf oc "	fstd	%a, [%a, #0]\n" freg src ireg addr; 1
     | _ ->
         assert false
@@ -400,20 +400,20 @@ let print_builtin_inline oc name args res =
   | "__builtin_fsqrt", [FR a1], FR res ->
       fprintf oc "	fsqrtd	%a, %a\n" freg res freg a1; 1
   (* Memory accesses *)
-  | "__builtin_read_int16_reversed", [IR a1], IR res ->
+  | "__builtin_read16_reversed", [IR a1], IR res ->
       fprintf oc "	ldrh	%a, [%a, #0]\n" ireg res ireg a1;
       fprintf oc "	mov	%a, %a, lsl #8\n" ireg IR14 ireg res;
       fprintf oc "	and	%a, %a, #0xFF00\n" ireg IR14 ireg IR14;
       fprintf oc "	orr	%a, %a, %a, lsr #8\n" ireg res ireg IR14 ireg res; 4
-  | "__builtin_read_int32_reversed", [IR a1], IR res ->
+  | "__builtin_read32_reversed", [IR a1], IR res ->
       fprintf oc "	ldr	%a, [%a, #0]\n" ireg res ireg a1;
       print_bswap oc res IR14 res; 5
-  | "__builtin_write_int16_reversed", [IR a1; IR a2], _ ->
+  | "__builtin_write16_reversed", [IR a1; IR a2], _ ->
       fprintf oc "	mov	%a, %a, lsr #8\n" ireg IR14 ireg a2;
       fprintf oc "	and	%a, %a, #0xFF\n" ireg IR14 ireg IR14;
       fprintf oc "	orr	%a, %a, %a, lsl #8\n" ireg IR14 ireg IR14 ireg a2;
       fprintf oc "	strh	%a, [%a, #0]\n" ireg IR14 ireg a1; 4
-  | "__builtin_write_int32_reversed", [IR a1; IR a2], _ ->
+  | "__builtin_write32_reversed", [IR a1; IR a2], _ ->
       let tmp = if a1 = IR10 then IR12 else IR10 in
       print_bswap oc a2 IR14 tmp;
       fprintf oc "	str	%a, [%a, #0]\n" ireg tmp ireg a1; 5
@@ -432,11 +432,9 @@ let fixup_conventions oc dir tyl =
   let fixup f i1 i2 =
     match dir with
     | Incoming ->     (* f <- (i1, i2)  *)
-        fprintf oc "	fmdlr	%a, %a\n" freg f ireg i1;
-        fprintf oc "	fmdhr	%a, %a\n" freg f ireg i2
+        fprintf oc "	fmdrr	%a, %a, %a\n" freg f ireg i1 ireg i2
     | Outgoing ->      (* (i1, i2) <- f *)
-        fprintf oc "	fmrdl	%a, %a\n" ireg i1 freg f;
-        fprintf oc "	fmrdh	%a, %a\n" ireg i2 freg f in
+        fprintf oc "	fmrrd	%a, %a, %a\n" ireg i1 ireg i2 freg f in
   match tyl with
   | Tfloat :: Tfloat :: _ ->
       fixup FR0 IR0 IR1; fixup FR1 IR2 IR3; 4
@@ -565,7 +563,7 @@ let print_instruction oc = function
       (* We could make good use of the fconstd instruction, but it's available
          in VFD v3 and up, not in v1 nor v2 *)
       let lbl = label_float f in
-      fprintf oc "	fldd	%a, .L%d @ %.12g\n" freg r1 lbl f; 1
+      fprintf oc "	fldd	%a, .L%d @ %.12g\n" freg r1 lbl (camlfloat_of_coqfloat f); 1
   | Pfcmpd(r1, r2) ->
       fprintf oc "	fcmpd	%a, %a\n" freg r1 freg r2;
       fprintf oc "	fmstat\n"; 2
@@ -673,6 +671,12 @@ let rec print_instructions oc instrs =
       end;
       print_instructions oc il
 
+(* Base-2 log of a Caml integer *)
+
+let rec log2 n =
+  assert (n > 0);
+  if n = 1 then 0 else 1 + log2 (n lsr 1)
+
 let print_function oc name fn =
   Hashtbl.clear current_function_labels;
   reset_constants();
@@ -682,7 +686,9 @@ let print_function oc name fn =
     | t :: _ -> t
     |   _    -> Section_text in
   section oc text;
-  fprintf oc "	.align 2\n";
+  let alignment =
+    match !Clflags.option_falignfunctions with Some n -> log2 n | None -> 2 in
+  fprintf oc "	.align %d\n" alignment;
   if not (C2C.atom_is_static name) then
     fprintf oc "	.global	%a\n" print_symb name;
   fprintf oc "%a:\n" print_symb name;
@@ -709,9 +715,11 @@ let print_init oc = function
   | Init_int32 n ->
       fprintf oc "	.word	%ld\n" (camlint_of_coqint n)
   | Init_float32 n ->
-      fprintf oc "	.word	0x%lx %s %.15g \n" (Int32.bits_of_float n) comment n
+      fprintf oc "	.word	0x%lx %s %.15g \n" (camlint_of_coqint (Floats.Float.bits_of_single n))
+	comment (camlfloat_of_coqfloat n)
   | Init_float64 n ->
-      fprintf oc "	.quad	%Ld %s %.18g\n" (Int64.bits_of_float n) comment n
+      fprintf oc "	.quad	%Ld %s %.18g\n" (camlint64_of_coqint (Floats.Float.bits_of_double n))
+	comment (camlfloat_of_coqfloat n)
   | Init_space n ->
       let n = camlint_of_z n in
       if n > 0l then fprintf oc "	.space	%ld\n" n
@@ -725,12 +733,6 @@ let print_init_data oc name id =
     fprintf oc "	.ascii	\"%s\"\n" (PrintCsyntax.string_of_init id)
   else
     List.iter (print_init oc) id
-
-(* Base-2 log of a Caml integer *)
-
-let rec log2 n =
-  assert (n > 0);
-  if n = 1 then 0 else 1 + log2 (n lsr 1)
 
 let print_var oc (name, v) =
   match v.gvar_init with

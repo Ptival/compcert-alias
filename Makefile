@@ -12,7 +12,8 @@
 
 include Makefile.config
 
-DIRS=lib common $(ARCH)/$(VARIANT) $(ARCH) backend cfrontend driver
+DIRS=lib common $(ARCH)/$(VARIANT) $(ARCH) backend cfrontend driver \
+  flocq/Core flocq/Prop flocq/Calc flocq/Appli
 
 INCLUDES=$(patsubst %,-I %, $(DIRS))
 
@@ -36,15 +37,27 @@ OCB_OPTIONS_CHECKLINK=\
 VPATH=$(DIRS)
 GPATH=$(DIRS)
 
+# Flocq
+FLOCQ_CORE=Fcore_float_prop.v Fcore_Zaux.v Fcore_rnd_ne.v Fcore_FTZ.v \
+  Fcore_FLT.v Fcore_defs.v Fcore_Raux.v Fcore_ulp.v Fcore_rnd.v Fcore_FLX.v \
+  Fcore_FIX.v Fcore_digits.v Fcore_generic_fmt.v Fcore.v
+FLOCQ_PROP=Fprop_Sterbenz.v Fprop_mult_error.v Fprop_relative.v \
+  Fprop_div_sqrt_error.v Fprop_plus_error.v
+FLOCQ_CALC=Fcalc_ops.v Fcalc_bracket.v Fcalc_sqrt.v Fcalc_div.v Fcalc_round.v \
+  Fcalc_digits.v
+FLOCQ_APPLI=Fappli_IEEE_bits.v Fappli_IEEE.v
+FLOCQ=$(FLOCQ_CORE) $(FLOCQ_PROP) $(FLOCQ_CALC) $(FLOCQ_APPLI)
+
 # General-purpose libraries (in lib/)
 
 LIB=Axioms.v Coqlib.v Intv.v Maps.v Heaps.v Lattice.v Ordered.v \
-  Iteration.v Integers.v Floats.v Parmov.v UnionFind.v
+  Iteration.v Integers.v Floats.v Parmov.v UnionFind.v Wfsimpl.v \
+  Postorder.v
 
 # Parts common to the front-ends and the back-end (in common/)
 
-COMMON=Errors.v AST.v Events.v Globalenvs.v Memdata.v Memtype.v Memory.v Values.v \
-  Smallstep.v Behaviors.v Switch.v Determinism.v
+COMMON=Errors.v AST.v Events.v Globalenvs.v Memdata.v Memtype.v Memory.v \
+  Values.v Smallstep.v Behaviors.v Switch.v Determinism.v
 
 # Back-end modules (in backend/, $(ARCH)/, $(ARCH)/$(VARIANT))
 
@@ -54,10 +67,12 @@ BACKEND=\
   Registers.v RTL.v \
   RTLgen.v RTLgenspec.v RTLgenproof.v \
   Tailcall.v Tailcallproof.v \
+  Inlining.v Inliningspec.v Inliningproof.v \
+  Renumber.v Renumberproof.v \
   RTLtyping.v \
   Kildall.v \
   ConstpropOp.v Constprop.v ConstpropOpproof.v Constpropproof.v \
-  CSE.v CSEproof.v \
+  CombineOp.v CSE.v CombineOpproof.v CSEproof.v \
   Machregs.v Locations.v Conventions1.v Conventions.v LTL.v LTLtyping.v \
   InterfGraph.v Coloring.v Coloringproof.v \
   Allocation.v Allocproof.v Alloctyping.v \
@@ -89,7 +104,7 @@ DRIVER=Compiler.v Complements.v
 
 # All source files
 
-FILES=$(LIB) $(COMMON) $(BACKEND) $(CFRONTEND) $(DRIVER)
+FILES=$(LIB) $(COMMON) $(BACKEND) $(CFRONTEND) $(DRIVER) $(FLOCQ)
 
 # Symbolic links vs. copy
 
@@ -177,7 +192,7 @@ driver/Configuration.ml: Makefile.config VERSION
          echo let arch = "\"$(ARCH)\""; \
          echo let variant = "\"$(VARIANT)\""; \
          echo let system = "\"$(SYSTEM)\""; \
-         echo let need_stdlib_wrapper = $(NEED_STDLIB_WRAPPER); \
+         echo let has_runtime_lib = $(HAS_RUNTIME_LIB); \
          version=`cat VERSION`; \
          echo let version = "\"$$version\"") \
         > driver/Configuration.ml

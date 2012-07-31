@@ -175,7 +175,7 @@ let print_pointer_hook
 let print_value p v =
   match v with
   | Vint n -> fprintf p "%ld" (camlint_of_coqint n)
-  | Vfloat f -> fprintf p "%F" f
+  | Vfloat f -> fprintf p "%F" (camlfloat_of_coqfloat f)
   | Vptr(b, ofs) -> fprintf p "<ptr%a>" !print_pointer_hook (b, ofs)
   | Vundef -> fprintf p "<undef>"
 
@@ -383,8 +383,8 @@ let print_init p = function
   | Init_int8 n -> fprintf p "%ld,@ " (camlint_of_coqint n)
   | Init_int16 n -> fprintf p "%ld,@ " (camlint_of_coqint n)
   | Init_int32 n -> fprintf p "%ld,@ " (camlint_of_coqint n)
-  | Init_float32 n -> fprintf p "%F,@ " n
-  | Init_float64 n -> fprintf p "%F,@ " n
+  | Init_float32 n -> fprintf p "%F,@ " (camlfloat_of_coqfloat n)
+  | Init_float64 n -> fprintf p "%F,@ " (camlfloat_of_coqfloat n)
   | Init_space n -> fprintf p "/* skip %ld, */@ " (camlint_of_coqint n)
   | Init_addrof(symb, ofs) ->
       let ofs = camlint_of_coqint ofs in
@@ -440,7 +440,9 @@ and collect_fields = function
   | Fnil -> ()
   | Fcons(id, hd, tl) -> collect_type hd; collect_fields tl
 
-let rec collect_expr = function
+let rec collect_expr e =
+  collect_type (typeof e);
+  match e with
   | Eloc _ -> assert false
   | Evar _ -> ()
   | Ederef(r, _) -> collect_expr r

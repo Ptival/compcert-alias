@@ -322,6 +322,9 @@ Definition transl_op
   | Ofloatconst f, nil =>
       do r <- freg_of res; 
       OK ((if Float.eq_dec f Float.zero then Pxorpd_f r else Pmovsd_fi r f) :: k)
+  | Oindirectsymbol id, nil =>
+      do r <- ireg_of res;
+      OK (Pmov_ra r id :: k)
   | Ocast8signed, a1 :: nil =>
       do r1 <- ireg_of a1; do r <- ireg_of res; mk_intconv Pmovsb_rr r r1 k
   | Ocast8unsigned, a1 :: nil =>
@@ -449,7 +452,7 @@ Definition transl_load (chunk: memory_chunk)
       do r <- ireg_of dest; OK(Pmov_rm r am :: k)
   | Mfloat32 =>
       do r <- freg_of dest; OK(Pcvtss2sd_fm r am :: k)
-  | Mfloat64 =>
+  | Mfloat64 | Mfloat64al32 =>
       do r <- freg_of dest; OK(Pmovsd_fm r am :: k)
   end.
 
@@ -466,7 +469,7 @@ Definition transl_store (chunk: memory_chunk)
       do r <- ireg_of src; OK(Pmov_mr am r :: k)
   | Mfloat32 =>
       do r <- freg_of src; OK(Pcvtsd2ss_mf am r :: k)
-  | Mfloat64 =>
+  | Mfloat64 | Mfloat64al32 =>
       do r <- freg_of src; OK(Pmovsd_mf am r :: k)
   end.
 

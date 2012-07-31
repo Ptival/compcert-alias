@@ -23,11 +23,10 @@ open Asm
 
 (* Recognition of target ABI and asm syntax *)
 
-type target = MacOS | Linux | Diab
+type target = Linux | Diab
 
 let target = 
   match Configuration.system with
-  | "macosx" -> MacOS
   | "linux"  -> Linux
   | "diab"   -> Diab
   | _        -> invalid_arg ("System " ^ Configuration.system ^ " not supported")
@@ -61,43 +60,28 @@ let coqint oc n =
   fprintf oc "%ld" (camlint_of_coqint n)
 
 let raw_symbol oc s =
-  match target with
-  | MacOS      -> fprintf oc "_%s" s
-  | Linux|Diab -> fprintf oc "%s" s
+  fprintf oc "%s" s
 
 let symbol oc symb =
-  match target with
-  | MacOS ->
-      if IdentSet.mem symb !stubbed_functions
-      then fprintf oc "L%s$stub" (extern_atom symb)
-      else fprintf oc "_%s" (extern_atom symb)
-  | Linux | Diab ->
-      if IdentSet.mem symb !stubbed_functions
-      then fprintf oc ".L%s$stub" (extern_atom symb)
-      else fprintf oc "%s" (extern_atom symb)
+  if IdentSet.mem symb !stubbed_functions
+  then fprintf oc ".L%s$stub" (extern_atom symb)
+  else fprintf oc "%s" (extern_atom symb)
 
 let symbol_offset oc (symb, ofs) =
   symbol oc symb;
   if ofs <> 0l then fprintf oc " + %ld" ofs
 
 let label oc lbl =
-  match target with
-  | MacOS      -> fprintf oc "L%d" lbl
-  | Linux|Diab -> fprintf oc ".L%d" lbl
+  fprintf oc ".L%d" lbl
 
 let label_low oc lbl =
-  match target with
-  | MacOS      -> fprintf oc "lo16(L%d)" lbl
-  | Linux|Diab -> fprintf oc ".L%d@l" lbl
+  fprintf oc ".L%d@l" lbl
 
 let label_high oc lbl =
-  match target with
-  | MacOS      -> fprintf oc "ha16(L%d)" lbl
-  | Linux|Diab -> fprintf oc ".L%d@ha" lbl
+  fprintf oc ".L%d@ha" lbl
 
 let comment =
   match target with
-  | MacOS -> ";"
   | Linux -> "#"
   | Diab -> ";"
 
@@ -106,23 +90,11 @@ let constant oc cst =
   | Cint n ->
       fprintf oc "%ld" (camlint_of_coqint n)
   | Csymbol_low(s, n) ->
-      begin match target with
-      | MacOS -> 
-          fprintf oc "lo16(%a)" symbol_offset (s, camlint_of_coqint n)
-      | Linux|Diab ->
-          fprintf oc "(%a)@l" symbol_offset (s, camlint_of_coqint n)
-      end
+      fprintf oc "(%a)@l" symbol_offset (s, camlint_of_coqint n)
   | Csymbol_high(s, n) ->
-      begin match target with
-      | MacOS ->
-          fprintf oc "ha16(%a)" symbol_offset (s, camlint_of_coqint n)
-      | Linux|Diab ->
-          fprintf oc "(%a)@ha" symbol_offset (s, camlint_of_coqint n)
-      end
+      fprintf oc "(%a)@ha" symbol_offset (s, camlint_of_coqint n)
   | Csymbol_sda(s, n) ->
       begin match target with
-      | MacOS ->
-          assert false
       | Linux ->
           fprintf oc "(%a)@sda21" symbol_offset (s, camlint_of_coqint n)
       | Diab ->
@@ -160,8 +132,8 @@ let float_reg_name = function
 
 let ireg oc r =
   begin match target with
-  | MacOS|Diab -> output_char oc 'r'
-  | Linux      -> ()
+  | Diab  -> output_char oc 'r'
+  | Linux -> ()
   end;
   output_string oc (int_reg_name r)
 
@@ -170,15 +142,15 @@ let ireg_or_zero oc r =
 
 let freg oc r =
   begin match target with
-  | MacOS|Diab -> output_char oc 'f'
-  | Linux      -> ()
+  | Diab  -> output_char oc 'f'
+  | Linux -> ()
   end;
   output_string oc (float_reg_name r)
 
 let creg oc r =
   match target with
-  | MacOS|Diab -> fprintf oc "cr%d" r
-  | Linux      -> fprintf oc "%d" r
+  | Diab  -> fprintf oc "cr%d" r
+  | Linux -> fprintf oc "%d" r
 
 let preg oc = function
   | IR r -> ireg oc r
@@ -186,20 +158,6 @@ let preg oc = function
   | _    -> assert false
 
 (* Names of sections *)
-
-let name_of_section_MacOS = function
-  | Section_text -> ".text"
-  | Section_data _ -> ".data"
-  | Section_small_data _ -> ".data"
-  | Section_const -> ".const"
-  | Section_small_const -> ".const"
-  | Section_string -> ".const"
-  | Section_literal -> ".literal8"
-  | Section_jumptable -> ".const"
-  | Section_user(s, wr, ex) ->
-       sprintf ".section	%s, %s, %s"
-               (if wr then "__DATA" else "__TEXT") s
-               (if ex then "regular, pure_instructions" else "regular")
 
 let name_of_section_Linux = function
   | Section_text -> ".text"
@@ -211,7 +169,7 @@ let name_of_section_Linux = function
   | Section_literal -> ".section	.rodata.cst8,\"aM\",@progbits,8"
   | Section_jumptable -> ".text"
   | Section_user(s, wr, ex) ->
-       sprintf ".section	%s,\"a%s%s\",@progbits"
+       sprintf ".section	\"%s\",\"a%s%s\",@progbits"
                s (if wr then "w" else "") (if ex then "x" else "")
 
 let name_of_section_Diab = function
@@ -224,7 +182,7 @@ let name_of_section_Diab = function
   | Section_literal -> ".text"
   | Section_jumptable -> ".text"
   | Section_user(s, wr, ex) ->
-       sprintf ".section	%s,,%c"
+       sprintf ".section	\"%s\",,%c"
                s
                (match wr, ex with
                 | true, true -> 'm'                 (* text+data *)
@@ -234,7 +192,6 @@ let name_of_section_Diab = function
 
 let name_of_section =
   match target with
-  | MacOS -> name_of_section_MacOS
   | Linux -> name_of_section_Linux
   | Diab  -> name_of_section_Diab
 
@@ -393,7 +350,7 @@ let print_builtin_vload_common oc chunk base offset res =
       fprintf oc "	lwz	%a, %a(%a)\n" ireg res constant offset ireg base
   | Mfloat32, FR res ->
       fprintf oc "	lfs	%a, %a(%a)\n" freg res constant offset ireg base
-  | Mfloat64, FR res ->
+  | (Mfloat64 | Mfloat64al32), FR res ->
       fprintf oc "	lfd	%a, %a(%a)\n" freg res constant offset ireg base
   | _ ->
       assert false
@@ -426,7 +383,7 @@ let print_builtin_vstore_common oc chunk base offset src =
   | Mfloat32, FR src ->
       fprintf oc "	frsp	%a, %a\n" freg FPR13 freg src;
       fprintf oc "	stfs	%a, %a(%a)\n" freg FPR13 constant offset ireg base
-  | Mfloat64, FR src ->
+  | (Mfloat64 | Mfloat64al32), FR src ->
       fprintf oc "	stfd	%a, %a(%a)\n" freg src constant offset ireg base
   | _ ->
       assert false
@@ -669,8 +626,8 @@ let print_instruction oc tbl pc = function
   | Plfi(r1, c) ->
       let lbl = new_label() in
       fprintf oc "	addis	%a, 0, %a\n" ireg GPR12 label_high lbl;
-      fprintf oc "	lfd	%a, %a(%a) %s %.18g\n" freg r1 label_low lbl ireg GPR12 comment c;
-      float_literals := (lbl, Int64.bits_of_float c) :: !float_literals;
+      fprintf oc "	lfd	%a, %a(%a) %s %.18g\n" freg r1 label_low lbl ireg GPR12 comment (camlfloat_of_coqfloat c);
+      float_literals := (lbl, camlint64_of_coqint (Floats.Float.bits_of_double c)) :: !float_literals;
   | Plfs(r1, c, r2) ->
       fprintf oc "	lfs	%a, %a(%a)\n" freg r1 constant c ireg r2
   | Plfsx(r1, r2, r3) ->
@@ -875,15 +832,15 @@ let print_function oc name code =
     | [t;l;j] -> (t, l, j)
     |    _    -> (Section_text, Section_literal, Section_jumptable) in
   section oc text;
-  fprintf oc "	.align 2\n";
+  let alignment =
+    match !Clflags.option_falignfunctions with Some n -> log2 n | None -> 2 in
+  fprintf oc "	.align %d\n" alignment;
   if not (C2C.atom_is_static name) then
     fprintf oc "	.globl %a\n" symbol name;
   fprintf oc "%a:\n" symbol name;
   print_instructions oc (label_positions PTree.empty 0 code) 0 code;
-  if target <> MacOS then begin
-    fprintf oc "	.type	%a, @function\n" symbol name;
-    fprintf oc "	.size	%a, . - %a\n" symbol name symbol name
-  end;
+  fprintf oc "	.type	%a, @function\n" symbol name;
+  fprintf oc "	.size	%a, . - %a\n" symbol name symbol name;
   if !float_literals <> [] then begin
     section oc lit;
     fprintf oc "	.align 3\n";
@@ -901,118 +858,7 @@ let print_function oc name code =
 
 let re_variadic_stub = Str.regexp "\\(.*\\)\\$[if]*$"
 
-(* Stubs for MacOS X *)
-
-module Stubs_MacOS = struct
-
-(* Generation of stub code for variadic functions, e.g. printf.
-   Calling conventions for variadic functions are:
-     - always reserve 8 stack words (offsets 24 to 52) so that the
-       variadic function can save there the integer registers parameters
-       r3 ... r10
-     - treat float arguments as pairs of integers, i.e. if we
-       must pass them in registers, use a pair of integer registers
-       for this purpose.
-   The code we generate is:
-     - allocate large enough stack frame
-     - save return address
-     - copy our arguments (registers and stack) to the stack frame,
-       starting at offset 24
-     - load relevant integer parameter registers r3...r10 from the
-       stack frame, limited by the actual number of arguments
-     - call the variadic thing
-     - deallocate stack frame and return
-*)
-
-let variadic_stub oc stub_name fun_name ty_args =
-  (* Compute total size of arguments *)
-  let arg_size =
-    List.fold_left
-     (fun sz ty -> match ty with Tint -> sz + 4 | Tfloat -> sz + 8)
-     0 ty_args in
-  (* Stack size is linkage area + argument size, with a minimum of 56 bytes *)
-  let frame_size = max 56 (24 + arg_size) in
-  fprintf oc "	mflr	r0\n";
-  fprintf oc "	stwu	r1, %d(r1)\n" (-frame_size);
-  fprintf oc "	stw	r0, %d(r1)\n" (frame_size + 4);
-  (* Copy our parameters to our stack frame.
-     As an optimization, don't copy parameters that are already in
-     integer registers, since these stay in place. *)
-  let rec copy gpr fpr src_ofs dst_ofs = function
-    | [] -> ()
-    | Tint :: rem ->
-        if gpr > 10 then begin
-          fprintf oc "	lwz	r0, %d(r1)\n" src_ofs;
-          fprintf oc "	stw	r0, %d(r1)\n" dst_ofs
-        end;
-        copy (gpr + 1) fpr (src_ofs + 4) (dst_ofs + 4) rem
-    | Tfloat :: rem ->
-        if fpr <= 10 then begin
-          fprintf oc "	stfd	f%d, %d(r1)\n" fpr dst_ofs
-        end else begin
-          fprintf oc "	lfd	f0, %d(r1)\n" src_ofs;
-          fprintf oc "	stfd	f0, %d(r1)\n" dst_ofs
-        end;
-        copy (gpr + 2) (fpr + 1) (src_ofs + 8) (dst_ofs + 8) rem
-  in copy 3 1 (frame_size + 24) 24 ty_args;
-  (* Load the first parameters into integer registers.
-     As an optimization, don't load parameters that are already
-     in the correct integer registers. *)
-  let rec load gpr ofs = function
-    | [] -> ()
-    | Tint :: rem ->
-        load (gpr + 1) (ofs + 4) rem
-    | Tfloat :: rem ->
-        if gpr <= 10 then
-          fprintf oc "	lwz	r%d, %d(r1)\n" gpr ofs;
-        if gpr + 1 <= 10 then
-          fprintf oc "	lwz	r%d, %d(r1)\n" (gpr + 1) (ofs + 4);
-        load (gpr + 2) (ofs + 8) rem
-  in load 3 24 ty_args;
-  (* Call the function *)
-  fprintf oc "	addis	r11, 0, ha16(L%s$ptr)\n" stub_name;
-  fprintf oc "	lwz	r11, lo16(L%s$ptr)(r11)\n" stub_name;
-  fprintf oc "	mtctr	r11\n";
-  fprintf oc "	bctrl\n";
-  (* Free our frame and return *)
-  fprintf oc "	lwz	r0, %d(r1)\n" (frame_size + 4);
-  fprintf oc "	mtlr	r0\n";
-  fprintf oc "	addi	r1, r1, %d\n" frame_size;
-  fprintf oc "	blr\n";
-  (* The function pointer *)
-  fprintf oc "	.non_lazy_symbol_pointer\n";
-  fprintf oc "L%s$ptr:\n" stub_name;
-  fprintf oc "	.indirect_symbol _%s\n" fun_name;
-  fprintf oc "	.long	0\n"
-
-(* Stubs for fixed-type functions are much simpler *)
-
-let non_variadic_stub oc name =
-  fprintf oc "	addis	r11, 0, ha16(L%s$ptr)\n" name;
-  fprintf oc "	lwz	r11, lo16(L%s$ptr)(r11)\n" name;
-  fprintf oc "	mtctr	r11\n";
-  fprintf oc "	bctr\n";
-  fprintf oc "	.non_lazy_symbol_pointer\n";
-  fprintf oc "L%s$ptr:\n" name;
-  fprintf oc "	.indirect_symbol _%s\n" name;
-  fprintf oc "	.long	0\n"
-
-let stub_function oc name sg =
-  let name = extern_atom name in
-  section oc Section_text;
-  fprintf oc "	.align 2\n";
-  fprintf oc "L%s$stub:\n" name;
-  if Str.string_match re_variadic_stub name 0
-  then variadic_stub oc name (Str.matched_group 1 name) sg.sig_args
-  else non_variadic_stub oc name
-
-let function_needs_stub name = true
-
-end
-
 (* Stubs for EABI *)
-
-module Stubs_EABI = struct
 
 let variadic_stub oc stub_name fun_name args =
   section oc Section_text;
@@ -1033,17 +879,7 @@ let stub_function oc name sg =
 let function_needs_stub name =
   Str.string_match re_variadic_stub (extern_atom name) 0
 
-end
-
-let function_needs_stub =
-  match target with
-  | MacOS      -> Stubs_MacOS.function_needs_stub
-  | Linux|Diab -> Stubs_EABI.function_needs_stub
-
-let stub_function =
-  match target with
-  | MacOS       -> Stubs_MacOS.stub_function
-  | Linux|Diab  -> Stubs_EABI.stub_function
+(* Generation of whole programs *)
 
 let print_fundef oc (name, defn) =
   match defn with
@@ -1070,13 +906,15 @@ let print_init oc = function
   | Init_int32 n ->
       fprintf oc "	.long	%ld\n" (camlint_of_coqint n)
   | Init_float32 n ->
-      fprintf oc "	.long	%ld %s %.18g\n" (Int32.bits_of_float n) comment n
+      fprintf oc "	.long	0x%lx %s %.18g\n"
+                 (camlint_of_coqint (Floats.Float.bits_of_single n))
+                 comment (camlfloat_of_coqfloat n)
   | Init_float64 n ->
-      let b = Int64.bits_of_float n in
-      fprintf oc "	.long	%Ld, %Ld %s %.18g\n"
+      let b = camlint64_of_coqint (Floats.Float.bits_of_double n) in
+      fprintf oc "	.long	0x%Lx, 0x%Lx %s %.18g\n"
                  (Int64.shift_right_logical b 32)
                  (Int64.logand b 0xFFFFFFFFL)
-                 comment n
+                 comment (camlfloat_of_coqfloat n)
   | Init_space n ->
       let n = camlint_of_z n in
       if n > 0l then fprintf oc "	.space	%ld\n" n
@@ -1113,10 +951,8 @@ let print_var oc (name, v) =
           fprintf oc "	.globl	%a\n" symbol name;
         fprintf oc "%a:\n" symbol name;
         print_init_data oc name v.gvar_init;
-        if target <> MacOS then begin
-          fprintf oc "	.type	%a, @object\n" symbol name;
-          fprintf oc "	.size	%a, . - %a\n" symbol name symbol name
-        end
+        fprintf oc "	.type	%a, @object\n" symbol name;
+        fprintf oc "	.size	%a, . - %a\n" symbol name symbol name
       end else begin
         let sz =
           match v.gvar_init with [Init_space sz] -> sz | _ -> assert false in

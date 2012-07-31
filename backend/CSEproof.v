@@ -28,6 +28,8 @@ Require Import Registers.
 Require Import RTL.
 Require Import RTLtyping.
 Require Import Kildall.
+Require Import CombineOp.
+Require Import CombineOpproof.
 Require Import CSE.
 
 (** * Semantic properties of value numberings *)
@@ -48,19 +50,22 @@ Definition wf_rhs (next: valnum) (rh: rhs) : Prop :=
 Definition wf_equation (next: valnum) (vr: valnum) (rh: rhs) : Prop :=
   Plt vr next /\ wf_rhs next rh.
 
-Definition wf_numbering (n: numbering) : Prop :=
-  (forall v rh,
-    In (v, rh) n.(num_eqs) -> wf_equation n.(num_next) v rh)
-/\
-  (forall r v,
-    PTree.get r n.(num_reg) = Some v -> Plt v n.(num_next)).
+Inductive wf_numbering (n: numbering) : Prop :=
+  wf_numbering_intro
+    (EQS: forall v rh,
+          In (v, rh) n.(num_eqs) -> wf_equation n.(num_next) v rh)
+    (REG: forall r v,
+          PTree.get r n.(num_reg) = Some v -> Plt v n.(num_next))
+    (VAL: forall r v,
+          In r (PMap.get v n.(num_val)) -> PTree.get r n.(num_reg) = Some v).
 
 Lemma wf_empty_numbering:
   wf_numbering empty_numbering.
 Proof.
   unfold empty_numbering; split; simpl; intros.
-  elim H.
+  contradiction.
   rewrite PTree.gempty in H. congruence.
+  rewrite PMap.gi in H. contradiction. 
 Qed.
 
 Lemma wf_rhs_increasing:
@@ -76,7 +81,7 @@ Lemma wf_equation_increasing:
   Ple next1 next2 ->
   wf_equation next1 vr rh -> wf_equation next2 vr rh.
 Proof.
-  intros. elim H0; intros. split. 
+  intros. destruct H0. split. 
   apply Plt_Ple_trans with next1; auto.
   apply wf_rhs_increasing with next1; auto.
 Qed.
@@ -90,20 +95,21 @@ Lemma wf_valnum_reg:
   valnum_reg n r = (n', v) ->
   wf_numbering n' /\ Plt v n'.(num_next) /\ Ple n.(num_next) n'.(num_next).
 Proof.
-  intros until v. intros WF. inversion WF.
-  generalize (H0 r v).
-  unfold valnum_reg. destruct ((num_reg n)!r).
-  intros. replace n' with n. split. auto. 
-  split. apply H1. congruence. 
-  apply Ple_refl.
-  congruence. 
-  intros. inversion H2. simpl. split.
-  split; simpl; intros. 
+  intros until v. unfold valnum_reg. intros WF VREG. inversion WF.
+  destruct ((num_reg n)!r) as [v'|]_eqn.
+(* found *)
+  inv VREG. split. auto. split. eauto. apply Ple_refl.
+(* not found *)
+  inv VREG. split. 
+  split; simpl; intros.
   apply wf_equation_increasing with (num_next n). apply Ple_succ. auto. 
-  rewrite PTree.gsspec in H3. destruct (peq r0 r). 
-  replace v0 with (num_next n). apply Plt_succ. congruence.
-  apply Plt_trans_succ; eauto. 
-  split. apply Plt_succ. apply Ple_succ.
+  rewrite PTree.gsspec in H. destruct (peq r0 r).
+  inv H. apply Plt_succ.
+  apply Plt_trans_succ; eauto.
+  rewrite PMap.gsspec in H. destruct (peq v (num_next n)). 
+  subst v. simpl in H. destruct H. subst r0. apply PTree.gss. contradiction.
+  rewrite PTree.gso. eauto. exploit VAL; eauto. congruence. 
+  simpl. split. apply Plt_succ. apply Ple_succ.
 Qed.
 
 Lemma wf_valnum_regs:
@@ -142,6 +148,54 @@ Proof.
   intro. right. auto.
 Qed.
 
+Lemma find_valnum_num_correct:
+  forall rh vn eqs,
+  find_valnum_num vn eqs = Some rh -> In (vn, rh) eqs.
+Proof.
+  induction eqs; simpl.
+  congruence.
+  destruct a as [v' r']. destruct (peq vn v'); intros. 
+  left. congruence.
+  right. auto.
+Qed.
+
+Remark in_remove:
+  forall (A: Type) (eq: forall (x y: A), {x=y}+{x<>y}) x y l,
+  In y (List.remove eq x l) <-> x <> y /\ In y l.
+Proof.
+  induction l; simpl. 
+  tauto.
+  destruct (eq x a). 
+  subst a. rewrite IHl. tauto. 
+  simpl. rewrite IHl. intuition congruence.
+Qed.
+
+Lemma wf_forget_reg:
+  forall n rd r v,
+  wf_numbering n ->
+  In r (PMap.get v (forget_reg n rd)) -> r <> rd /\ PTree.get r n.(num_reg) = Some v.
+Proof.
+  unfold forget_reg; intros. inversion H. 
+  destruct ((num_reg n)!rd) as [vd|]_eqn. 
+  rewrite PMap.gsspec in H0. destruct (peq v vd). 
+  subst vd. rewrite in_remove in H0. destruct H0. split. auto. eauto. 
+  split; eauto. exploit VAL; eauto. congruence. 
+  split; eauto. exploit VAL; eauto. congruence.
+Qed.
+
+Lemma wf_update_reg:
+  forall n rd vd r v,
+  wf_numbering n ->
+  In r (PMap.get v (update_reg n rd vd)) -> PTree.get r (PTree.set rd vd n.(num_reg)) = Some v.
+Proof.
+  unfold update_reg; intros. inversion H. rewrite PMap.gsspec in H0. 
+  destruct (peq v vd). 
+  subst v; simpl in H0. destruct H0. 
+  subst r. apply PTree.gss. 
+  exploit wf_forget_reg; eauto. intros [A B]. rewrite PTree.gso; eauto. 
+  exploit wf_forget_reg; eauto. intros [A B]. rewrite PTree.gso; eauto. 
+Qed.
+
 Lemma wf_add_rhs:
   forall n rd rh,
   wf_numbering n ->
@@ -149,20 +203,24 @@ Lemma wf_add_rhs:
   wf_numbering (add_rhs n rd rh).
 Proof.
   intros. inversion H. unfold add_rhs. 
-  caseEq (find_valnum_rhs rh n.(num_eqs)); intros.
-  split; simpl. assumption. 
-  intros r v0. rewrite PTree.gsspec. case (peq r rd); intros.
-  inversion H4. subst v0. 
-  elim (H1 v rh (find_valnum_rhs_correct _ _ _ H3)). auto.
-  eauto.
-  split; simpl.
-  intros v rh0 [A1|A2]. inversion A1. subst rh0. 
-  split. apply Plt_succ. apply wf_rhs_increasing with n.(num_next).
-  apply Ple_succ. auto.
+  destruct (find_valnum_rhs rh n.(num_eqs)) as [vres|]_eqn.
+(* found *)
+  exploit find_valnum_rhs_correct; eauto. intros IN. 
+  split; simpl; intros. 
+  auto.
+  rewrite PTree.gsspec in H1. destruct (peq r rd). 
+  inv H1. exploit EQS; eauto. intros [A B]. auto. 
+  eauto. 
+  eapply wf_update_reg; eauto. 
+(* not found *)
+  split; simpl; intros.
+  destruct H1.
+  inv H1. split. apply Plt_succ. apply wf_rhs_increasing with n.(num_next). apply Ple_succ. auto.
   apply wf_equation_increasing with n.(num_next). apply Ple_succ. auto.
-  intros r v. rewrite PTree.gsspec. case (peq r rd); intro.
-  intro. inversion H4. apply Plt_succ.
-  intro. apply Plt_trans_succ. eauto. 
+  rewrite PTree.gsspec in H1. destruct (peq r rd). 
+  inv H1. apply Plt_succ.
+  apply Plt_trans_succ. eauto. 
+  eapply wf_update_reg; eauto. 
 Qed.
 
 Lemma wf_add_op:
@@ -170,16 +228,18 @@ Lemma wf_add_op:
   wf_numbering n ->
   wf_numbering (add_op n rd op rs).
 Proof.
-  intros. unfold add_op. 
-  case (is_move_operation op rs).
-  intro r. caseEq (valnum_reg n r); intros n' v EQ.
-  destruct (wf_valnum_reg _ _ _ _ H EQ) as [[A1 A2] [B C]].
-  split; simpl. assumption. intros until v0. rewrite PTree.gsspec.
-  case (peq r0 rd); intros. replace v0 with v. auto. congruence.
+  intros. unfold add_op. destruct (is_move_operation op rs) as [r|]_eqn.
+(* move *)
+  destruct (valnum_reg n r) as [n' v]_eqn.
+  exploit wf_valnum_reg; eauto. intros [A [B C]]. inversion A.
+  constructor; simpl; intros.
   eauto.
-  caseEq (valnum_regs n rs). intros n' vl EQ. 
-  generalize (wf_valnum_regs _ _ _ _ H EQ). intros [A [B C]].
-  apply wf_add_rhs; auto.
+  rewrite PTree.gsspec in H0. destruct (peq r0 rd). inv H0. auto. eauto.
+  eapply wf_update_reg; eauto. 
+(* not a move *)
+  destruct (valnum_regs n rs) as [n' vs]_eqn.
+  exploit wf_valnum_regs; eauto. intros [A [B C]].
+  eapply wf_add_rhs; eauto.
 Qed.
 
 Lemma wf_add_load:
@@ -198,11 +258,12 @@ Lemma wf_add_unknown:
   wf_numbering n ->
   wf_numbering (add_unknown n rd).
 Proof.
-  intros. inversion H. unfold add_unknown. constructor; simpl.
-  intros. eapply wf_equation_increasing; eauto. auto with coqlib. 
-  intros until v. rewrite PTree.gsspec. case (peq r rd); intros.
-  inversion H2. auto with coqlib.
-  apply Plt_trans_succ. eauto.
+  intros. inversion H. unfold add_unknown. constructor; simpl; intros.
+  eapply wf_equation_increasing; eauto. auto with coqlib. 
+  rewrite PTree.gsspec in H0. destruct (peq r rd). 
+  inv H0. auto with coqlib.
+  apply Plt_trans_succ; eauto.
+  exploit wf_forget_reg; eauto. intros [A B]. rewrite PTree.gso; eauto.
 Qed.
 
 Remark kill_eqs_in:
@@ -221,6 +282,7 @@ Lemma wf_kill_equations:
 Proof.
   intros. inversion H. unfold kill_equations; split; simpl; intros.
   exploit kill_eqs_in; eauto. intros [A B]. auto. 
+  eauto.
   eauto.
 Qed.
 
@@ -320,15 +382,13 @@ Lemma numbering_holds_exten:
   numbering_holds valu2 ge sp rs m n.
 Proof.
   intros. inversion H0. inversion H1. split; intros.
-  generalize (H2 _ _ H6). intro WFEQ.
-  generalize (H4 _ _ H6). 
+  exploit EQS; eauto. intros [A B]. red in B.
+  generalize (H2 _ _ H4).
   unfold equation_holds; destruct rh.
-  elim WFEQ; intros.
   rewrite (valu_agree_list valu1 valu2 n.(num_next)). 
-  rewrite H. auto. auto. auto. exact H8. 
-  elim WFEQ; intros.
+  rewrite H. auto. auto. auto. auto.
   rewrite (valu_agree_list valu1 valu2 n.(num_next)). 
-  rewrite H. auto. auto. auto. exact H8. 
+  rewrite H. auto. auto. auto. auto. 
   rewrite H. auto. eauto.
 Qed.
 
@@ -643,81 +703,101 @@ Qed.
   that register correctly maps back to the given value number. *)
 
 Lemma reg_valnum_correct:
-  forall n v r, reg_valnum n v = Some r -> n.(num_reg)!r = Some v.
+  forall n v r, wf_numbering n -> reg_valnum n v = Some r -> n.(num_reg)!r = Some v.
 Proof.
-  intros until r. unfold reg_valnum. rewrite PTree.fold_spec.
-  assert(forall l acc0,
-    List.fold_left
-     (fun (acc: option reg) (p: reg * valnum) => 
-        if peq (snd p) v then Some (fst p) else acc)
-     l acc0 = Some r ->
-     In (r, v) l \/ acc0 = Some r).
-  induction l; simpl.
-  intros. tauto.
-  case a; simpl; intros r1 v1 acc0 FL.
-  generalize (IHl _ FL). 
-  case (peq v1 v); intro. 
-    subst v1. intros [A|B]. tauto. inversion B; subst r1. tauto.
-    tauto.
-  intro. elim (H _ _ H0); intro. 
-  apply PTree.elements_complete; auto.
-  discriminate.
+  unfold reg_valnum; intros. inv H. 
+  destruct ((num_val n)#v) as [| r1 rl]_eqn; inv H0. 
+  eapply VAL. rewrite Heql. auto with coqlib.
 Qed.
 
-(** Correctness of [find_op] and [find_load]: if successful and in a
+(** Correctness of [find_rhs]: if successful and in a
   satisfiable numbering, the returned register does contain the 
   result value of the operation or memory load. *)
 
 Lemma find_rhs_correct:
   forall valu rs m n rh r,
+  wf_numbering n ->
   numbering_holds valu ge sp rs m n ->
   find_rhs n rh = Some r ->
   rhs_evals_to valu rh m rs#r.
 Proof.
-  intros until r.  intros NH. 
+  intros until r. intros WF NH. 
   unfold find_rhs. 
   caseEq (find_valnum_rhs rh n.(num_eqs)); intros.
-  generalize (find_valnum_rhs_correct _ _ _ H); intro.
-  generalize (reg_valnum_correct _ _ _ H0); intro.
+  exploit find_valnum_rhs_correct; eauto. intros.
+  exploit reg_valnum_correct; eauto. intros.
   inversion NH. 
   generalize (H3 _ _ H1). rewrite (H4 _ _ H2). 
   destruct rh; simpl; auto.
   discriminate.
 Qed.
 
-Lemma find_op_correct:
-  forall rs m n op args r,
-  wf_numbering n ->
-  numbering_satisfiable ge sp rs m n ->
-  find_op n op args = Some r ->
-  eval_operation ge sp op rs##args m = Some rs#r.
+(** Correctness of operator reduction *)
+
+Section REDUCE.
+
+Variable A: Type.
+Variable f: (valnum -> option rhs) -> A -> list valnum -> option (A * list valnum).
+Variable V: Type.
+Variable rs: regset.
+Variable m: mem.
+Variable sem: A -> list val -> option V.
+Hypothesis f_sound:
+  forall eqs valu op args op' args',
+  (forall v rhs, eqs v = Some rhs -> equation_holds valu ge sp m v rhs) ->
+  f eqs op args = Some(op', args') ->
+  sem op' (map valu args') = sem op (map valu args).
+Variable n: numbering.
+Variable valu: valnum -> val.
+Hypothesis n_holds: numbering_holds valu ge sp rs m n.
+Hypothesis n_wf: wf_numbering n.
+
+Lemma regs_valnums_correct:
+  forall vl rl, regs_valnums n vl = Some rl -> rs##rl = map valu vl.
 Proof.
-  intros until r. intros WF [valu NH].
-  unfold find_op. caseEq (valnum_regs n args). intros n' vl VR FIND.
-  generalize (valnum_regs_holds _ _ _ _ _ _ _ WF NH VR).
-  intros [valu2 [NH2 [EQ AG]]].
-  rewrite <- EQ. 
-  change (rhs_evals_to valu2 (Op op vl) m rs#r).
-  eapply find_rhs_correct; eauto.
+  induction vl; simpl; intros.
+  inv H. auto.
+  destruct (reg_valnum n a) as [r1|]_eqn; try discriminate.
+  destruct (regs_valnums n vl) as [rx|]_eqn; try discriminate.
+  inv H. simpl; decEq; auto. 
+  eapply (proj2 n_holds); eauto. eapply reg_valnum_correct; eauto.
 Qed.
 
-Lemma find_load_correct:
-  forall rs m n chunk addr args r,
-  wf_numbering n ->
-  numbering_satisfiable ge sp rs m n ->
-  find_load n chunk addr args = Some r ->
-  exists a,
-  eval_addressing ge sp addr rs##args = Some a /\
-  Mem.loadv chunk m a = Some rs#r.
+Lemma reduce_rec_sound:
+  forall niter op args op' rl' res,
+  reduce_rec A f n niter op args = Some(op', rl') ->
+  sem op (map valu args) = Some res ->
+  sem op' (rs##rl') = Some res.
 Proof.
-  intros until r. intros WF [valu NH].
-  unfold find_load. caseEq (valnum_regs n args). intros n' vl VR FIND.
-  generalize (valnum_regs_holds _ _ _ _ _ _ _ WF NH VR).
-  intros [valu2 [NH2 [EQ AG]]].
-  rewrite <- EQ. 
-  change (rhs_evals_to valu2 (Load chunk addr vl) m rs#r).
-  eapply find_rhs_correct; eauto.
+  induction niter; simpl; intros.
+  discriminate.
+  destruct (f (fun v : valnum => find_valnum_num v (num_eqs n)) op args)
+           as [[op1 args1] | ]_eqn.
+  assert (sem op1 (map valu args1) = Some res).
+    rewrite <- H0. eapply f_sound; eauto.
+    simpl; intros. apply (proj1 n_holds). eapply find_valnum_num_correct; eauto. 
+  destruct (reduce_rec A f n niter op1 args1) as [[op2 rl2] | ]_eqn.
+  inv H. eapply IHniter; eauto.
+  destruct (regs_valnums n args1) as [rl|]_eqn.
+  inv H. erewrite regs_valnums_correct; eauto.
+  discriminate.
+  discriminate.
 Qed.
+
+Lemma reduce_sound:
+  forall op rl vl op' rl' res,
+  reduce A f n op rl vl = (op', rl') ->
+  map valu vl = rs##rl ->
+  sem op rs##rl = Some res ->
+  sem op' rs##rl' = Some res.
+Proof.
+  unfold reduce; intros. 
+  destruct (reduce_rec A f n 4%nat op vl) as [[op1 rl1] | ]_eqn; inv H.
+  eapply reduce_rec_sound; eauto. congruence.
+  auto.
+Qed.
+
+End REDUCE.
 
 End SATISFIABILITY.
 
@@ -895,17 +975,27 @@ Proof.
 
   (* Iop *)
   exists (State s' (transf_function' f approx) sp pc' (rs#res <- v) m); split.
-  assert (eval_operation tge sp op rs##args m = Some v).
-    rewrite <- H0. apply eval_operation_preserved. exact symbols_preserved.
   destruct (is_trivial_op op) as []_eqn.
-  eapply exec_Iop'; eauto. 
-  destruct (find_op approx!!pc op args) as [r|]_eqn. 
-  eapply exec_Iop'; eauto. simpl. 
-  assert (eval_operation ge sp op rs##args m = Some rs#r).
-    eapply find_op_correct; eauto.
-    eapply wf_analyze; eauto.
-  congruence.
   eapply exec_Iop'; eauto.
+  rewrite <- H0. apply eval_operation_preserved. exact symbols_preserved.
+  destruct (valnum_regs approx!!pc args) as [n1 vl]_eqn.
+  assert (wf_numbering approx!!pc). eapply wf_analyze; eauto.
+  destruct SAT as [valu1 NH1].
+  exploit valnum_regs_holds; eauto. intros [valu2 [NH2 [EQ AG]]]. 
+  assert (wf_numbering n1). eapply wf_valnum_regs; eauto. 
+  destruct (find_rhs n1 (Op op vl)) as [r|]_eqn.
+  (* replaced by move *)
+  assert (EV: rhs_evals_to ge sp valu2 (Op op vl) m rs#r). eapply find_rhs_correct; eauto.
+  assert (RES: rs#r = v). red in EV. congruence.
+  eapply exec_Iop'; eauto. simpl. congruence. 
+  (* possibly simplified *)
+  destruct (reduce operation combine_op n1 op args vl) as [op' args']_eqn.
+  assert (RES: eval_operation ge sp op' rs##args' m = Some v).
+    eapply reduce_sound with (sem := fun op vl => eval_operation ge sp op vl m); eauto. 
+    intros; eapply combine_op_sound; eauto.
+  eapply exec_Iop'; eauto.
+  rewrite <- RES. apply eval_operation_preserved. exact symbols_preserved.
+  (* state matching *)
   econstructor; eauto.
   apply wt_regset_assign; auto. 
   generalize (wt_instrs _ _ WTF pc _ H); intro WTI; inv WTI.
@@ -919,17 +1009,25 @@ Proof.
 
   (* Iload *)
   exists (State s' (transf_function' f approx) sp pc' (rs#dst <- v) m); split.
-  assert (eval_addressing tge sp addr rs##args = Some a).
-    rewrite <- H0. apply eval_addressing_preserved. exact symbols_preserved.
-  destruct (find_load approx!!pc chunk addr args) as [r|]_eqn.
-  eapply exec_Iop'; eauto. simpl. 
-  assert (exists a, eval_addressing ge sp addr rs##args = Some a
-                 /\ Mem.loadv chunk m a = Some rs#r).
-    eapply find_load_correct; eauto.
-    eapply wf_analyze; eauto.
-  destruct H3 as [a' [A B]].
-  congruence.
-  eapply exec_Iload'; eauto.
+  destruct (valnum_regs approx!!pc args) as [n1 vl]_eqn.
+  assert (wf_numbering approx!!pc). eapply wf_analyze; eauto.
+  destruct SAT as [valu1 NH1].
+  exploit valnum_regs_holds; eauto. intros [valu2 [NH2 [EQ AG]]]. 
+  assert (wf_numbering n1). eapply wf_valnum_regs; eauto. 
+  destruct (find_rhs n1 (Load chunk addr vl)) as [r|]_eqn.
+  (* replaced by move *)
+  assert (EV: rhs_evals_to ge sp valu2 (Load chunk addr vl) m rs#r). eapply find_rhs_correct; eauto.
+  assert (RES: rs#r = v). red in EV. destruct EV as [a' [EQ1 EQ2]]. congruence.
+  eapply exec_Iop'; eauto. simpl. congruence. 
+  (* possibly simplified *)
+  destruct (reduce addressing combine_addr n1 addr args vl) as [addr' args']_eqn.
+  assert (ADDR: eval_addressing ge sp addr' rs##args' = Some a).
+    eapply reduce_sound with (sem := fun addr vl => eval_addressing ge sp addr vl); eauto. 
+    intros; eapply combine_addr_sound; eauto.
+  assert (ADDR': eval_addressing tge sp addr' rs##args' = Some a).
+    rewrite <- ADDR. apply eval_addressing_preserved. exact symbols_preserved.
+  eapply exec_Iload; eauto.
+  (* state matching *)
   econstructor; eauto.
   generalize (wt_instrs _ _ WTF pc _ H); intro WTI; inv WTI.
   apply wt_regset_assign. auto. rewrite H8. eapply type_of_chunk_correct; eauto.
@@ -939,8 +1037,17 @@ Proof.
 
   (* Istore *)
   exists (State s' (transf_function' f approx) sp pc' rs m'); split.
-  assert (eval_addressing tge sp addr rs##args = Some a).
-    rewrite <- H0. apply eval_addressing_preserved. exact symbols_preserved.
+  destruct (valnum_regs approx!!pc args) as [n1 vl]_eqn.
+  assert (wf_numbering approx!!pc). eapply wf_analyze; eauto.
+  destruct SAT as [valu1 NH1].
+  exploit valnum_regs_holds; eauto. intros [valu2 [NH2 [EQ AG]]]. 
+  assert (wf_numbering n1). eapply wf_valnum_regs; eauto. 
+  destruct (reduce addressing combine_addr n1 addr args vl) as [addr' args']_eqn.
+  assert (ADDR: eval_addressing ge sp addr' rs##args' = Some a).
+    eapply reduce_sound with (sem := fun addr vl => eval_addressing ge sp addr vl); eauto. 
+    intros; eapply combine_addr_sound; eauto.
+  assert (ADDR': eval_addressing tge sp addr' rs##args' = Some a).
+    rewrite <- ADDR. apply eval_addressing_preserved. exact symbols_preserved.
   eapply exec_Istore; eauto.
   econstructor; eauto.
   eapply analysis_correct_1; eauto. simpl; auto. 
@@ -988,6 +1095,15 @@ Proof.
   eapply kill_loads_satisfiable; eauto. 
 
   (* Icond *)
+  destruct (valnum_regs approx!!pc args) as [n1 vl]_eqn.
+  assert (wf_numbering approx!!pc). eapply wf_analyze; eauto.
+  elim SAT; intros valu1 NH1.
+  exploit valnum_regs_holds; eauto. intros [valu2 [NH2 [EQ AG]]]. 
+  assert (wf_numbering n1). eapply wf_valnum_regs; eauto. 
+  destruct (reduce condition combine_cond n1 cond args vl) as [cond' args']_eqn.
+  assert (RES: eval_condition cond' rs##args' m = Some b).
+    eapply reduce_sound with (sem := fun cond vl => eval_condition cond vl m); eauto. 
+    intros; eapply combine_cond_sound; eauto.
   econstructor; split.
   eapply exec_Icond; eauto. 
   econstructor; eauto.

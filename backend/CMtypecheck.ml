@@ -125,7 +125,7 @@ let type_binary_operation = function
 
 let name_of_constant = function
   | Ointconst n -> sprintf "intconst %ld" (camlint_of_coqint n)
-  | Ofloatconst n -> sprintf "floatconst %g" n
+  | Ofloatconst n -> sprintf "floatconst %g" (camlfloat_of_coqfloat n)
   | Oaddrsymbol (s, ofs) -> sprintf "addrsymbol %s %ld" (extern_atom s) (camlint_of_coqint ofs)
   | Oaddrstack n -> sprintf "addrstack %ld" (camlint_of_coqint n)
 
@@ -176,6 +176,7 @@ let type_chunk = function
   | Mint32 -> tint
   | Mfloat32 -> tfloat
   | Mfloat64 -> tfloat
+  | Mfloat64al32 -> tfloat
 
 let name_of_chunk = function
   | Mint8signed -> "int8signed"
@@ -185,6 +186,7 @@ let name_of_chunk = function
   | Mint32 -> "int32"
   | Mfloat32 -> "float32"
   | Mfloat64 -> "float64"
+  | Mfloat64al32 -> "float64al32"
 
 let rec type_expr env lenv e =
   match e with

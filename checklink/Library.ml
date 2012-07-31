@@ -1,10 +1,12 @@
 open BinInt
 open BinPos
+open Camlcoq
 
 type bitstring = Bitstring.bitstring
 
 module IntMap = Map.Make(struct type t = int let compare = compare end)
 module StringMap = Map.Make (String)
+module StringSet = Set.Make (String)
 
 let is_some: 'a option -> bool = function
 | Some(_) -> true
@@ -42,6 +44,18 @@ let filter_err (l: 'a or_err list): string list =
   List.(map from_err (filter is_err l))
 
 external id : 'a -> 'a = "%identity"
+
+(** [a; a + 1; ... ; b - 1; b] *)
+let list_ab (a: int) (b: int): int list =
+  let rec list_ab_aux a b res =
+    if b < a
+    then res
+    else list_ab_aux a (b - 1) (b :: res)
+  in list_ab_aux a b []
+
+(** [0; 1; ...; n - 1] *)
+let list_n (n: int): int list =
+  list_ab 0 (n - 1)
 
 (** Checks for existence of an array element satisfying a condition, and returns
     its index if it exists.
@@ -92,7 +106,7 @@ let z_int32 = function
 let z_int32_lax = function
 | Z0      -> 0l
 | Zpos(p) -> positive_int32_lax p
-| Zneg(p) -> raise Int32Overflow
+| Zneg(_) -> raise Int32Overflow
 
 let z_int z = Safe32.to_int (z_int32 z)
 
@@ -100,19 +114,20 @@ let z_int_lax z = Safe32.to_int (z_int32_lax z)
 
 (* Some more printers *)
 
+let string_of_ffloat f = string_of_float (camlfloat_of_coqfloat f)
+
 let string_of_array string_of_elt sep a =
-  let contents =
-    (fst
-       (Array.fold_left
-          (fun accu elt ->
-            let (str, ndx) = accu in
-            (str ^ (if ndx > 0 then sep else "") ^ string_of_int ndx ^ ": " ^
-               string_of_elt elt, ndx + 1)
-          )
-          ("", 0) a
-       )
-    )
-  in "[\n" ^ contents ^ "\n]"
+  let b = Buffer.create 1024 in
+  Buffer.add_string b "[\n";
+  Array.iteri
+    (fun ndx elt ->
+       if ndx > 0 then Buffer.add_string b sep;
+       Buffer.add_string b (string_of_int ndx);
+       Buffer.add_string b ": ";
+       Buffer.add_string b (string_of_elt elt)
+    ) a;
+  Buffer.add_string b "\n]";
+  Buffer.contents b
 
 let string_of_list string_of_elt sep l =
   String.concat sep (List.map string_of_elt l)
@@ -128,9 +143,27 @@ let string_of_bitstring bs =
 
 (* To print addresses/offsets *)
 let string_of_int32 = Printf.sprintf "0x%08lx"
+let string_of_int64 = Printf.sprintf "0x%08Lx"
 (* To print counts/indices *)
 let string_of_int32i = Int32.to_string
 
 let string_of_positive p = string_of_int32i (positive_int32 p)
 
 let string_of_z z = string_of_int32 (z_int32 z)
+
+let sorted_lookup (compare: 'a -> 'b -> int) (arr: 'a array) (v: 'b): 'a option =
+  let rec sorted_lookup_aux (i_from: int) (i_to: int): 'a option =
+    if i_from > i_to
+    then None
+    else
+      let i_mid = (i_from + i_to) / 2 in
+      let comp = compare arr.(i_mid) v in
+      if comp < 0 (* v_mid < v *)
+      then sorted_lookup_aux (i_mid + 1) i_to
+      else if comp > 0
+      then sorted_lookup_aux i_from (i_mid - 1)
+      else Some(arr.(i_mid))
+  in sorted_lookup_aux 0 (Array.length arr - 1)
+
+let list_false_indices a =
+  filter_some (Array.(to_list (mapi (fun ndx b -> if b then None else Some(ndx)) a)))
