@@ -88,7 +88,7 @@ BACKEND=\
   Machsem.v \
   Asm.v Asmgen.v Asmgenretaddr.v Asmgenproof1.v Asmgenproof.v \
   AliasLib.v AliasHierarchy.v AliasSets.v AliasMaps.v AliasLattices.v \
-	AliasAnalysis.v
+  AliasAnalysis.v AliasAnalysisConclusion.v
 
 # C front-end modules (in cfrontend/)
 

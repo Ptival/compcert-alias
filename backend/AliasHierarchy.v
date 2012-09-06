@@ -4,6 +4,8 @@ Require Import RelationClasses.
 Require Import Relations.
 Require Import Transitive_Closure.
 
+Require Import AliasLib.
+
 Section Relation.
 
   Variable A: Type.
@@ -353,6 +355,83 @@ Module OverlapFacts (O: Overlap).
     eapply O.parent_overlaps_too; eauto.
     apply O.no_parent_is_top in Heqo. subst. elim (Facts.not_above_top _ A).
   Qed.
+
+  Theorem above_equation: forall ax x,
+    O.above ax x ->
+    match O.parent x with
+    | None => False
+    | Some px => ax = px \/ O.above ax px
+    end.
+  Proof.
+    intros ax x A.
+    destruct (O.parent x) as [px|]_eqn.
+    destruct (O.eq_dec ax px). now left. right. eauto using O.no_lozenge.
+    apply O.no_parent_is_top in Heqo. subst. destruct (O.eq_dec ax O.top).
+    subst. now apply irreflexivity in A.
+    destruct (O.top_above O.top) as [B _]. specialize (B (eq_refl O.top) ax n).
+    eauto using asymmetry.
+  Qed.
+
+  Theorem both_above_overlap: forall a b x, O.above a x -> O.above b x -> O.overlap a b.
+  Proof.
+    intros a b. refine (O.above_ind _ _). intros x IND Aa Ab.
+    apply above_equation in Aa. apply above_equation in Ab.
+    destruct (O.parent x) as [px|]_eqn. intuition; subst.
+    reflexivity.
+    symmetry. now apply O.above_overlaps.
+    now apply O.above_overlaps.
+    eapply IND. apply O.parent_is_above. apply Heqo. easy. easy.
+    contradiction.
+  Qed.
+
+  Ltac solver :=
+    repeat (subst; intuition (idtac;
+      match goal with
+
+  (* Properties of above *)
+
+      (* above irreflexive *)
+      | A: O.above ?a ?a
+        |- _ =>
+        apply irreflexivity in A
+      (* above transitive *)
+      | _: O.above ?a ?b, _: O.above ?b ?c
+        |- _ =>
+        notHyp (O.above a c); assert (O.above a c) by (now transitivity b)
+      (* above asymmetric *)
+      | _: O.above ?a ?b
+        |- _ =>
+        notHyp (~ O.above b a); assert (O.above b a) by asymmetry
+
+  (* Properties of overlap *)
+
+      (* overlap reflexive *)
+      | |- O.overlap ?a ?a =>
+        reflexivity
+      (* overlap symmetric *)
+      | A: O.overlap ?a ?b
+        |- _ =>
+        notHyp (O.overlap b a); assert (O.overlap b a) by (now symmetry)
+
+  (* Relating above and overlap *)
+
+      (* a above x -> a overlaps x *)
+      | A: O.above ?a ?x
+        |- _ =>
+        notHyp (O.overlap a x); assert (O.overlap a x) by (now apply O.above_overlaps)
+
+      (* a above x -> b overlaps x -> a overlaps b *)
+      | A: O.above ?a ?x, B: O.above ?b ?x
+        |- _ =>
+        extend (both_above_overlap _ _ _ A B)
+
+      (* ax above x -> x overlaps y -> ax overlaps y *)
+      | A: O.above ?ax ?x, B: O.overlap ?x ?y
+        |- _ =>
+        extend (above_overlaps_too _ _ _ A B)
+
+      end
+    )).
 
 End OverlapFacts.
 

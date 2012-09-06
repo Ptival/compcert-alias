@@ -3328,10 +3328,12 @@ Qed.
 
 (* Theorems *)
 
-Theorem satisfy_init:
+Notation alias_interprets ge s := (exists abs, satisfy ge abs s).
+
+Theorem alias_interprets_init:
   forall p st
     (IS:   initial_state p st),
-    exists abs, satisfy (Genv.globalenv p) abs st.
+    alias_interprets (Genv.globalenv p) st.
 Proof.
   intros. inv IS.
   exists (fun b =>
@@ -3355,14 +3357,14 @@ Proof.
   eapply Genv.find_symbol_not_fresh in FIND; eauto. contradiction.
 Qed.
 
-Theorem satisfy_step:
-  forall ge st t st' abs
-    (SAT:  satisfy ge abs st)
+Theorem alias_interprets_step:
+  forall ge st t st'
+    (AI:   alias_interprets ge st)
     (STEP: step ge st t st')
     ,
-    exists abs', satisfy ge abs' st'.
+    alias_interprets ge st'.
 Proof.
-  intros.
+  intros. destruct AI as [abs SAT].
   destruct st; destruct st'; try solve [inv STEP]; inv SAT; try inv RES.
 
   Case "state -> state".
@@ -4476,81 +4478,4 @@ Proof.
   destruct (zlt b0 (Mem.nextblock m0));
   apply MemMap.get_eq_top; auto with ptset.
   apply load_valid_block in LOAD. congruence.
-Qed.
-
-Definition disjoint (x y: PTSet.t) :=
-  forall a b,
-    PTSet.In a x -> PTSet.In b y -> ~ AbsPO.overlap a b.
-
-Theorem conclusion: forall
-  ge abs cs f sp pc rs m
-  (SAT: satisfy ge abs (State cs f sp pc rs m))
-  rmap mmap (RES: (safe_funanalysis f)#pc = (rmap, mmap))
-  r1 r2 (DISJ: disjoint (RegMap.get r1 rmap) (RegMap.get r2 rmap))
-  b1 o1 (R1: rs # r1 = Vptr b1 o1)
-  b2 o2 (R2: rs # r2 = Vptr b2 o2)
-  ,
-  Vptr b1 o1 <> Vptr b2 o2.
-Proof.
-  repeat intro. inv H. inv SAT. inv RES0. rewrite RPC in RES. inv RES.
-  pose proof (RSAT r1) as Sr1. pose proof (RSAT r2) as Sr2.
-  unfold regsat, valsat in Sr1, Sr2.
-  rewrite R1 in Sr1. rewrite R2 in Sr2.
-  destruct (abs b2).
-
-  elim (DISJ (Loc a o2) (Loc a o2)); auto. apply reflexivity.
-
-  elim (DISJ AbsPH.top AbsPH.top); auto using PTSet.In_top. apply reflexivity.
-Qed.
-
-Definition disjoint_dec_bool (a b: PTSet.t): bool :=
-  PTSet.AbsPSet.for_all
-  (fun x =>
-    PTSet.AbsPSet.for_all
-    (fun y =>
-      negb (AbsPO.overlap_dec x y)
-    )
-    b
-  )
-  a.
-
-Module Facts := OverlapFacts(AbsPO).
-
-Theorem disjoint_dec_bool_spec: forall a b,
-  disjoint_dec_bool a b = true -> disjoint a b.
-Proof.
-  intros a b DISJ x y INx INy OVER.
-  apply PTSet.F.for_all_iff in DISJ.
-  apply PTSet.In_spec in INx; destruct INx as [INx | [ax [Ax INax]]].
-  Case "x is really in a".
-  specialize (DISJ x INx). simpl in DISJ.
-  apply PTSet.In_spec in INy; destruct INy as [INy | [ay [Ay INay]]].
-  SCase "y is really in b".
-  apply PTSet.F.for_all_iff in DISJ; auto.
-  specialize (DISJ y INy). simpl in DISJ.
-  destruct (AbsPO.overlap_dec x y). inv DISJ. contradiction.
-  repeat intro. subst. reflexivity.
-  SCase "y has an ancestor in b".
-  apply PTSet.F.for_all_iff in DISJ; auto.
-  specialize (DISJ ay INay). simpl in DISJ.
-  destruct (AbsPO.overlap_dec x ay). inv DISJ. elim n.
-  symmetry. eapply Facts.above_overlaps_too; eauto. now symmetry.
-  repeat intro. subst. reflexivity.
-  Case "x has an ancestor in a".
-  specialize (DISJ ax INax). simpl in DISJ.
-  apply PTSet.In_spec in INy; destruct INy as [INy | [ay [Ay INay]]].
-  SCase "y is really in b".
-  apply PTSet.F.for_all_iff in DISJ; auto.
-  specialize (DISJ y INy). simpl in DISJ.
-  destruct (AbsPO.overlap_dec ax y). inv DISJ.
-  elim n. eapply Facts.above_overlaps_too; eauto.
-  repeat intro. subst. reflexivity.
-  SCase "y has an ancestor in b".
-  apply PTSet.F.for_all_iff in DISJ; auto.
-  specialize (DISJ ay INay). simpl in DISJ.
-  destruct (AbsPO.overlap_dec ax ay). inv DISJ. elim n.
-  eapply Facts.above_overlaps_too; eauto. symmetry.
-  eapply Facts.above_overlaps_too; eauto. now symmetry.
-  repeat intro. subst. reflexivity.
-  repeat intro. subst. reflexivity.
 Qed.

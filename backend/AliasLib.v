@@ -44,3 +44,17 @@ Ltac feed_n n H :=
   | O => idtac
   | (S ?m) => feed H ; [| feed_n m H]
   end.
+
+Ltac notHyp P :=
+  match goal with
+  | [ _ : P |- _ ] => fail 1
+  | _ =>
+    match P with
+    | ?P1 /\ ?P2 => first [ notHyp P1 | notHyp P2 | fail 2 ]
+    | _ => idtac
+    end
+  end.
+
+Ltac extend pf :=
+  let t := type of pf in
+  notHyp t; pose proof pf.

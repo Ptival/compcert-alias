@@ -1,7 +1,7 @@
 include ../../Makefile.config
 
 CC=../../ccomp 
-CFLAGS=-stdlib ../../runtime -dparse -dclight -dasm -fstruct-return
+CFLAGS=-stdlib ../../runtime -dparse -dclight -dasm -fstruct-return -dcse
 
 SRCS=analyze.c clause.c clock.c closure.c cnf.c component.c                 \
   condensing.c context.c defs.c dfgparser.c dfgscanner.c doc-proof.c        \
@@ -24,8 +24,8 @@ clean:
 test:
 	./spass small_problem.dfg | grep 'Proof found'
 
-TIME=xtime -o /dev/null     # Xavier's hack
-#TIME=time >/dev/null       # Otherwise
+#TIME=xtime -o /dev/null     # Xavier's hack
+TIME=time >/dev/null       # Otherwise
 
 bench:
 	@echo -n "spass: "; $(TIME) ./spass problem.dfg

@@ -1,5 +1,5 @@
 CC=../../ccomp 
-CFLAGS=-U__GNUC__ -stdlib ../../runtime -dclight -dasm
+CFLAGS=-U__GNUC__ -stdlib ../../runtime -dclight -dasm -dcse
 LIBS=
 TIME=xtime -o /dev/null -mintime 1.0
 

@@ -99,7 +99,7 @@ Parameter print_RTL_constprop: RTL.program -> unit.
 Parameter print_RTL_cse: RTL.program -> unit.
 Parameter print_LTLin: LTLin.program -> unit.
 Parameter print_Mach: Mach.program -> unit.
-Parameter print_Alias: RTL.program -> unit.
+Parameter print_Alias: AST.fundef RTL.function -> unit.
 
 Open Local Scope string_scope.
 
