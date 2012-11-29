@@ -287,23 +287,22 @@ Proof.
 Qed.
 
 Lemma wf_add_store:
-  forall rmap n chunk addr rargs rsrc,
-  wf_numbering n -> wf_numbering (add_store rmap n chunk addr rargs rsrc).
+  forall n chunk addr rargs rsrc,
+  wf_numbering n -> wf_numbering (add_store n chunk addr rargs rsrc).
 Proof.
   intros. unfold add_store. 
   destruct (valnum_regs n rargs) as [n1 vargs]_eqn.
   exploit wf_valnum_regs; eauto. intros [A [B C]].
-  set (store_set_o := AliasAnalysis.addr_image addr rargs rmap).
-  assert (wf_numbering (kill_equations (filter_after_store chunk addr vargs store_set_o rmap n) n1)).
+  assert (wf_numbering (kill_equations (filter_after_store chunk addr vargs) n1)).
     apply wf_kill_equations. auto.
   destruct chunk; auto; apply wf_add_rhs; auto.
 Qed.
 
 Lemma wf_transfer:
-  forall f res pc n, wf_numbering n -> wf_numbering (transfer f res pc n).
+  forall f pc n, wf_numbering n -> wf_numbering (transfer f pc n).
 Proof.
   intros. unfold transfer. 
-  destruct (f.(fn_code)!pc), (res # pc); auto.
+  destruct (f.(fn_code)!pc); auto.
   destruct i; auto.
   apply wf_add_op; auto.
   apply wf_add_load; auto.
@@ -322,7 +321,7 @@ Proof.
   unfold analyze; intros.
   eapply Solver.fixpoint_invariant with (P := wf_numbering); eauto.
   exact wf_empty_numbering.   
-  exact (wf_transfer f (AliasAnalysis.safe_funanalysis f)).
+  exact (wf_transfer f).
 Qed.
 
 (** ** Properties of satisfiability of numberings *)
@@ -654,13 +653,51 @@ Proof.
   congruence.
 Qed.
 
-Definition transf_function' (f: function) (approxs: PMap.t numbering) : function :=
-  mkfunction
-    f.(fn_sig)
-    f.(fn_params)
-    f.(fn_stacksize)
-    (transf_code approxs f.(fn_code))
-    f.(fn_entrypoint).
+(** [add_store] returns a numbering that is satisfiable in the memory state
+  after execution of the corresponding [Istore] instruction. *)
+
+Lemma add_store_satisfiable:
+  forall n rs chunk addr args src a m m',
+  wf_numbering n ->
+  numbering_satisfiable ge sp rs m n ->
+  eval_addressing ge sp addr rs##args = Some a ->
+  Mem.storev chunk m a (rs#src) = Some m' ->
+  Val.has_type (rs#src) (type_of_chunk chunk) ->
+  numbering_satisfiable ge sp rs m' (add_store n chunk addr args src).
+Proof.
+  intros. unfold add_store. destruct H0 as [valu A].
+  destruct (valnum_regs n args) as [n1 vargs]_eqn.
+  exploit valnum_regs_holds; eauto. intros [valu' [B [C D]]].
+  exploit wf_valnum_regs; eauto. intros [U [V W]].
+  set (n2 := kill_equations (filter_after_store chunk addr vargs) n1).
+  assert (numbering_holds valu' ge sp rs m' n2).
+    apply kill_equations_holds with (m := m); auto.
+    intros. destruct r; simpl in *. 
+    rewrite <- H0. apply op_depends_on_memory_correct; auto.
+    destruct H0 as [a' [P Q]]. 
+    destruct (eq_list_valnum vargs l); simpl in H4; try congruence. subst l.
+    rewrite negb_false_iff in H4.
+    exists a'; split; auto. 
+    destruct a; simpl in H2; try congruence.
+    destruct a'; simpl in Q; try congruence.
+    simpl. rewrite <- Q. 
+    rewrite C in P. eapply Mem.load_store_other; eauto.
+    exploit addressing_separated_sound; eauto. intuition congruence.
+  assert (N2: numbering_satisfiable ge sp rs m' n2).
+    exists valu'; auto.
+  set (n3 := add_rhs n2 src (Load chunk addr vargs)).
+  assert (N3: Val.load_result chunk (rs#src) = rs#src -> numbering_satisfiable ge sp rs m' n3).
+    intro EQ. unfold n3. apply add_rhs_satisfiable_gen with valu' rs.
+    apply wf_kill_equations; auto.
+    red. auto. auto.
+    red. exists a; split. congruence. 
+    rewrite <- EQ. destruct a; simpl in H2; try discriminate. simpl. 
+    eapply Mem.load_store_same; eauto. 
+    auto.
+  destruct chunk; auto; apply N3. 
+  simpl in H3. destruct (rs#src); auto || contradiction.
+  simpl in H3. destruct (rs#src); auto || contradiction.
+Qed.
 
 (** Correctness of [reg_valnum]: if it returns a register [r],
   that register correctly maps back to the given value number. *)
@@ -671,430 +708,6 @@ Proof.
   unfold reg_valnum; intros. inv H. 
   destruct ((num_val n)#v) as [| r1 rl]_eqn; inv H0. 
   eapply VAL. rewrite Heql. auto with coqlib.
-Qed.
-
-Require Import AliasAnalysisConclusion.
-
-(** [add_store] returns a numbering that is satisfiable in the memory state
-  after execution of the corresponding [Istore] instruction. *)
-Lemma add_store_satisfiable:
-  forall f pc rmap mmap,
-  forall n rs chunk addr args src a m m',
-  wf_numbering n ->
-  numbering_satisfiable ge sp rs m n ->
-  eval_addressing ge sp addr rs##args = Some a ->
-  Mem.storev chunk m a (rs#src) = Some m' ->
-  Val.has_type (rs#src) (type_of_chunk chunk) ->
-  ((AliasAnalysis.safe_funanalysis f) # pc = (rmap, mmap)) ->
-  forall s approx s' rmap' mmap',
-  ((AliasAnalysis.safe_funanalysis (transf_function' f approx)) # pc = (rmap', mmap')) ->
-  AliasAnalysis.alias_interprets ge (State s f sp pc rs m) ->
-  AliasAnalysis.alias_interprets ge (State s' (transf_function' f approx) sp pc rs m) ->
-  numbering_satisfiable ge sp rs m' (add_store rmap n chunk addr args src).
-Proof.
-  intros ??? ?????????? WF NS EA MS VHT SF ????? SF' [abs SAT] [abs' SAT'].
-  unfold add_store. destruct NS as [valu A].
-  destruct (valnum_regs n args) as [n1 vargs]_eqn.
-  exploit valnum_regs_holds; eauto. intros [valu' [B [C D]]].
-  exploit wf_valnum_regs; eauto. intros [U [V W]].
-  set (store_set_o := AliasAnalysis.addr_image addr args rmap).
-  set (n2 := kill_equations (filter_after_store chunk addr vargs store_set_o rmap n) n1).
-  assert (numbering_holds valu' ge sp rs m' n2).
-    apply kill_equations_holds with (m := m); auto.
-    intros ?? EH FAS. destruct r; simpl in *. 
-    rewrite <- EH. apply op_depends_on_memory_correct; auto.
-    destruct EH as [a' [P Q]].
-    destruct (eq_list_valnum vargs l && addressing_separated chunk addr m0 a0) as []_eqn;
-      simpl in FAS.
-    destruct (eq_list_valnum vargs l); try discriminate. simpl in Heqb. subst. clear FAS.
-    exists a'; split; auto.
-    destruct a; simpl in MS; try congruence.
-    destruct a'; simpl in Q; try congruence.
-    simpl. rewrite <- Q. 
-    rewrite C in P. eapply Mem.load_store_other; eauto.
-    exploit addressing_separated_sound; eauto. intuition congruence.
-
-    rewrite negb_false_iff in FAS.
-    exists a'; split; auto.
-    destruct a; simpl in MS; try congruence.
-    destruct a'; simpl in Q; try congruence.
-    simpl. rewrite <- Q. 
-    eapply Mem.load_store_other; eauto.
-
-    destruct (regs_valnums n l) as [rargs|]_eqn; try congruence.
-    destruct store_set_o as [store_set|]_eqn; try congruence.
-    destruct (AliasAnalysis.addr_image a0 rargs rmap) as [load_set|]_eqn; try congruence.
-    apply disjoint_chunks_dec_bool_spec in FAS.
-    subst.
-
-    pose proof disjoint_chunks_implies3 as DCI.
-    specialize (DCI _ _ _ _ _ _ _ abs SAT _ _ SF _ _ _ _ FAS).
-    destruct (zeq b0 b); [subst b0; right|now left].
-    specialize (DCI b i i0).
-
-    Ltac destruct_list l :=
-      repeat (destruct l as [|? l]; simpl in *; try discriminate).
-
-    Ltac cleanup :=
-      repeat (
-      match goal with
-      | H: ?x = ?x |- _ => clear H
-      | H: Some _ = Some _ |- _ => injection H; clear H; intros H
-      | H: _ :: _ = _ :: _ |- _ => let H' := fresh H in injection H; clear H; intros H; try intros H'
-      end
-      ).
-
-    Ltac show_plt :=
-      solve [inversion WF as [_ REG]; eapply REG; apply reg_valnum_correct; [easy | eauto]].
-
-    symmetry in C.
-    inv SAT. inv RES. rewrite SF in RPC; inv RPC. unfold AliasAnalysis.regsat in RSAT.
-
-    Require Import AliasLib. Require Import AliasAnalysis.
-    destruct addr; destruct_list args; destruct_list vargs; cleanup;
-    repeat (
-      match goal with
-      | H: Vptr _ _ = Vptr _ _ |- _ => inv H
-      | _: ?rs # ?r = valu' _ |- _ =>
-        let RS := fresh "RS" in let ABS := fresh "ABS" in
-        destruct (rs # r) as []_eqn:RS; simpl in *; try discriminate;
-        pose proof (RSAT r) as ABS; rewrite RS in ABS; simpl in ABS
-      end
-    );
-    destruct a0; destruct_list rargs; inv Heqo1; destruct_list l; inv P.
-    repeat (
-      match goal with
-      | H: Some _ = Some _ |- _ => inv H
-      | H: Vptr _ _ = Vptr _ _ |- _ => inv H
-      | _: context [match reg_valnum ?n ?v with Some _ => _ | None => _ end],
-        V: valu_agree ?valu ?valu' _,
-        N: numbering_holds ?valu _ _ ?rs _ ?n,
-        RSAT: forall r : reg, AliasAnalysis.valsat ?rs # _ _ _
-        |- _ =>
-        let r := fresh "r" in let RS := fresh "RS" in let R := fresh "R" in
-        destruct (reg_valnum n v) as [r|]_eqn; try discriminate;
-        assert (RS: rs#r = valu' v) by (rewrite V; [apply N; apply reg_valnum_correct; easy | show_plt]);
-        pose proof (RSAT r) as R; rewrite RS in R; destruct (valu' v) as []_eqn;
-        simpl in *; try discriminate
-      end
-    ).
-    match goal with
-    | H: match abs ?b with Some _ => _ | None => _ end -> _ \/ _
-      |- _ =>
-      apply H; destruct (abs b) as []_eqn; split
-    end;
-    repeat (
-      match goal with
-      | |- AliasAnalysis.PTSet.In _ (AliasAnalysis.shift_offset _ _) =>
-        eapply AliasAnalysis.In_shift_offset; eauto
-      | |- AliasAnalysis.PTSet.ge (AliasAnalysis.shift_offset _ _) AliasAnalysis.PTSet.top =>
-        now apply AliasAnalysis.shift_offset_top
-      | |- AliasAnalysis.PTSet.In _ (AliasAnalysis.unknown_offset _) =>
-        eapply AliasAnalysis.In_unknown_offset; eauto
-      | |- AliasAnalysis.PTSet.ge (AliasAnalysis.unknown_offset _) AliasAnalysis.PTSet.top =>
-        now apply AliasAnalysis.unknown_offset_top
-      | _: AliasAnalysis.PTSet.In _ (AliasAnalysis.RegMap.get ?r _)
-        |- AliasAnalysis.PTSet.In _ (AliasAnalysis.PTSet.lub
-          (AliasAnalysis.unknown_offset (AliasAnalysis.RegMap.get ?r _)) _)
-        =>
-        eapply AliasAnalysis.PTSet.ge_lub_left
-      | _: AliasAnalysis.PTSet.In _ (AliasAnalysis.RegMap.get ?r _)
-        |- AliasAnalysis.PTSet.In _ (AliasAnalysis.PTSet.lub _
-          (AliasAnalysis.unknown_offset (AliasAnalysis.RegMap.get ?r _)))
-        =>
-        eapply AliasAnalysis.PTSet.ge_lub_right
-      | _: AliasAnalysis.PTSet.ge (AliasAnalysis.RegMap.get ?r _) AliasAnalysis.PTSet.top
-        |- AliasAnalysis.PTSet.ge
-        (AliasAnalysis.PTSet.lub
-          (AliasAnalysis.unknown_offset (AliasAnalysis.RegMap.get ?r ?rmap)) _)
-        AliasAnalysis.PTSet.top =>
-        eapply AliasAnalysis.PTSet.ge_trans
-        with (y := AliasAnalysis.unknown_offset (AliasAnalysis.RegMap.get r rmap));
-        [apply AliasAnalysis.PTSet.ge_lub_left|]
-      | _: AliasAnalysis.PTSet.ge (AliasAnalysis.RegMap.get ?r _) AliasAnalysis.PTSet.top
-        |- AliasAnalysis.PTSet.ge
-        (AliasAnalysis.PTSet.lub
-          _ (AliasAnalysis.unknown_offset (AliasAnalysis.RegMap.get ?r ?rmap)))
-        AliasAnalysis.PTSet.top =>
-        eapply AliasAnalysis.PTSet.ge_trans
-        with (y := AliasAnalysis.unknown_offset (AliasAnalysis.RegMap.get r rmap));
-        [apply AliasAnalysis.PTSet.ge_lub_right|]
-      end
-    );
-    try (
-      match goal with
-      | GENV: AliasAnalysis.ok_abs_genv ?abs ?ge,
-        S: context [symbol_address ?ge ?i _] |- _ =>
-          let G := fresh "G" in
-          unfold symbol_address in S; destruct (Genv.find_symbol ge i) as []_eqn:G; try inv S;
-          try (
-            match goal with
-            | H: abs _ = _ |- _ =>
-              rewrite (GENV _ _ G) in H; try inv H
-            end
-          )
-      end
-    ).
-    apply AliasAnalysis.PTSet.In_singleton.
-    apply AliasAnalysis.PTSet.above_In_singleton. left. now compute.
-    apply AliasAnalysis.PTSet.above_In_singleton. left. now compute.
-    inv SP. rewrite Int.add_zero_l. apply AliasAnalysis.PTSet.In_singleton.
-    inv SP.
-
-    TODO.
-
-    eapply AliasAnalysis.PTSet.ge_trans. apply AliasAnalysis.PTSet.ge_lub_right.
-    now apply AliasAnalysis.unknown_offset_top.
-
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    destruct (eq_list_valnum vargs l).
-    subst l. simpl in Heqb.
-
-    destruct addr; destruct_list args; destruct_list vargs; cleanup.
-
-    Require Import AliasLib.
-
-    Case "Aindexed".
-    rewrite <- C in P.
-    destruct (rs#p) as []_eqn; inv EA.
-    destruct (reg_valnum n v0) as []_eqn; inv Heqo.
-    destruct a0; inv P; inv Heqo1.
-    SCase "Aindexed".
-    assert (RSR: rs # r = valu v0) by (apply A; apply reg_valnum_correct; easy).
-    rewrite <- D in RSR. rewrite <- C in RSR.
-    apply DCI.
-    pose proof (RSAT p) as Rp. rewrite Heqv1 in Rp. simpl in Rp.
-    destruct (abs b0). eapply AliasAnalysis.In_shift_offset; eauto.
-    now apply AliasAnalysis.shift_offset_top.
-    pose proof (RSAT r) as Rr. rewrite RSR in Rr. simpl in Rr.
-    destruct (abs b0). eapply AliasAnalysis.In_shift_offset; eauto.
-    now apply AliasAnalysis.shift_offset_top.
-    show_plt.
-    SCase "Abased".
-    unfold symbol_address in H0.
-    destruct (Genv.find_symbol ge i) as []_eqn; simpl in H0; inv H0.
-    SCase "Abasedscaled".
-    unfold symbol_address in H0.
-    destruct (Genv.find_symbol ge i3) as []_eqn; simpl in H0; inv H0.
-
-    Case "Aindexed 2".
-    rewrite <- C in P. rewrite <- C0 in P.
-    destruct (rs#p) as []_eqn, (rs#p0) as []_eqn; inv EA.
-    SCase "p0 is the pointer".
-    destruct (reg_valnum n v0) as []_eqn, (reg_valnum n v1) as []_eqn; inv Heqo.
-    destruct a0; inv P; inv Heqo1.
-    SSCase "1/2".
-    apply DCI.
-    pose proof (RSAT p0) as Rp. rewrite Heqv0 in Rp. simpl in Rp.
-    destruct (abs b0).
-    eapply AliasAnalysis.PTSet.ge_lub_right. eapply AliasAnalysis.In_unknown_offset; eauto.
-    eapply AliasAnalysis.PTSet.ge_trans.
-    apply AliasAnalysis.PTSet.ge_lub_right. now apply AliasAnalysis.unknown_offset_top.
-    assert (RSR0: rs#r0 = valu v1) by (apply A; apply reg_valnum_correct; easy).
-    rewrite <- D in RSR0.
-    pose proof (RSAT r0) as Rr0. rewrite RSR0 in Rr0. rewrite <- C in Rr0. simpl in Rr0.
-    destruct (abs b0).
-    eapply AliasAnalysis.PTSet.ge_lub_right. eapply AliasAnalysis.In_unknown_offset; eauto.
-    eapply AliasAnalysis.PTSet.ge_trans.
-    apply AliasAnalysis.PTSet.ge_lub_right. now apply AliasAnalysis.unknown_offset_top.
-    show_plt.
-    SCase "p is the pointer".
-    destruct (reg_valnum n v0) as []_eqn, (reg_valnum n v1) as []_eqn; inv Heqo.
-    destruct a0; inv P; inv Heqo1.
-    SSCase "1".
-    apply DCI.
-    pose proof (RSAT p) as Rp. rewrite Heqv2 in Rp. simpl in Rp.
-    destruct (abs b0).
-    eapply AliasAnalysis.PTSet.ge_lub_left. eapply AliasAnalysis.In_unknown_offset; eauto.
-    eapply AliasAnalysis.PTSet.ge_trans.
-    apply AliasAnalysis.PTSet.ge_lub_left. now apply AliasAnalysis.unknown_offset_top.
-    assert (RSR: rs#r = valu v0) by (apply A; apply reg_valnum_correct; easy).
-    rewrite <- D in RSR.
-    pose proof (RSAT r) as Rr. rewrite RSR in Rr. rewrite <- C0 in Rr. simpl in Rr.
-    destruct (abs b0).
-    eapply AliasAnalysis.PTSet.ge_lub_left. eapply AliasAnalysis.In_unknown_offset; eauto.
-    eapply AliasAnalysis.PTSet.ge_trans.
-    apply AliasAnalysis.PTSet.ge_lub_left. now apply AliasAnalysis.unknown_offset_top.
-    show_plt.
-    SSCase "2".
-    apply DCI.
-    pose proof (RSAT p) as Rp. rewrite Heqv2 in Rp. simpl in Rp.
-    destruct (abs b0).
-    eapply AliasAnalysis.PTSet.ge_lub_left. eapply AliasAnalysis.In_unknown_offset; eauto.
-    eapply AliasAnalysis.PTSet.ge_trans.
-    apply AliasAnalysis.PTSet.ge_lub_left. now apply AliasAnalysis.unknown_offset_top.
-    assert (RSR: rs#r = valu v0) by (apply A; apply reg_valnum_correct; easy).
-    rewrite <- D in RSR.
-    pose proof (RSAT r) as Rr. rewrite RSR in Rr. rewrite <- C0 in Rr. simpl in Rr.
-    destruct (abs b0).
-    eapply AliasAnalysis.In_unknown_offset; eauto.
-    now apply AliasAnalysis.unknown_offset_top.
-    show_plt.
-
-    Case "Ascaled".
-    destruct (rs#p) as []_eqn; inv EA.
-
-    Case "Aindexed2scaled".
-    rewrite <- C in P. rewrite <- C0 in P.
-    destruct (rs#p) as []_eqn, (rs#p0) as []_eqn; inv EA.
-    destruct (reg_valnum n v0) as []_eqn, (reg_valnum n v1) as []_eqn; inv Heqo.
-    destruct a0; inv P; inv Heqo1.
-    SCase "Aindexed2".
-    apply DCI.
-    pose proof (RSAT p) as Rp. rewrite Heqv2 in Rp. simpl in Rp.
-    destruct (abs b0).
-    eapply AliasAnalysis.In_unknown_offset; eauto.
-    now apply AliasAnalysis.unknown_offset_top.
-    assert (RSR: rs # r = valu v0) by (apply A; apply reg_valnum_correct; easy).
-    rewrite <- D in RSR. rewrite <- C0 in RSR.
-    pose proof (RSAT r) as Rr. rewrite RSR in Rr. simpl in Rr.
-    destruct (abs b0).
-    eapply AliasAnalysis.PTSet.ge_lub_left. eapply AliasAnalysis.In_unknown_offset; eauto.
-    eapply AliasAnalysis.PTSet.ge_trans.
-    apply AliasAnalysis.PTSet.ge_lub_left. now apply AliasAnalysis.unknown_offset_top.
-    show_plt.
-    SCase "Aindexed2scaled".
-    apply DCI.
-    pose proof (RSAT p) as Rp. rewrite Heqv2 in Rp. simpl in Rp.
-    destruct (abs b0).
-    eapply AliasAnalysis.In_unknown_offset; eauto.
-    now apply AliasAnalysis.unknown_offset_top.
-    assert (RSR: rs # r = valu v0) by (apply A; apply reg_valnum_correct; easy).
-    rewrite <- D in RSR. rewrite <- C0 in RSR.
-    pose proof (RSAT r) as Rr. rewrite RSR in Rr. simpl in Rr.
-    destruct (abs b0).
-    eapply AliasAnalysis.In_unknown_offset; eauto.
-    now apply AliasAnalysis.unknown_offset_top.
-    show_plt.
-
-    Case "Aglobal".
-    destruct a0; inv P; inv Heqo1.
-    SCase "Aglobal".
-    destruct (zeq b0 b); [subst; right|now left].
-    unfold symbol_address in *.
-    destruct (Genv.find_symbol ge i1) as []_eqn; inv EA.
-    destruct (Genv.find_symbol ge i3) as []_eqn; inv H0.
-    pose proof (GENV _ _ Heqo). pose proof (GENV _ _ Heqo0). rewrite H in H0. inv H0.
-    specialize (FAS
-      (AliasAnalysis.Loc (Some (AliasAnalysis.Globals (Some i3))) i)
-      (AliasAnalysis.Loc (Some (AliasAnalysis.Globals (Some i3))) i0)
-    ).
-    feed_all FAS.
-    apply AliasAnalysis.PTSet.In_singleton. apply AliasAnalysis.PTSet.In_singleton.
-    simpl in FAS. intuition.
-    SCase "Ainstack".
-    left. intro. subst.
-    unfold symbol_address in EA. destruct (Genv.find_symbol ge i1) as []_eqn; inv EA.
-    rewrite (GENV _ _ Heqo) in SP. discriminate.
-
-    Case "Abased".
-    rewrite <- C in P.
-    unfold symbol_address in EA. destruct (Genv.find_symbol ge i1) as []_eqn; inv EA.
-    destruct (rs#p) as []_eqn; inv H0.
-    left. intro. subst.
-    destruct a0; inv P; destruct_list rargs; inv Heqo1.
-    SCase "Abased".
-    unfold symbol_address in H0. destruct (Genv.find_symbol ge i) as []_eqn; inv H0.
-    pose proof (GENV _ _ Heqo2) as G. rewrite (GENV _ _ Heqo0) in G. inv G.
-    specialize (FAS
-      (AliasAnalysis.Blk (Some (AliasAnalysis.Globals (Some i1))))
-      (AliasAnalysis.Blk (Some (AliasAnalysis.Globals (Some i1))))
-    ).
-    elim FAS. congruence. intro F. contradict F. reflexivity.
-    apply AliasAnalysis.PTSet.In_singleton.
-    apply AliasAnalysis.PTSet.In_singleton.
-    SCase "Abasedscaled".
-    unfold symbol_address in H0. destruct (Genv.find_symbol ge i4) as []_eqn; inv H0.
-    pose proof (GENV _ _ Heqo2) as G. rewrite (GENV _ _ Heqo0) in G. inv G.
-    specialize (FAS
-      (AliasAnalysis.Blk (Some (AliasAnalysis.Globals (Some i1))))
-      (AliasAnalysis.Blk (Some (AliasAnalysis.Globals (Some i1))))
-    ).
-    elim FAS. congruence. intro F. contradict F. reflexivity.
-    apply AliasAnalysis.PTSet.In_singleton.
-    apply AliasAnalysis.PTSet.In_singleton.
-
-    Case "Abasedscaled".
-    rewrite <- C in P.
-    unfold symbol_address in EA. destruct (Genv.find_symbol ge i2) as []_eqn; inv EA.
-    destruct (rs#p) as []_eqn; inv H0.
-    left. intro. subst.
-    destruct a0; inv P; destruct_list rargs; inv Heqo1.
-    SCase "Abased".
-    unfold symbol_address in H0. destruct (Genv.find_symbol ge i) as []_eqn; inv H0.
-    pose proof (GENV _ _ Heqo2) as G. rewrite (GENV _ _ Heqo0) in G. inv G.
-    specialize (FAS
-      (AliasAnalysis.Blk (Some (AliasAnalysis.Globals (Some i2))))
-      (AliasAnalysis.Blk (Some (AliasAnalysis.Globals (Some i2))))
-    ).
-    elim FAS. congruence. intro F. contradict F. reflexivity.
-    apply AliasAnalysis.PTSet.In_singleton.
-    apply AliasAnalysis.PTSet.In_singleton.
-    SCase "Abasedscaled".
-    unfold symbol_address in H0. destruct (Genv.find_symbol ge i5) as []_eqn; inv H0.
-    pose proof (GENV _ _ Heqo2) as G. rewrite (GENV _ _ Heqo0) in G. inv G.
-    specialize (FAS
-      (AliasAnalysis.Blk (Some (AliasAnalysis.Globals (Some i2))))
-      (AliasAnalysis.Blk (Some (AliasAnalysis.Globals (Some i2))))
-    ).
-    elim FAS. congruence. intro F. contradict F. reflexivity.
-    apply AliasAnalysis.PTSet.In_singleton.
-    apply AliasAnalysis.PTSet.In_singleton.
-
-    Case "Ainstack".
-    intro. subst.
-    destruct a0; inv P; inv Heqo1.
-    SCase "Aglobal".
-    destruct (zeq b0 b); [right; subst|now left].
-    unfold symbol_address in H0. destruct (Genv.find_symbol ge i) as []_eqn; inv H0.
-    pose proof (GENV _ _ Heqo) as G. rewrite SP in G. inv G.
-    SCase "Ainstack".
-    apply DCI.
-    rewrite SP. rewrite Int.add_zero_l. apply AliasAnalysis.PTSet.In_singleton.
-    rewrite SP. rewrite Int.add_zero_l. apply AliasAnalysis.PTSet.In_singleton.
-
-    (* vargs <> l *)
-    admit.
-  (*
-    exists a'; split; auto.
-    destruct a; simpl in MS; try congruence.
-    destruct a'; simpl in Q; try congruence.
-    simpl. rewrite <- Q. 
-    rewrite C in P. eapply Mem.load_store_other; eauto.
-    apply orb_prop in FAS. destruct FAS.
-    exploit addressing_separated_sound; eauto. intuition congruence.    
-    *)
-
-  assert (N2: numbering_satisfiable ge sp rs m' n2).
-    exists valu'; auto.
-  set (n3 := add_rhs n2 src (Load chunk addr vargs)).
-  assert (N3: Val.load_result chunk (rs#src) = rs#src -> numbering_satisfiable ge sp rs m' n3).
-    intro EQ. unfold n3. apply add_rhs_satisfiable_gen with valu' rs.
-    apply wf_kill_equations; auto.
-    red. auto. auto.
-    red. exists a; split. congruence. 
-    rewrite <- EQ. destruct a; simpl in EA; try discriminate. simpl. 
-    eapply Mem.load_store_same; eauto. 
-    auto.
-  destruct chunk; auto; apply N3.
-  simpl in VHT. destruct (rs#src); auto || contradiction.
-  simpl in VHT. destruct (rs#src); auto || contradiction.
 Qed.
 
 (** Correctness of [find_rhs]: if successful and in a
@@ -1198,11 +811,11 @@ Theorem analysis_correct_1:
   forall ge sp rs m f approx pc pc' i,
   analyze f = Some approx ->
   f.(fn_code)!pc = Some i -> In pc' (successors_instr i) ->
-  numbering_satisfiable ge sp rs m (transfer f (AliasAnalysis.safe_funanalysis f) pc approx!!pc) ->
+  numbering_satisfiable ge sp rs m (transfer f pc approx!!pc) ->
   numbering_satisfiable ge sp rs m approx!!pc'.
 Proof.
   intros.
-  assert (Numbering.ge approx!!pc' (transfer f (AliasAnalysis.safe_funanalysis f) pc approx!!pc)).
+  assert (Numbering.ge approx!!pc' (transfer f pc approx!!pc)).
     eapply Solver.fixpoint_solution; eauto.
     unfold successors_list, successors. rewrite PTree.gmap1.
     rewrite H0. auto.
@@ -1270,6 +883,14 @@ Proof.
   discriminate.
 Qed.
 
+Definition transf_function' (f: function) (approxs: PMap.t numbering) : function :=
+  mkfunction
+    f.(fn_sig)
+    f.(fn_params)
+    f.(fn_stacksize)
+    (transf_code approxs f.(fn_code))
+    f.(fn_entrypoint).
+
 (** The proof of semantic preservation is a simulation argument using
   diagrams of the following form:
 <<
@@ -1335,41 +956,12 @@ Ltac TransfInstr :=
         unfold option_map; rewrite H1; reflexivity ]
   end.
 
-Require Import AliasAnalysis.
-
-Lemma ok_abs_genv_preserved:
-  forall abs, ok_abs_genv abs ge <-> ok_abs_genv abs tge.
-Proof.
-  split.
-  intros OK ???. apply OK. now rewrite <- symbols_preserved.
-  intros OK ???. apply OK. now rewrite symbols_preserved.
-Qed.
-
-Lemma ok_stack_preserved:
-  forall m cs, ok_stack ge (Mem.nextblock m) cs <-> ok_stack tge (Mem.nextblock m) cs.
-Proof.
-  split.
-  intros OK. induction cs. constructor.
-  inv OK. econstructor; eauto. now apply ok_abs_genv_preserved.
-  intros OK. induction cs. constructor.
-  inv OK. econstructor; eauto. now apply ok_abs_genv_preserved.
-Qed.
-
-Lemma alias_interprets_preserved:
-  forall s, alias_interprets ge s <-> alias_interprets tge s.
-Proof.
-  split.
-  intros [abs SAT]. exists abs.
-  inv SAT; constructor; auto; try solve [ now apply ok_stack_preserved | now apply ok_abs_genv_preserved].
-  intros [abs SAT]. exists abs.
-  inv SAT; constructor; auto; try solve [ now apply ok_stack_preserved | now apply ok_abs_genv_preserved].
-Qed.
-
 (** The proof of simulation is a case analysis over the transition
   in the source code. *)
-Lemma transf_step_correct':
+
+Lemma transf_step_correct:
   forall s1 t s2, step ge s1 t s2 ->
-  forall s1' (MS: match_states s1 s1') (AI: alias_interprets ge s1) (AI': alias_interprets tge s1'),
+  forall s1' (MS: match_states s1 s1'),
   exists s2', step tge s1' t s2' /\ match_states s2 s2'.
 Proof.
   induction 1; intros; inv MS; try (TransfInstr; intro C).
@@ -1377,7 +969,7 @@ Proof.
   (* Inop *)
   exists (State s' (transf_function' f approx) sp pc' rs m); split.
   apply exec_Inop; auto.
-  econstructor; eauto.
+  econstructor; eauto. 
   eapply analysis_correct_1; eauto. simpl; auto. 
   unfold transfer; rewrite H; auto.
 
@@ -1460,18 +1052,9 @@ Proof.
   econstructor; eauto.
   eapply analysis_correct_1; eauto. simpl; auto. 
   unfold transfer; rewrite H.
-
-  pose proof AI as AI2.
-  destruct AI2 as [abs ABS]. inv ABS.
-
-  destruct ((safe_funanalysis f) # pc) as [rmap mmap]_eqn.
-  destruct ((safe_funanalysis (transf_function' f approx)) # pc) as [rmap' mmap']_eqn.
-  eapply add_store_satisfiable with (s':=s').
-  eapply wf_analyze; eauto.
-  apply SAT. apply H0. easy.
-  generalize (wt_instrs _ _ WTF pc _ H); intro WTI; inv WTI. now rewrite <- H8.
-  apply Heqt. apply Heqt0. apply AI. 
-  now apply alias_interprets_preserved.
+  eapply add_store_satisfiable; eauto. eapply wf_analyze; eauto.
+  generalize (wt_instrs _ _ WTF pc _ H); intro WTI; inv WTI.
+  rewrite <- H8. auto.
 
   (* Icall *)
   exploit find_function_translated; eauto. intros [tf [FIND' TRANSF']]. 
@@ -1569,19 +1152,6 @@ Proof.
   apply wt_regset_assign; auto. 
 Qed.
 
-Lemma transf_step_correct:
-  forall s1 t s2, step ge s1 t s2 ->
-  forall s1' (MS: match_states s1 s1') (AI: alias_interprets ge s1) (AI: alias_interprets tge s1'),
-  exists s2', step tge s1' t s2' /\ match_states s2 s2' /\ alias_interprets ge s2 /\ alias_interprets tge s2'.
-Proof.
-  intros ??? STEP ?? AI AI'. pose proof (transf_step_correct' _ _ _ STEP _ MS) as T.
-  destruct T as [s2' [STEP' MS']].
-  easy. easy.
-  exists s2'. split. easy. split. easy. split.
-  eapply AliasAnalysis.alias_interprets_step. apply AI. apply STEP.
-  eapply AliasAnalysis.alias_interprets_step. apply AI'. apply STEP'.
-Qed.
-
 Lemma transf_initial_states:
   forall st1, initial_state prog st1 ->
   exists st2, initial_state tprog st2 /\ match_states st1 st2.
@@ -1612,8 +1182,7 @@ Proof.
   eexact symbols_preserved.
   eexact transf_initial_states.
   eexact transf_final_states.
-  admit.
-  (*exact transf_step_correct.*)
+  exact transf_step_correct. 
 Qed.
 
 End PRESERVATION.

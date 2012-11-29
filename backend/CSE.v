@@ -251,6 +251,30 @@ Definition filter_loads (r: rhs) : bool :=
 Definition kill_loads (n: numbering) : numbering :=
   kill_equations filter_loads n.
 
+(** [add_store n chunk addr rargs rsrc] updates the numbering [n] to reflect
+  the effect of a store instruction [Istore chunk addr rargs rsrc].
+  Equations involving the memory state are removed from [n], unless we
+  can prove that the store does not invalidate them.
+  Then, an equations [rsrc = Load chunk addr rargs] is added to reflect
+  the known content of the stored memory area, but only if [chunk] is
+  a "full-size" quantity ([Mint32] or [Mfloat64]). *)
+
+Definition filter_after_store (chunk: memory_chunk) (addr: addressing) (vl: list valnum) (r: rhs) : bool :=
+  match r with
+  | Op op vl' => op_depends_on_memory op
+  | Load chunk' addr' vl' =>
+      negb(eq_list_valnum vl vl' && addressing_separated chunk addr chunk' addr')
+  end.
+
+Definition add_store (n: numbering) (chunk: memory_chunk) (addr: addressing)
+                                   (rargs: list reg) (rsrc: reg) : numbering :=
+  let (n1, vargs) := valnum_regs n rargs in
+  let n2 := kill_equations (filter_after_store chunk addr vargs) n1 in
+  match chunk with
+  | Mint32 | Mfloat64 => add_rhs n2 rsrc (Load chunk addr vargs)
+  | _ => n2
+  end.
+
 (** [reg_valnum n vn] returns a register that is mapped to value number
     [vn], or [None] if no such register exists. *)
 
@@ -268,51 +292,6 @@ Fixpoint regs_valnums (n: numbering) (vl: list valnum) : option (list reg) :=
       | Some r1, Some rs => Some (r1 :: rs)
       | _, _ => None
       end
-  end.
-
-(** [add_store n chunk addr rargs rsrc] updates the numbering [n] to reflect
-  the effect of a store instruction [Istore chunk addr rargs rsrc].
-  Equations involving the memory state are removed from [n], unless we
-  can prove that the store does not invalidate them.
-  Then, an equations [rsrc = Load chunk addr rargs] is added to reflect
-  the known content of the stored memory area, but only if [chunk] is
-  a "full-size" quantity ([Mint32] or [Mfloat64]). *)
-
-Require Import AliasAnalysisConclusion.
-
-Definition disjoint_sets chunk chunk' store_set_o load_set_o :=
-  match store_set_o, load_set_o with
-    | None, _ | _, None => false
-    | Some store_set, Some load_set => disjoint_chunks_dec_bool chunk chunk' store_set load_set
-  end.
-
-Definition filter_after_store (chunk: memory_chunk) (addr: addressing) (vl: list valnum)
-  store_set_o rmap n (r: rhs) : bool :=
-  match r with
-  | Op op vl' => op_depends_on_memory op
-  | Load chunk' addr' vl' =>
-      negb (
-        (* true if we can prove disjointness *)
-        (eq_list_valnum vl vl' && addressing_separated chunk addr chunk' addr')
-        || (
-          match regs_valnums n vl' with
-          | None => false
-          | Some rargs' =>
-            let load_set_o := AliasAnalysis.addr_image addr' rargs' rmap in
-            disjoint_sets chunk chunk' store_set_o (AliasAnalysis.addr_image addr' rargs' rmap)
-          end
-        )
-      )
-  end.
-
-Definition add_store rmap (n: numbering) (chunk: memory_chunk) (addr: addressing)
-                                   (rargs: list reg) (rsrc: reg) : numbering :=
-  let (n1, vargs) := valnum_regs n rargs in
-  let addr_set := AliasAnalysis.addr_image addr rargs rmap in
-  let n2 := kill_equations (filter_after_store chunk addr vargs addr_set rmap n) n1 in
-  match chunk with
-  | Mint32 | Mfloat64 => add_rhs n2 rsrc (Load chunk addr vargs)
-  | _ => n2
   end.
 
 (** [find_rhs] return a register that already holds the result of the given arithmetic
@@ -447,9 +426,7 @@ Module Solver := BBlock_solver(Numbering).
   Finally, the remaining instructions modify neither registers nor
   the memory, so we keep the numbering unchanged. *)
 
-Require AliasAnalysis.
-
-Definition transfer (f: function) alias (pc: node) (before: numbering) :=
+Definition transfer (f: function) (pc: node) (before: numbering) :=
   match f.(fn_code)!pc with
   | None => before
   | Some i =>
@@ -461,7 +438,7 @@ Definition transfer (f: function) alias (pc: node) (before: numbering) :=
       | Iload chunk addr args dst s =>
           add_load before dst chunk addr args
       | Istore chunk addr args src s =>
-          add_store (fst (AliasAnalysis.coerce_solver (alias#pc))) before chunk addr args src
+          add_store before chunk addr args src
       | Icall sig ros args res s =>
           empty_numbering
       | Itailcall sig ros args =>
@@ -483,10 +460,7 @@ Definition transfer (f: function) alias (pc: node) (before: numbering) :=
   a mapping from program points to numberings. *)
 
 Definition analyze (f: RTL.function): option (PMap.t numbering) :=
-  Solver.fixpoint
-  (successors f)
-  (transfer f (AliasAnalysis.safe_funanalysis f))
-  f.(fn_entrypoint).
+  Solver.fixpoint (successors f) (transfer f) f.(fn_entrypoint).
 
 (** * Code transformation *)
 
