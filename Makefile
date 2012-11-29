@@ -87,8 +87,8 @@ BACKEND=\
   Bounds.v Stacklayout.v Stacking.v Stackingproof.v Stackingtyping.v \
   Machsem.v \
   Asm.v Asmgen.v Asmgenretaddr.v Asmgenproof1.v Asmgenproof.v \
-  AliasLib.v AliasHierarchy.v AliasSets.v AliasMaps.v AliasLattices.v \
-  AliasAnalysis.v AliasAnalysisConclusion.v
+  AliasAbstract.v AliasPTSet.v AliasPTMap.v  AliasRegMap.v AliasMemMap.v \
+  AliasTransfer.v
 
 # C front-end modules (in cfrontend/)
 
