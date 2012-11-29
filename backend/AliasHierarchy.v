@@ -83,11 +83,11 @@ End WellFoundedRelation.
 
 Module Type HierarchyFun.
 
-  Parameter t: Type.
+  Parameter Inline t: Type.
 
   Parameter eq_dec: forall (x y: t), {x = y} + {x <> y}.
 
-  Parameter top: t.
+  Parameter Inline top: t.
 
   Parameter parent: t -> option t.
 

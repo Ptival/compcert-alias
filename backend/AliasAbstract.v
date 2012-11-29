@@ -47,7 +47,6 @@ Definition ablock_parent (b : ablock) : option ablock :=
 
 (* We need an OrderedType for using these with maps, however this is not the
  order we will otherwise consider, as this one needs to be total. *)
-
 Module ablockOT <: OrderedType.
 
   Definition t := ablock.
@@ -137,7 +136,6 @@ Module ablockOT <: OrderedType.
 End ablockOT.
 
 (* now defining the actual partial order of abstract blocks *)
-
 Fixpoint lt (x y: ablock) : Prop :=
   match x with
   | All => False

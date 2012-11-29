@@ -10,6 +10,8 @@ Module RegMap <: PTMap.
 
   Axiom top : t.
 
+  Axiom bot : t.
+
   Axiom get : k -> t -> PTSet.t.
 
   Axiom add : k -> PTSet.t -> t -> t.

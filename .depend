@@ -104,6 +104,7 @@ backend/AliasPTMap.vo backend/AliasPTMap.glob: backend/AliasPTMap.v backend/Alia
 backend/AliasRegMap.vo backend/AliasRegMap.glob: backend/AliasRegMap.v backend/Registers.vo backend/AliasPTMap.vo
 backend/AliasMemMap.vo backend/AliasMemMap.glob: backend/AliasMemMap.v backend/AliasAbstract.vo backend/AliasPTMap.vo
 backend/AliasTransfer.vo backend/AliasTransfer.glob: backend/AliasTransfer.v common/AST.vo lib/Integers.vo lib/Maps.vo $(ARCH)/Op.vo backend/RTL.vo backend/AliasAbstract.vo backend/AliasMemMap.vo backend/AliasRegMap.vo
+backend/AliasSolver.vo backend/AliasSolver.glob: backend/AliasSolver.v backend/Kildall.vo lib/Lattice.vo lib/Maps.vo backend/RTL.vo backend/AliasAbstract.vo backend/AliasMemMap.vo backend/AliasRegMap.vo backend/AliasTransfer.vo
 cfrontend/Csyntax.vo cfrontend/Csyntax.glob: cfrontend/Csyntax.v lib/Coqlib.vo common/Errors.vo lib/Integers.vo lib/Floats.vo common/Values.vo common/AST.vo
 cfrontend/Csem.vo cfrontend/Csem.glob: cfrontend/Csem.v lib/Coqlib.vo common/Errors.vo lib/Maps.vo lib/Integers.vo lib/Floats.vo common/Values.vo common/AST.vo common/Memory.vo common/Events.vo common/Globalenvs.vo cfrontend/Csyntax.vo common/Smallstep.vo
 cfrontend/Cstrategy.vo cfrontend/Cstrategy.glob: cfrontend/Cstrategy.v lib/Axioms.vo lib/Coqlib.vo common/Errors.vo lib/Maps.vo lib/Integers.vo lib/Floats.vo common/Values.vo common/AST.vo common/Memory.vo common/Events.vo common/Globalenvs.vo common/Smallstep.vo cfrontend/Csyntax.vo cfrontend/Csem.vo

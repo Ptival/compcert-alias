@@ -9,6 +9,8 @@ Module MemMap <: PTMap.
 
   Axiom top : t.
 
+  Axiom bot : t.
+
   Axiom get : aloc -> t -> PTSet.t.
 
   Axiom add : aloc -> PTSet.t -> t -> t.

@@ -88,7 +88,7 @@ BACKEND=\
   Machsem.v \
   Asm.v Asmgen.v Asmgenretaddr.v Asmgenproof1.v Asmgenproof.v \
   AliasAbstract.v AliasPTSet.v AliasPTMap.v  AliasRegMap.v AliasMemMap.v \
-  AliasTransfer.v
+  AliasTransfer.v AliasSolver.v
 
 # C front-end modules (in cfrontend/)
 
