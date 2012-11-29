@@ -46,11 +46,9 @@ End Result.
 
 Module Solver := Dataflow_Solver(Result)(NodeSetForward).
 
-Definition add_reg_top rmap r :=
-  RegMap.add r PTSet.top rmap.
-
 (* At function entry, be conservative about parameter registers *)
 Definition entry_rmap reglist :=
+  let add_reg_top rmap r := RegMap.add r PTSet.top rmap in
   fold_left add_reg_top reglist RegMap.bot.
 
 (* At function entry, be conservative about non-local blocks *)
