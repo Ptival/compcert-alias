@@ -99,7 +99,7 @@ Parameter print_RTL_constprop: RTL.program -> unit.
 Parameter print_RTL_cse: RTL.program -> unit.
 Parameter print_LTLin: LTLin.program -> unit.
 Parameter print_Mach: Mach.program -> unit.
-Parameter print_Alias: AST.fundef RTL.function -> unit.
+(*Parameter print_Alias: AST.fundef RTL.function -> unit.*)
 
 Open Local Scope string_scope.
 
@@ -176,8 +176,10 @@ Definition transf_c_program (p: Csyntax.program) : res Asm.program :=
 
 Definition transl_init := Initializers.transl_init.
 Definition cexec_do_step := Cexec.do_step.
+(*
 Require AliasAnalysis.
 Definition safe_funanalysis := AliasAnalysis.safe_funanalysis.
+*)
 
 (** The following lemmas help reason over compositions of passes. *)
 
