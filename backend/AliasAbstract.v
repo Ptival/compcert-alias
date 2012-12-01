@@ -136,7 +136,7 @@ Module ablockOT <: OrderedType.
 End ablockOT.
 
 (* now defining the actual partial order of abstract blocks *)
-Fixpoint lt (x y: ablock) : Prop :=
+Fixpoint ablock_lt (x y: ablock) : Prop :=
   match x with
   | All => False
   | (Nonlocal | Stack | Allocs) =>
@@ -153,6 +153,14 @@ Inductive aloc :=
 | Blk : ablock -> aloc
 | Loc : ablock -> Int.int -> aloc
 .
+
+Definition aloc_lt (x y : aloc) : Prop :=
+  match x, y with
+  | Loc _ _, Loc _ _ => False
+  | Loc b _, Blk b'  => b = b' \/ ablock_lt b b'
+  | Blk _,   Loc _ _ => False
+  | Blk b,   Blk b'  => ablock_lt b b'
+  end.
 
 Definition aloc_parent (l : aloc) : option aloc :=
   match l with

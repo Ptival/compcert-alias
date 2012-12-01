@@ -26,7 +26,10 @@ Module Result <: SEMILATTICE.
 
   Hypothesis beq_correct: forall x y, beq x y = true -> eq x y.
 
-  Variable ge: t -> t -> Prop.
+  Definition ge (x y : t) :=
+    match x, y with
+    | (rmap, mmap), (rmap', mmap') => RegMap.ge rmap rmap' /\ MemMap.ge mmap mmap'
+    end.
 
   Hypothesis ge_refl: forall x y, eq x y -> ge x y.
 
