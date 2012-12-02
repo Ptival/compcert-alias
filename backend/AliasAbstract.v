@@ -27,14 +27,14 @@ Inductive ablock :=
 | Alloc: node  -> ablock
 .
 
-Definition ablock_eqdec (x y : ablock) : { x = y } + { x <> y }.
+Definition ablock_eq_dec (x y : ablock) : { x = y } + { x <> y }.
 Proof.
   destruct x, y; try solve [now left | now right].
   destruct (ident_eq i i0). left. now f_equal. right. intro. elim n. now inversion H.
   destruct (ident_eq n n0). left. now f_equal. right. intro. elim n1. now inversion H.
 Defined.
 
-Program Instance ablock_eqdec_instance : EqDec ablock eq := ablock_eqdec.
+Program Instance ablock_eq_dec_instance : EqDec ablock eq := ablock_eq_dec.
 
 Definition ablock_parent (b : ablock) : option ablock :=
   match b with
@@ -59,7 +59,7 @@ Module ablockOT <: OrderedType.
 
   Definition eq_trans := @trans_eq t.
 
-  Definition eq_dec : forall x y, {eq x y} + {~ eq x y} := ablock_eqdec.
+  Definition eq_dec : forall x y, {eq x y} + {~ eq x y} := ablock_eq_dec.
 
   (* some meaningless and arbitrary order... *)
   Definition lt (x y : t) : Prop :=
@@ -171,3 +171,10 @@ Definition aloc_parent (l : aloc) : option aloc :=
     | Some b => Some (Blk b)
     end
   end.
+
+Definition aloc_eq_dec (x y : aloc) : { x = y } + { x <> y }.
+Proof with first [ left; now subst | right; now injection ].
+  destruct x as [b|b o], y as [b'|b' o']; try now right.
+  destruct (ablock_eq_dec b b')...
+  destruct (ablock_eq_dec b b'), (Int.eq_dec o o')...
+Defined.

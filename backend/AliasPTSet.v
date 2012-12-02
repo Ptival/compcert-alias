@@ -56,6 +56,13 @@ Module Type PTSetT.
 
   Axiom loc_In_add_blk : forall b o s, In (Loc b o) (add (Blk b) s).
 
+  Axiom for_all : (elt -> bool) -> t -> bool.
+
+  Definition For_all (P : elt -> Prop) s :=
+    forall x, In x s -> P x.
+
+  Axiom for_all_iff : forall f s, For_all (fun x => f x = true) s <-> for_all f s = true.
+
 End PTSetT.
 
 Module PTSet <: PTSetT.
@@ -113,5 +120,12 @@ Module PTSet <: PTSetT.
   Axiom ge_join_r : forall a b, ge (join a b) b.
 
   Axiom loc_In_add_blk : forall b o s, In (Loc b o) (add (Blk b) s).
+
+  Axiom for_all : (elt -> bool) -> t -> bool.
+
+  Definition For_all (P : elt -> Prop) s :=
+    forall x, In x s -> P x.
+
+  Axiom for_all_iff : forall f s, For_all (fun x => f x = true) s <-> for_all f s = true.
 
 End PTSet.
