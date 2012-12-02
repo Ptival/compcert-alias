@@ -147,11 +147,6 @@ Theorem disjoint_chunks_implies2: forall
   \/ (Int.unsigned o1 + size_chunk chunk1 <= Int.unsigned o2).
 Proof.
   intros. inv SAT. inv RES0. rewrite RPC in RES. inv RES.
-  (*
-  pose proof (RSAT r1) as Sr1. pose proof (RSAT r2) as Sr2.
-  unfold regsat, valsat in Sr1, Sr2.
-  rewrite R1 in Sr1. rewrite R2 in Sr2.
-  *)
   destruct (abs b2) as [ab2|]_eqn, (abs b1) as [ab1|]_eqn.
   specialize (DISJ _ _ In1 In2). simpl in DISJ. intuition.
   left. intro. subst. rewrite Heqo in Heqo0. inv Heqo0. now apply H0.
